@@ -29,3 +29,22 @@ data/
 
 # Env
 .env
+
+# Media
+*.avi
+*.mp4
+*.wav
+*.mp3
+
+# Uploads
+uploads/
+backend/temp_uploads/
+backend/output_videos/
+backend/fall_video/
+
+# Model weights
+frontend/model/
+*.bin
+
+# Processing files
+processing_status.json

@@ -1,0 +1,31 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# Models
+*.pt
+*.pth
+*.onnx
+*.h5
+
+# Dataset
+dataset/
+data/
+*.zip
+*.mp4
+*.csv
+
+# Logs
+*.log
+
+# Database
+*.db
+*.sqlite3
+
+# Env
+.env

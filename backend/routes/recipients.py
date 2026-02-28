@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, UploadFile, Header, HTTPException, status, Request
+from fastapi import APIRouter, Depends, File, UploadFile, Header, HTTPException, status, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Optional, Dict
 
@@ -15,6 +15,122 @@ from pydantic import BaseModel
 
 
 router = APIRouter(tags=["Recipients"])
+
+
+def _run_medical_history_pipeline(recipient_id: int, report_id: int, filename: str):
+    """Async background task: runs full medical history pipeline on a new report.
+
+    Steps: text extraction → structured extraction (Gemini) → disease detection →
+    progression analysis → alert generation → risk score update.
+    """
+    from config import SessionLocal
+    db = SessionLocal()
+    try:
+        from tables.medical_reports import MedicalReport, ReportProcessingStatus
+        from tables.medical_conditions import PatientCondition, ConditionStatus, ConditionSeverity, SourceType
+        from services.report_ingestion import extract_structured_report
+        from services.disease_detection import detect_diseases_from_report
+        from services.disease_progression import analyze_progression
+        from services.alert_engine import generate_alerts, check_monitoring_gaps
+        from services.medical_history_ai import calculate_risk_score
+        from repository import medical_history as repo
+        import datetime
+
+        report = db.query(MedicalReport).filter(MedicalReport.id == report_id).first()
+        if not report:
+            print(f"[pipeline] Report {report_id} not found")
+            return
+
+        report.processing_status = ReportProcessingStatus.processing
+        db.flush()
+
+        # 1. Extract text from report
+        text = ""
+        if report.data:
+            try:
+                text = extract_text_from_bytes(report.data, filename)
+            except Exception as e:
+                print(f"[pipeline] Text extraction failed: {e}")
+
+        if not text:
+            print(f"[pipeline] No text extracted from report {report_id}")
+            report.processing_status = ReportProcessingStatus.failed
+            db.commit()
+            return
+
+        # 2. Structured extraction via Gemini
+        extracted = extract_structured_report(text)
+        report.extracted_data = extracted
+        if extracted.get("report_date"):
+            try:
+                report.report_date = datetime.date.fromisoformat(extracted["report_date"])
+            except (ValueError, TypeError):
+                pass
+
+        # 3. Disease detection
+        existing = repo.get_all_conditions(db, recipient_id)
+        new_diseases = detect_diseases_from_report(
+            extracted, existing, db, report_id, extracted.get("report_date")
+        )
+
+        for disease in new_diseases:
+            cond = PatientCondition(
+                care_recipient_id=recipient_id,
+                disease_code=disease["disease_code"],
+                disease_name=disease["disease_name"],
+                status=ConditionStatus.active,
+                severity=ConditionSeverity.moderate,
+                first_detected=disease.get("first_detected", datetime.date.today()),
+                last_updated=disease.get("first_detected", datetime.date.today()),
+                baseline_value=disease.get("baseline_value"),
+                baseline_date=disease.get("baseline_date"),
+                confidence_score=disease.get("confidence_score", 0.5),
+                source_type=SourceType(disease.get("source_type", "lab_inferred")),
+                source_report_id=report_id,
+            )
+            db.add(cond)
+        db.flush()
+
+        # 4. Progression analysis
+        progression = analyze_progression(
+            recipient_id, extracted, report_id,
+            extracted.get("report_date", ""), db
+        )
+
+        # 5. Generate alerts
+        generate_alerts(recipient_id, progression, db)
+
+        # 6. Check monitoring gaps
+        check_monitoring_gaps(recipient_id, db)
+
+        # 7. Update risk score
+        calculate_risk_score(recipient_id, db)
+
+        # 8. Update last_report_date on recipient
+        from tables.users import CareRecipient
+        recipient = db.query(CareRecipient).filter(CareRecipient.id == recipient_id).first()
+        if recipient:
+            recipient.last_report_date = datetime.datetime.utcnow()
+
+        report.processing_status = ReportProcessingStatus.completed
+        db.commit()
+        print(f"[pipeline] ✅ Report {report_id} processing complete")
+
+    except Exception as e:
+        print(f"[pipeline] ❌ Error processing report {report_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        db.rollback()
+        try:
+            from tables.medical_reports import MedicalReport, ReportProcessingStatus
+            report = db.query(MedicalReport).filter(MedicalReport.id == report_id).first()
+            if report:
+                report.processing_status = ReportProcessingStatus.failed
+                db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
 
 
 def _get_username_from_auth(auth_header: Optional[str]):
@@ -69,7 +185,7 @@ def _recalculate_aggregate_summary(db: Session, recipient_id: int):
 
 
 @router.post('/recipients/{recipient_id}/reports', response_model=ResponseSchema)
-async def upload_medical_report(recipient_id: int, file: UploadFile = File(...), authorization: Optional[str] = Header(None), db: Session = Depends(get_db), request: Request = None):
+async def upload_medical_report(recipient_id: int, file: UploadFile = File(...), authorization: Optional[str] = Header(None), db: Session = Depends(get_db), request: Request = None, background_tasks: BackgroundTasks = None):
     # Auth
     # Debug: log some request header info
     try:
@@ -118,7 +234,18 @@ async def upload_medical_report(recipient_id: int, file: UploadFile = File(...),
         # Auto-update summary
         _recalculate_aggregate_summary(db, recipient_id)
 
-        return ResponseSchema(code=200, status='success', message='Report uploaded', result={'report_id': report.id, 'filename': report.filename})
+        # Launch async medical history pipeline (v3)
+        report_id = report.id
+        if background_tasks:
+            background_tasks.add_task(
+                _run_medical_history_pipeline,
+                recipient_id=recipient_id,
+                report_id=report_id,
+                filename=file.filename
+            )
+            print(f"[recipients] Medical history pipeline queued for report {report_id}")
+
+        return ResponseSchema(code=200, status='success', message='Report uploaded', result={'report_id': report.id, 'filename': report.filename, 'processing_status': 'processing'})
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to save report: {str(e)}")
@@ -147,9 +274,19 @@ def remove_medical_report(recipient_id: int, report_id: int, authorization: Opti
         if delete_medical_report(db, report_id):
             # Auto-update summary after deletion
             _recalculate_aggregate_summary(db, recipient_id)
+            # Auto-recalculate risk score and analysis after deletion
+            try:
+                from services.medical_history_ai import calculate_risk_score
+                calculate_risk_score(recipient_id, db)
+                db.commit()
+                print(f"[recipients] Risk score recalculated after report {report_id} deletion")
+            except Exception as re:
+                print(f"[recipients] Risk recalculation after delete failed: {re}")
             return ResponseSchema(code=200, status='success', message='Report deleted successfully')
         else:
             raise HTTPException(status_code=500, detail="Failed to delete report")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Deletion error: {e}")
 
@@ -175,7 +312,9 @@ def list_reports(recipient_id: int, authorization: Optional[str] = Header(None),
         'filename': r.filename, 
         'mime_type': r.mime_type, 
         'uploaded_at': r.uploaded_at.isoformat(),
-        'analysis_summary': r.analysis_summary
+        'analysis_summary': r.analysis_summary,
+        'processing_status': r.processing_status.value if r.processing_status else 'unknown',
+        'report_date': r.report_date.isoformat() if r.report_date else None,
     } for r in reports]
     return ResponseSchema(code=200, status='success', message='Reports fetched', result={'reports': out})
 
@@ -410,3 +549,42 @@ def remove_care_recipient_account(recipient_id: int, authorization: Optional[str
     db.delete(recipient)
     db.commit()
     return ResponseSchema(code=200, status="success", message="Recipient removed successfully")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  SENSOR FUSION INSIGHTS ENGINE ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════
+
+@router.get("/recipients/{recipient_id}/insights")
+async def get_patient_insights(
+    recipient_id: int,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Full Sensor Fusion Insights — aggregates ALL data sources (vitals, audio,
+    video, medical reports, environment) and generates cross-domain health
+    conclusions using deterministic rules + Gemini AI interpretation.
+    """
+    username = _get_username_from_auth(authorization)
+    if not username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid token")
+
+    caretaker = UsersRepo.find_by_username(db, CareTaker, username)
+    recipient = db.query(CareRecipient).filter(
+        CareRecipient.id == recipient_id,
+        CareRecipient.caretaker_id == caretaker.id
+    ).first()
+    if not recipient:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipient not found")
+
+    try:
+        from services.insights_engine import generate_full_insights
+        result = generate_full_insights(recipient_id, db)
+        return result
+    except Exception as e:
+        print(f"[insights] Error generating insights: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Insights generation failed: {str(e)}")
+

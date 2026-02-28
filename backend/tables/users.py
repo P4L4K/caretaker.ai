@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, Enum, Text, JSON
 from sqlalchemy.orm import relationship
 from config import Base
 import datetime
@@ -52,6 +52,12 @@ class CareRecipient(Base):
     # aggregated summary of uploaded medical reports for this recipient
     report_summary = Column(Text, nullable=True)
 
+    # Medical History System (v3)
+    risk_score = Column(Float, nullable=True)                       # 0-100 deterministic risk score
+    risk_factors_breakdown = Column(JSON, nullable=True)            # Transparent factor-by-factor explanation
+    last_analysis_date = Column(DateTime, nullable=True)
+    last_report_date = Column(DateTime, nullable=True)              # For monitoring gap detection
+
     # Relationship back to caretaker
     caretaker = relationship("CareTaker", back_populates="care_recipients")
 
@@ -63,3 +69,8 @@ class CareRecipient(Base):
 
     # Vital Signs relation
     vital_signs = relationship('VitalSign', back_populates='recipient', cascade='all, delete-orphan')
+
+    # Medical History System relations
+    patient_conditions = relationship('PatientCondition', back_populates='care_recipient', cascade='all, delete-orphan')
+    lab_values = relationship('LabValue', back_populates='care_recipient', cascade='all, delete-orphan')
+    medical_alerts = relationship('MedicalAlert', back_populates='care_recipient', cascade='all, delete-orphan')

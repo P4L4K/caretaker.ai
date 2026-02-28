@@ -31,6 +31,8 @@ import tables.medical_reports as med_reports_tables
 import tables.video_analysis as video_analysis_tables
 import tables.vital_signs as vital_signs_tables
 import tables.audio_events as audio_events_tables
+import tables.medical_conditions as medical_conditions_tables
+import tables.disease_dictionary as disease_dictionary_tables
 
 # Import routes
 import routes.users as user_routes
@@ -46,6 +48,8 @@ med_reports_tables.Base.metadata.create_all(bind=engine)
 video_analysis_tables.Base.metadata.create_all(bind=engine)
 vital_signs_tables.Base.metadata.create_all(bind=engine)
 audio_events_tables.Base.metadata.create_all(bind=engine)
+medical_conditions_tables.Base.metadata.create_all(bind=engine)
+disease_dictionary_tables.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="CareTaker AI Backend")
 
@@ -130,6 +134,8 @@ app.include_router(audio_events.router, prefix="/api")
 app.include_router(voice_bot.router, prefix="/api")
 from routes import vitals as vitals_routes
 app.include_router(vitals_routes.router, prefix="/api")
+from routes import medical_history as medical_history_routes
+app.include_router(medical_history_routes.router)
 
 # Debug: Print all registered routes
 print("\n=== Registered Routes ===")
@@ -438,6 +444,15 @@ async def startup_event():
         print("✅ Weather service initialized successfully")
     except Exception as e:
         print(f"❌ Failed to initialize weather service: {e}")
+
+    # Seed disease dictionary
+    try:
+        seed_db = SessionLocal()
+        disease_dictionary_tables.seed_disease_dictionary(seed_db)
+        seed_db.close()
+        print("✅ Disease dictionary seeded")
+    except Exception as e:
+        print(f"❌ Disease dictionary seeding failed: {e}")
 
 # Make sure this is at the end of the file
 # ... (existing imports)

@@ -1,10 +1,10 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CareTaker · Profile Hub</title>
+    <title>CareTaker Â· Profile Hub</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
@@ -680,7 +680,7 @@
         }
 
         .summary-ul li::before {
-            content: "•";
+            content: "â€¢";
             color: var(--accent);
             font-weight: bold;
             position: absolute;
@@ -1019,7 +1019,7 @@
         }
 
         .insight-content li::before {
-            content: "👉";
+            content: "ðŸ‘‰";
             position: absolute;
             left: 0;
             font-size: 0.8rem;
@@ -1144,32 +1144,37 @@
             <div class="caretaker-chip">
                 <div class="avatar">CT</div>
                 <div>
-                    <h4 id="sidebarCaretakerName">—</h4>
-                    <span id="sidebarCaretakerEmail">Loading…</span>
+                    <h4 id="sidebarCaretakerName">â€”</h4>
+                    <span id="sidebarCaretakerEmail">Loadingâ€¦</span>
                 </div>
             </div>
 
             <div class="nav-group">
                 <button class="nav-chip" data-target="overview">
                     <span>Profile Overview</span>
-                    ➜
+                    âžœ
                 </button>
                 <button class="nav-chip" data-target="audio-section">
                     <span>Audio Monitoring</span>
-                    ➜
+                    âžœ
                 </button>
                 <button class="nav-chip" data-target="video-section">
                     <span>Video Monitoring</span>
-                    ➜
+                    âžœ
                 </button>
-                <button class="nav-chip" data-target="reports-section">
-                    <span>Medical Reports</span>
-                    ➜
-                </button>
+                <a href="medical_reports.html" class="nav-chip" style="text-decoration:none;">
+                    <span>Medical Reports &amp; History</span>
+                    âžœ
+                </a>
+                <a href="insights.html" class="nav-chip"
+                    style="text-decoration:none; background: linear-gradient(135deg, rgba(74,144,226,0.12), rgba(139,92,246,0.08)); border-color: rgba(74,144,226,0.2);">
+                    <span>Patient Intelligence</span>
+                    âžœ
+                </a>
 
                 <button class="nav-chip" id="voiceBotBtn">
                     <span>Voice Bot</span>
-                    ➜
+                    âžœ
                 </button>
                 <div style="margin-top: 10px; border-top: 1px solid rgba(0,0,0,0.05); padding-top: 10px;">
                     <a href="settings.html" class="nav-chip"
@@ -1184,7 +1189,7 @@
                 <div class="section-title">Care Recipients</div>
                 <input id="recipientSearch" type="search" class="recipient-search" placeholder="Search recipients">
                 <div id="recipientsList" class="recipient-list">
-                    <p class="muted">Loading recipients…</p>
+                    <p class="muted">Loading recipientsâ€¦</p>
                 </div>
             </div>
         </aside>
@@ -1194,7 +1199,7 @@
                 <div class="panel-head">
                     <div>
                         <p class="eyebrow">Profile Hub</p>
-                        <h1>Welcome back, <span id="caretakerName">—</span></h1>
+                        <h1>Welcome back, <span id="caretakerName">â€”</span></h1>
                         <p class="muted">Stay close to every care recipient from a single, modern workspace.</p>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
@@ -1217,10 +1222,10 @@
                 <div class="grid-two" style="margin-top:24px;">
                     <article class="info-card">
                         <p class="eyebrow">Caretaker</p>
-                        <h2 id="caretakerFullName">—</h2>
+                        <h2 id="caretakerFullName">â€”</h2>
                         <div class="info-row">
-                            <span>Email: <strong id="caretakerEmail">—</strong></span>
-                            <span>Phone: <strong id="caretakerPhone">—</strong></span>
+                            <span>Email: <strong id="caretakerEmail">â€”</strong></span>
+                            <span>Phone: <strong id="caretakerPhone">â€”</strong></span>
                         </div>
                     </article>
 
@@ -1328,7 +1333,7 @@
                                 style="position:absolute; bottom:0; left:50%; transform:translateX(-50%); text-align:center;">
                                 <strong id="val-temp"
                                     style="font-size:1.4rem; color:var(--text); line-height:1;">--</strong>
-                                <span style="font-size:0.8rem; display:block; color:var(--muted);">°F</span>
+                                <span style="font-size:0.8rem; display:block; color:var(--muted);">Â°F</span>
                             </div>
                         </div>
                     </div>
@@ -1536,93 +1541,12 @@
                     <div id="fallDetectionStatus" class="status-pill">Processing video...</div>
                     <div id="fallDetectionOutput" style="margin-top: 15px;"></div>
                 </div>
-            </section>
-            <section class="panel" id="reports-section">
-                <div class="panel-head">
-                    <div>
-                        <p class="eyebrow">Documentation</p>
-                        <h2>Medical Reports</h2>
-                        <p class="muted">Select a care recipient to browse, upload, and review their medical reports.
-                            Click any report to view its AI-generated summary.</p>
-                    </div>
-                    <div class="report-controls">
-                        <button id="refreshReports" class="ghost-btn" disabled>↺ Refresh</button>
-                        <button id="regenerateSummary" class="primary-btn" disabled>✦ Regenerate Summary</button>
-                    </div>
-                </div>
-
-                <!-- Upload area (shown after a recipient is selected) -->
-                <div id="uploadArea" style="margin-top:24px; display:none;">
-                    <p class="eyebrow" style="margin-bottom:10px;">Upload New Report</p>
-                    <div class="upload-drop-zone" id="uploadDropZone">
-                        <input type="file" id="reportFileInput" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx">
-                        <span class="upload-icon">📂</span>
-                        <div class="upload-label-text">
-                            <strong>Click to browse</strong> or drag &amp; drop a file here<br>
-                            <span style="font-size:0.78rem;">PDF, PNG, JPG, DOC, DOCX · max 5 MB</span>
-                        </div>
-                        <div class="upload-file-name" id="uploadFileName"></div>
-                    </div>
-                    <div class="upload-progress" id="uploadProgress">
-                        <div class="upload-progress-bar" id="uploadProgressBar"></div>
-                    </div>
-                    <div style="margin-top:12px; display:flex; gap:10px; justify-content:flex-end;">
-                        <button id="uploadReportBtn" class="primary-btn" disabled
-                            style="padding:10px 20px; font-size:0.9rem;">
-                            ⬆ Upload Report
-                        </button>
-                    </div>
-                </div>
-
-                <div class="reports-grid" style="margin-top:24px;">
-                    <!-- LEFT: Insights Dashboard -->
-                    <article class="info-card" id="insightsDashboard" style="min-height: 450px;">
-                        <div
-                            style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                            <p class="eyebrow" id="summaryTypeLabel" style="color: var(--accent);">Aggregate Summary</p>
-                            <button id="clearReportSelectBtn" class="ghost-btn"
-                                style="padding:4px 12px; font-size:0.75rem; border-radius: 20px; display:none;">✕ View
-                                Full History</button>
-                        </div>
-                        <div id="summaryStatus" class="muted"
-                            style="margin-bottom:16px; font-size:0.82rem; border-bottom: 1px solid rgba(0,0,0,0.05); padding-bottom: 8px;">
-                            Browse insights from medical documentation.
-                        </div>
-
-                        <div id="medicalInsightsContainer">
-                            <div style="text-align:center; padding: 60px 20px; color: var(--muted);">
-                                <div style="font-size: 2.5rem; margin-bottom: 15px; opacity: 0.5;">📋</div>
-                                <p>Select a care recipient to load AI insights</p>
-                            </div>
-                        </div>
-                    </article>
-
-                    <!-- RIGHT: File list + upload -->
-                    <article class="info-card">
-                        <div
-                            style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                            <p class="eyebrow">Uploaded Files</p>
-                            <div class="sorting-controls">
-                                <select id="reportSortOrder"
-                                    style="padding: 4px 12px; border-radius: 12px; font-size: 0.75rem; border: 1px solid rgba(74,144,226,0.2); outline: none; background: rgba(255,255,255,0.6);">
-                                    <option value="date_desc">Newest First</option>
-                                    <option value="date_asc">Oldest First</option>
-                                    <option value="name_asc">Name (A-Z)</option>
-                                    <option value="name_desc">Name (Z-A)</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div id="reportsCountBadge" style="display:none; margin-bottom:10px;"></div>
-                        <div id="reportsList" class="report-list">
-                            <p class="muted">Select a care recipient to list their medical reports.</p>
-                        </div>
-                    </article>
-                </div>
+                <!-- Medical Reports and Medical History sections removed - now in medical_reports.html -->
             </section>
 
             <!-- Toast Notification -->
             <div id="uploadToast">
-                <span class="toast-icon" id="toastIcon">✓</span>
+                <span class="toast-icon" id="toastIcon">âœ“</span>
                 <span id="toastMessage">Report uploaded successfully!</span>
             </div>
 
@@ -1725,8 +1649,8 @@
                 const caretaker = data.caretaker;
                 caretakerNameEl.textContent = caretaker.full_name || caretaker.username;
                 caretakerFullEl.textContent = caretaker.full_name || caretaker.username;
-                caretakerEmailEl.textContent = caretaker.email || '—';
-                caretakerPhoneEl.textContent = caretaker.phone_number || '—';
+                caretakerEmailEl.textContent = caretaker.email || 'â€”';
+                caretakerPhoneEl.textContent = caretaker.phone_number || 'â€”';
                 sidebarNameEl.textContent = caretaker.full_name || caretaker.username;
                 sidebarEmailEl.textContent = caretaker.email || '';
 
@@ -1757,7 +1681,7 @@
             const card = document.createElement('div');
             card.className = 'recipient-card';
             card.dataset.recipientId = recipient.id || '';
-            const metaText = recipient.meta || `Age: ${recipient.age || '-'} · ${recipient.gender || '-'} · ${recipient.respiratory_condition_status ? 'Respiratory care' : 'General care'}`;
+            const metaText = recipient.meta || `Age: ${recipient.age || '-'} Â· ${recipient.gender || '-'} Â· ${recipient.respiratory_condition_status ? 'Respiratory care' : 'General care'}`;
             card.innerHTML = `<h5>${recipient.full_name}</h5><p>${metaText}</p>`;
             card.addEventListener('click', () => selectRecipient(recipient.id || null, recipient.full_name));
             return card;
@@ -1857,10 +1781,10 @@
             const recipient = recipientsCache.find(r => String(r.id) === String(selectedRecipientId));
             if (!recipient) return;
             recipientTitleEl.textContent = recipient.full_name || 'Recipient';
-            recipientMetaEl.innerHTML = `Email: <strong>${recipient.email || '—'}</strong><br>Phone: <strong>${recipient.phone_number || '—'}</strong>`;
+            recipientMetaEl.innerHTML = `Email: <strong>${recipient.email || 'â€”'}</strong><br>Phone: <strong>${recipient.phone_number || 'â€”'}</strong>`;
             const badges = [
-                `Age ${recipient.age || '—'}`,
-                recipient.gender || '—',
+                `Age ${recipient.age || 'â€”'}`,
+                recipient.gender || 'â€”',
                 recipient.respiratory_condition_status ? 'Respiratory care' : 'General care'
             ];
             recipientBadgesEl.innerHTML = badges.map(b => `<span class="tag">${b}</span>`).join('');
@@ -2005,7 +1929,7 @@
                     container.innerHTML = `
                         <div style="text-align:center; padding: 60px 20px;">
                             <div class="spinner" style="margin: 0 auto 15px;"></div>
-                            <p class="muted">Gemini is analyzing reports and health history…</p>
+                            <p class="muted">Gemini is analyzing reports and health historyâ€¦</p>
                         </div>`;
                 }
             }
@@ -2013,7 +1937,7 @@
             if (!recipient) {
                 container.innerHTML = `
                     <div style="text-align:center; padding: 60px 20px; color: var(--muted);">
-                        <div style="font-size: 2.5rem; margin-bottom: 15px; opacity: 0.5;">📋</div>
+                        <div style="font-size: 2.5rem; margin-bottom: 15px; opacity: 0.5;">ðŸ“‹</div>
                         <p>No recipient selected.</p>
                     </div>`;
                 return;
@@ -2022,7 +1946,7 @@
             if (!recipient.report_summary) {
                 container.innerHTML = `
                     <div style="text-align:center; padding: 60px 20px; color: var(--muted);">
-                        <div style="font-size: 2.5rem; margin-bottom: 15px; opacity: 0.5;">🔍</div>
+                        <div style="font-size: 2.5rem; margin-bottom: 15px; opacity: 0.5;">ðŸ”</div>
                         <p>No summary available yet for this recipient.</p>
                         <p style="font-size: 0.8rem; margin-top: 8px;">Upload a report or click "Regenerate Summary" to begin.</p>
                     </div>`;
@@ -2051,7 +1975,7 @@
 
             const hub = document.createElement('div');
             hub.className = 'mind-map-hub';
-            hub.innerHTML = '<span style="font-size:1.5rem;">🧠</span>';
+            hub.innerHTML = '<span style="font-size:1.5rem;">ðŸ§ </span>';
             container.appendChild(hub);
 
             const grid = document.createElement('div');
@@ -2091,13 +2015,13 @@
                 }
 
                 // 2. Section Header Detection
-                // Supports bullets: •, ∙, ·, *, + OR keywords followed by colons
-                const hasBullet = /^[•∙·\*\+]\s*/.test(trimmed);
+                // Supports bullets: â€¢, âˆ™, Â·, *, + OR keywords followed by colons
+                const hasBullet = /^[â€¢âˆ™Â·\*\+]\s*/.test(trimmed);
                 const hasKeyword = clinicalHeaders.some(h => trimmed.toUpperCase().includes(h));
                 const isHeader = (hasBullet && trimmed.includes(':')) || (trimmed.includes(':') && hasKeyword && !trimmed.startsWith('-'));
 
                 if (isHeader) {
-                    const cleanHeader = trimmed.replace(/^[•∙·\*\+]\s*/, '').trim();
+                    const cleanHeader = trimmed.replace(/^[â€¢âˆ™Â·\*\+]\s*/, '').trim();
                     const colonIdx = cleanHeader.indexOf(':');
                     const title = cleanHeader.substring(0, colonIdx).trim();
                     const remainder = cleanHeader.substring(colonIdx + 1).trim();
@@ -2115,7 +2039,7 @@
 
                 // 3. Point Capture
                 if (currentSection) {
-                    const point = trimmed.replace(/^[•∙·\*\+\-]\s*/, '').trim();
+                    const point = trimmed.replace(/^[â€¢âˆ™Â·\*\+\-]\s*/, '').trim();
                     if (point && !point.toUpperCase().includes('ENVIRONMENTAL RECOMMENDATIONS')) {
                         // Avoid duplicates of the title itself
                         if (point !== currentSection.title && !point.startsWith(currentSection.title + ':')) {
@@ -2133,14 +2057,14 @@
 
                     const card = document.createElement('div');
                     let typeClass = 'careplan';
-                    let icon = '📝';
+                    let icon = 'ðŸ“';
 
                     const titleLower = sec.title.toLowerCase();
-                    if (titleLower.includes('diagnos')) { typeClass = 'diagnoses'; icon = '🏥'; }
-                    else if (titleLower.includes('symptom') || titleLower.includes('history')) { typeClass = 'symptoms'; icon = '🤒'; }
-                    else if (titleLower.includes('vital') || titleLower.includes('lab')) { typeClass = 'vitals'; icon = '📊'; }
-                    else if (titleLower.includes('medication')) { typeClass = 'meds'; icon = '💊'; }
-                    else if (titleLower.includes('plan') || titleLower.includes('advice')) { typeClass = 'careplan'; icon = '📋'; }
+                    if (titleLower.includes('diagnos')) { typeClass = 'diagnoses'; icon = 'ðŸ¥'; }
+                    else if (titleLower.includes('symptom') || titleLower.includes('history')) { typeClass = 'symptoms'; icon = 'ðŸ¤’'; }
+                    else if (titleLower.includes('vital') || titleLower.includes('lab')) { typeClass = 'vitals'; icon = 'ðŸ“Š'; }
+                    else if (titleLower.includes('medication')) { typeClass = 'meds'; icon = 'ðŸ’Š'; }
+                    else if (titleLower.includes('plan') || titleLower.includes('advice')) { typeClass = 'careplan'; icon = 'ðŸ“‹'; }
 
                     let processedPoints = [];
                     rawPoints.forEach(p => {
@@ -2166,7 +2090,7 @@
                 fallbackCard.className = 'insight-card careplan';
                 fallbackCard.style.gridColumn = '1 / -1';
                 fallbackCard.innerHTML = `
-                    <div class="insight-header"><div class="insight-icon">ℹ️</div>Clinical Summary</div>
+                    <div class="insight-header"><div class="insight-icon">â„¹ï¸</div>Clinical Summary</div>
                     <div class="insight-content" style="white-space: pre-line; line-height: 1.6;">${text}</div>
                 `;
                 grid.appendChild(fallbackCard);
@@ -2181,7 +2105,7 @@
                 envDash.style.zIndex = "2";
                 envDash.style.position = "relative";
                 envDash.innerHTML = `
-                    <div class="insight-header"><div class="insight-icon">🏠</div>Optimized Health Environment</div>
+                    <div class="insight-header"><div class="insight-icon">ðŸ </div>Optimized Health Environment</div>
                     <div class="env-items">
                         <div class="env-stat"><label>Temperature</label><span>${envData.temp}</span></div>
                         <div class="env-stat"><label>Humidity</label><span>${envData.hum}</span></div>
@@ -2275,7 +2199,7 @@
                 if (content) {
                     // Extract bullet points
                     const lines = content.split('\n')
-                        .map(l => l.trim().replace(/^[\-\•\*\s]+/g, ''))
+                        .map(l => l.trim().replace(/^[\-\â€¢\*\s]+/g, ''))
                         .filter(l => l && !l.startsWith('Based on the')); // Filter out the transition sentence
 
                     if (lines.length > 0) {
@@ -2312,7 +2236,7 @@
             }
             reportsRefreshing = true;
             updateReportControlsState();
-            reportsListEl.innerHTML = '<p class="muted">Loading reports…</p>';
+            reportsListEl.innerHTML = '<p class="muted">Loading reportsâ€¦</p>';
             try {
                 const res = await fetch(`${API_BASE}/recipients/${recipient.id}/reports`, {
                     method: 'GET',
@@ -2399,7 +2323,7 @@
                 card.style.cursor = 'pointer';
 
                 const ext = (report.filename.split('.').pop() || '').toLowerCase();
-                const icon = ext === 'pdf' ? '📄' : ['png', 'jpg', 'jpeg'].includes(ext) ? '🖼️' : '📝';
+                const icon = ext === 'pdf' ? 'ðŸ“„' : ['png', 'jpg', 'jpeg'].includes(ext) ? 'ðŸ–¼ï¸' : 'ðŸ“';
 
                 card.innerHTML = `
                     <h4 style="display:flex; align-items:center; gap:6px;">
@@ -2410,7 +2334,7 @@
                     <div class="report-meta">Uploaded ${new Date(report.uploaded_at).toLocaleString()}</div>
                 `;
 
-                // Click card → load its individual preview into the summary pane
+                // Click card â†’ load its individual preview into the summary pane
                 card.addEventListener('click', (e) => {
                     if (e.target.closest('button')) return; // let action buttons handle themselves
                     selectReport(card, recipientId, report.id, report.filename);
@@ -2421,7 +2345,7 @@
 
                 const downloadBtn = document.createElement('button');
                 downloadBtn.className = 'ghost-btn';
-                downloadBtn.innerHTML = '⬇ Download';
+                downloadBtn.innerHTML = 'â¬‡ Download';
                 downloadBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     downloadMedicalReport(recipientId, report.id, report.filename);
@@ -2429,7 +2353,7 @@
 
                 const refreshBtn = document.createElement('button');
                 refreshBtn.className = 'ghost-btn';
-                refreshBtn.innerHTML = '🔄 Regenerate Analysis';
+                refreshBtn.innerHTML = 'ðŸ”„ Regenerate Analysis';
                 refreshBtn.style.padding = '4px 8px';
                 refreshBtn.style.fontSize = '0.7rem';
                 refreshBtn.addEventListener('click', (e) => {
@@ -2439,7 +2363,7 @@
 
                 const deleteBtn = document.createElement('button');
                 deleteBtn.className = 'ghost-btn';
-                deleteBtn.innerHTML = '🗑 Delete';
+                deleteBtn.innerHTML = 'ðŸ—‘ Delete';
                 deleteBtn.style.color = '#ef4444';
                 deleteBtn.style.padding = '4px 8px';
                 deleteBtn.style.fontSize = '0.7rem';
@@ -2471,7 +2395,7 @@
             container.innerHTML = `
                 <div style="text-align:center; padding: 60px 20px;">
                     <div class="spinner" style="margin: 0 auto 15px;"></div>
-                    <p class="muted">Generating clinical snapshot for "${filename}"…</p>
+                    <p class="muted">Generating clinical snapshot for "${filename}"â€¦</p>
                 </div>`;
 
             summaryStatusEl.textContent = `Analyzing Report: ${filename}`;
@@ -2531,7 +2455,7 @@
                 return;
             }
             previewArea.style.display = 'block';
-            previewArea.textContent = 'Loading preview…';
+            previewArea.textContent = 'Loading previewâ€¦';
             try {
                 const res = await fetch(`${API_BASE}/recipients/${recipientId}/reports/${reportId}/extract_preview`, {
                     method: 'GET',
@@ -2573,7 +2497,7 @@
             if (!recipient) return;
             summaryGenerating = true;
             updateReportControlsState();
-            renderMedicalSummary('Generating summary…');
+            renderMedicalSummary('Generating summaryâ€¦');
             try {
                 const res = await fetch(`${API_BASE}/recipients/${recipient.id}/summarize`, {
                     method: 'POST',
@@ -2608,7 +2532,7 @@
             fileInput.addEventListener('change', () => {
                 const file = fileInput.files[0];
                 if (file) {
-                    fileNameEl.textContent = '📎 ' + file.name;
+                    fileNameEl.textContent = 'ðŸ“Ž ' + file.name;
                     fileNameEl.style.display = 'block';
                     uploadBtn.disabled = false;
                 } else {
@@ -2635,7 +2559,7 @@
                     const dt = new DataTransfer();
                     dt.items.add(file);
                     fileInput.files = dt.files;
-                    fileNameEl.textContent = '📎 ' + file.name;
+                    fileNameEl.textContent = 'ðŸ“Ž ' + file.name;
                     fileNameEl.style.display = 'block';
                     uploadBtn.disabled = false;
                 }
@@ -2651,7 +2575,7 @@
 
                 // --- UI: start state ---
                 uploadBtn.disabled = true;
-                uploadBtn.textContent = 'Uploading…';
+                uploadBtn.textContent = 'Uploadingâ€¦';
                 progressWrap.style.display = 'block';
                 progressBar.style.width = '30%';
 
@@ -2679,7 +2603,7 @@
                         throw new Error(err.detail || 'Upload failed');
                     }
 
-                    showToast('✓ Report uploaded successfully!', 'success');
+                    showToast('âœ“ Report uploaded successfully!', 'success');
 
                     // Reset file input
                     resetUploadUI();
@@ -2692,7 +2616,7 @@
                     console.error('Upload error', err);
                     progressBar.style.width = '100%';
                     progressBar.style.background = 'linear-gradient(90deg, var(--danger), #ff6b6b)';
-                    showToast('✕ ' + (err.message || 'Upload failed'), 'error');
+                    showToast('âœ• ' + (err.message || 'Upload failed'), 'error');
                     setTimeout(() => resetUploadUI(), 2000);
                 }
             }
@@ -2702,7 +2626,7 @@
                 fileNameEl.style.display = 'none';
                 fileNameEl.textContent = '';
                 uploadBtn.disabled = true;
-                uploadBtn.textContent = '⬆ Upload Report';
+                uploadBtn.textContent = 'â¬† Upload Report';
                 progressBar.style.width = '0%';
                 progressBar.style.background = 'linear-gradient(90deg, var(--accent), var(--accent-2))';
                 progressWrap.style.display = 'none';
@@ -2718,7 +2642,7 @@
             if (!toast) return;
 
             toast.className = type;  // sets .success or .error for icon color
-            iconEl.textContent = type === 'success' ? '✓' : '✕';
+            iconEl.textContent = type === 'success' ? 'âœ“' : 'âœ•';
             msgEl.textContent = message;
             toast.classList.add('show');
 
@@ -2804,7 +2728,7 @@
                     const snoreScore = snoreIndex >= 0 ? scores[snoreIndex] : 0;
 
                     if (!coughDetectionActive && !snoreDetectionActive) {
-                        statusEl.textContent = `Listening… (Cough: ${coughScore.toFixed(2)} | Snore: ${snoreScore.toFixed(2)})`;
+                        statusEl.textContent = `Listeningâ€¦ (Cough: ${coughScore.toFixed(2)} | Snore: ${snoreScore.toFixed(2)})`;
                         statusEl.style.color = '#38bdf8';
                     }
 
@@ -2822,7 +2746,7 @@
                             coughStartTime = Date.now();
                             coughCount++;
                             document.getElementById('coughCount').textContent = coughCount;
-                            statusEl.textContent = `🚨 Cough #${coughCount} detected! (${coughScore.toFixed(2)}) - Recording…`;
+                            statusEl.textContent = `ðŸš¨ Cough #${coughCount} detected! (${coughScore.toFixed(2)}) - Recordingâ€¦`;
                             statusEl.style.color = '#fb7185';
                             if (coughRecordingTimeout) clearTimeout(coughRecordingTimeout);
                             coughRecordingTimeout = setTimeout(() => saveDetectionRecording('cough', coughScore), MIN_RECORDING_DURATION);
@@ -2852,7 +2776,7 @@
                             snoreStartTime = Date.now();
                             snoreCount++;
                             document.getElementById('snoreCount').textContent = snoreCount;
-                            statusEl.textContent = `😴 Snore #${snoreCount} detected! (${snoreScore.toFixed(2)}) - Recording…`;
+                            statusEl.textContent = `ðŸ˜´ Snore #${snoreCount} detected! (${snoreScore.toFixed(2)}) - Recordingâ€¦`;
                             statusEl.style.color = '#a78bfa';
                             if (snoreRecordingTimeout) clearTimeout(snoreRecordingTimeout);
                             snoreRecordingTimeout = setTimeout(() => saveDetectionRecording('snore', snoreScore), MIN_RECORDING_DURATION);
@@ -2874,7 +2798,7 @@
                     probabilityThreshold: 0.5
                 });
 
-                statusEl.textContent = 'Listening for coughs and snores…';
+                statusEl.textContent = 'Listening for coughs and snoresâ€¦';
             } catch (err) {
                 console.error('Error init audio:', err);
                 statusEl.textContent = `Error: ${err.message}`;
@@ -2962,7 +2886,7 @@
                 if (!coughDetectionActive && !snoreDetectionActive) {
                     pcmBuffer = [];
                     pcmBufferLength = 0;
-                    statusEl.textContent = 'Listening…';
+                    statusEl.textContent = 'Listeningâ€¦';
                     statusEl.style.color = '#38bdf8';
                 }
             }
@@ -3011,7 +2935,7 @@
         }
 
         function addSessionPrediction(pred) {
-            const emoji = pred.type === 'cough' ? '🤧' : pred.type === 'snore' ? '😴' : '🔊';
+            const emoji = pred.type === 'cough' ? 'ðŸ¤§' : pred.type === 'snore' ? 'ðŸ˜´' : 'ðŸ”Š';
             pred.displayText = `${emoji} ${(pred.score * 100).toFixed(0)}% ${pred.type}${pred.recipient_name ? ` (${pred.recipient_name})` : ''}`;
 
             sessionPredictions.unshift(pred);
@@ -3043,9 +2967,9 @@
             });
 
             const sections = [
-                { type: 'cough', title: '🤧 Coughs', predictions: groupedPredictions.cough },
-                { type: 'snore', title: '😴 Snores', predictions: groupedPredictions.snore },
-                { type: 'other', title: '🔊 Other Sounds', predictions: groupedPredictions.other }
+                { type: 'cough', title: 'ðŸ¤§ Coughs', predictions: groupedPredictions.cough },
+                { type: 'snore', title: 'ðŸ˜´ Snores', predictions: groupedPredictions.snore },
+                { type: 'other', title: 'ðŸ”Š Other Sounds', predictions: groupedPredictions.other }
             ];
 
             sections.forEach(section => {
@@ -3124,7 +3048,7 @@
                     div.className = 'history-card';
                     div.innerHTML = `
                     <h4>${rec.filename}</h4>
-                    <div class="meta">${new Date(rec.created_at).toLocaleString()}${rec.care_recipient_id ? ' • Recipient: ' + rec.care_recipient_id : ''}</div>
+                    <div class="meta">${new Date(rec.created_at).toLocaleString()}${rec.care_recipient_id ? ' â€¢ Recipient: ' + rec.care_recipient_id : ''}</div>
                 `;
                     const controls = document.createElement('div');
                     controls.style.marginTop = '12px';
@@ -3197,7 +3121,7 @@
             div.className = 'history-card';
             div.innerHTML = `
             <h4>${filename}</h4>
-            <div class="meta">Local session • ${selectedRecipientName}</div>
+            <div class="meta">Local session â€¢ ${selectedRecipientName}</div>
             <audio controls style="width:100%;margin-top:12px;">
                 <source src="${url}" type="${mimeType}">
             </audio>
@@ -3286,7 +3210,7 @@
                 if (result.falls_detected && result.falls_detected.length > 0) {
                     fallDetectionOutput.innerHTML = `
                     <div class="mt-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
-                        <p class="font-bold">⚠️ Fall Detected!</p>
+                        <p class="font-bold">âš ï¸ Fall Detected!</p>
                         <p>Falls detected: ${result.falls_detected.length}</p>
                         <p>Confidence: ${(result.average_confidence * 100).toFixed(1)}%</p>
                     </div>
@@ -3307,7 +3231,7 @@
                 } else {
                     fallDetectionOutput.innerHTML = `
                     <div class="mt-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded">
-                        <p>✅ No falls detected in the video.</p>
+                        <p>âœ… No falls detected in the video.</p>
                     </div>
                 `;
                 }
@@ -3354,7 +3278,7 @@
                     return;
                 }
 
-                emotionStatusEl.textContent = 'Status: Requesting camera…';
+                emotionStatusEl.textContent = 'Status: Requesting cameraâ€¦';
                 emotionStatusEl.style.color = '#38bdf8';
 
                 emotionStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
@@ -3362,7 +3286,7 @@
 
                 emotionMonitoringActive = true;
                 startEmotionMonitorBtn.textContent = 'Stop Video Monitoring';
-                emotionStatusEl.textContent = 'Status: Camera on - analyzing…';
+                emotionStatusEl.textContent = 'Status: Camera on - analyzingâ€¦';
 
                 if (emotionCaptureInterval) clearInterval(emotionCaptureInterval);
             } catch (err) {
@@ -3414,13 +3338,13 @@
                 const data = await res.json();
 
                 if (!data || data.user_id === null || data.dominant_emotion === null) {
-                    emotionCurrentEl.textContent = '—';
-                    emotionConfidenceEl.textContent = '—';
+                    emotionCurrentEl.textContent = 'â€”';
+                    emotionConfidenceEl.textContent = 'â€”';
                     return;
                 }
 
                 emotionCurrentEl.textContent = data.dominant_emotion;
-                emotionConfidenceEl.textContent = data.confidence != null ? data.confidence.toFixed(1) + '%' : '—';
+                emotionConfidenceEl.textContent = data.confidence != null ? data.confidence.toFixed(1) + '%' : 'â€”';
             } catch (err) {
                 console.error('Error capturing/sending emotion frame:', err);
             }
@@ -3536,9 +3460,9 @@
             });
         }
 
-        // ═══════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         // Audio Analytics Functions
-        // ═══════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
         let audioTrendChart = null;
         let audioHourlyChart = null;
@@ -3718,7 +3642,7 @@
                 const timeStr = date.toLocaleTimeString();
                 const dateStr = date.toLocaleDateString();
                 const type = event.event_type.toLowerCase();
-                const icon = type === 'cough' ? '🤧' : type === 'sneeze' ? '🤧' : '🔊';
+                const icon = type === 'cough' ? 'ðŸ¤§' : type === 'sneeze' ? 'ðŸ¤§' : 'ðŸ”Š';
 
                 return `
                     <div class="audio-event-item ${type}">
@@ -3747,7 +3671,6 @@
 
         fetchProfile();
         fetchAndRenderRecordings();
-        renderMedicalSummary();
         fetchAudioAnalytics(); // Load audio analytics on page load
     </script>
     <!-- Chart.js for Audio Analytics -->

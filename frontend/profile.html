@@ -1,0 +1,3688 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CareTaker Â· Profile Hub</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            /* Light/Pastel Theme */
+            --bg: #FDFBF7;
+            --bg-alt: #ffffff;
+            --card: rgba(255, 255, 255, 0.6);
+            --card-alt: rgba(255, 255, 255, 0.8);
+            --border: rgba(74, 144, 226, 0.2);
+            --text: #1A202C;
+            --muted: #4A5568;
+            --accent: #4A90E2;
+            --accent-2: #6BB5FF;
+            --danger: #fb7185;
+            --success: #34d399;
+            --shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+
+            /* Pastel Accents */
+            --pastel-mint: #B2F7EF;
+            --pastel-peach: #FFDAC1;
+            --pastel-lavender: #E2D1F9;
+
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            /* Pastel Gradient Background matching Index */
+            background-color: var(--bg);
+            background-image:
+                radial-gradient(at 20% 30%, var(--pastel-mint) 0px, transparent 55%),
+                radial-gradient(at 80% 10%, var(--pastel-peach) 0px, transparent 50%),
+                radial-gradient(at 40% 80%, var(--pastel-lavender) 0px, transparent 50%),
+                radial-gradient(at 90% 90%, var(--pastel-mint) 0px, transparent 40%);
+            background-attachment: fixed;
+            background-size: 120% 120%;
+            color: var(--text);
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+
+        .app-shell {
+            min-height: 100vh;
+            display: flex;
+            gap: 28px;
+            padding: 28px clamp(16px, 3vw, 48px);
+        }
+
+        .sidebar {
+            width: 320px;
+            background: rgba(255, 255, 255, 0.65);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            border-radius: 28px;
+            padding: 28px;
+            backdrop-filter: blur(24px);
+            box-shadow: var(--shadow);
+            display: flex;
+            flex-direction: column;
+            gap: 28px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 1.2rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--text);
+        }
+
+        .brand span {
+            color: var(--accent);
+        }
+
+        .caretaker-chip {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            padding: 18px;
+            border-radius: 20px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.4));
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
+        }
+
+        .caretaker-chip .avatar {
+            width: 56px;
+            height: 56px;
+            border-radius: 16px;
+            background: var(--accent);
+            color: white;
+            display: grid;
+            place-items: center;
+            font-weight: 700;
+            font-size: 1rem;
+        }
+
+        .caretaker-chip h4 {
+            margin: 0;
+            font-size: 1.1rem;
+            color: var(--text);
+        }
+
+        .caretaker-chip span {
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .nav-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .nav-chip {
+            background: rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            color: var(--text);
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .nav-chip:hover,
+        .nav-chip:focus {
+            background: white;
+            border-color: var(--accent);
+            transform: translateX(4px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .section-title {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--muted);
+            font-weight: 600;
+        }
+
+        .recipient-search {
+            margin-top: 12px;
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            background: rgba(255, 255, 255, 0.7);
+            color: var(--text);
+        }
+
+        .recipient-search::placeholder {
+            color: var(--muted);
+        }
+
+        .recipient-list {
+            margin-top: 16px;
+            max-height: 52vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding-right: 6px;
+        }
+
+        .recipient-card {
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            padding: 12px 14px;
+            background: rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .recipient-card:hover {
+            background: rgba(255, 255, 255, 0.8);
+        }
+
+        .recipient-card.active {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+            background: white;
+            box-shadow: 0 4px 12px rgba(74, 144, 226, 0.15);
+        }
+
+        .recipient-card h5 {
+            margin: 0 0 4px;
+            font-size: 1rem;
+            color: var(--text);
+        }
+
+        .recipient-card p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 0.85rem;
+        }
+
+        main.content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 28px;
+            padding-bottom: 48px;
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.6);
+            border-radius: 32px;
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            padding: clamp(20px, 3vw, 36px);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(20px);
+        }
+
+        .panel-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .eyebrow {
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--muted);
+            font-size: 0.78rem;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+
+        h2,
+        h3,
+        h4 {
+            color: var(--text);
+        }
+
+        .grid-two {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+        }
+
+        .info-card {
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 24px;
+            padding: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+        }
+
+        .info-card h2 {
+            margin: 8px 0 4px;
+        }
+
+        .info-row {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            color: var(--muted);
+        }
+
+        .tag-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .tag {
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: white;
+            font-size: 0.8rem;
+            color: var(--muted);
+        }
+
+        .control-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            align-items: center;
+            margin: 24px 0;
+        }
+
+        .primary-btn {
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+            border: none;
+            color: white;
+            font-weight: 700;
+            padding: 14px 22px;
+            border-radius: 16px;
+            cursor: pointer;
+            font-size: 1rem;
+            box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3);
+            transition: transform 0.2s;
+        }
+
+        .primary-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(74, 144, 226, 0.4);
+        }
+
+        .stat-pill {
+            background: white;
+            border-radius: 16px;
+            padding: 12px 18px;
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.03);
+        }
+
+        .stat-pill span {
+            color: var(--muted);
+            font-size: 0.85rem;
+        }
+
+        .stat-pill strong {
+            display: block;
+            font-size: 1.2rem;
+            margin-top: 4px;
+            color: var(--text);
+        }
+
+        .status-pill {
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            padding: 8px 16px;
+            font-size: 0.9rem;
+            background: rgba(255, 255, 255, 0.8);
+            color: var(--text);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.03);
+        }
+
+        .wave-shell {
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            padding: 20px;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02);
+        }
+
+        canvas {
+            width: 100%;
+            max-width: 100%;
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.6);
+        }
+
+        .session-card {
+            margin-top: 24px;
+            background: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            border-radius: 24px;
+            padding: 24px;
+        }
+
+        .session-list {
+            margin-top: 16px;
+            max-height: 280px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .session-item {
+            background: white;
+            padding: 12px 16px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            font-size: 0.95rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .history-list {
+            margin-top: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            max-height: 420px;
+            overflow-y: auto;
+        }
+
+        .history-card {
+            padding: 16px;
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            margin-bottom: 12px;
+        }
+
+        .history-card h4 {
+            margin: 0 0 6px;
+            color: var(--text);
+        }
+
+        .history-card .meta {
+            color: var(--muted);
+            font-size: 0.85rem;
+        }
+
+        .ghost-btn {
+            background: white;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            color: var(--text);
+            border-radius: 12px;
+            padding: 10px 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .ghost-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .ghost-btn:disabled,
+        .primary-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .report-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        /* Audio Analytics Styles */
+        .chart-card {
+            background: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(74, 144, 226, 0.15);
+            border-radius: 20px;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+            transition: all 0.3s ease;
+        }
+
+        .chart-card:hover {
+            border-color: rgba(74, 144, 226, 0.3);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.06);
+            transform: translateY(-2px);
+        }
+
+        .chart-header {
+            margin-bottom: 16px;
+        }
+
+        .chart-header h3 {
+            margin: 0 0 4px;
+            font-size: 1.1rem;
+            color: var(--text);
+            font-weight: 700;
+        }
+
+        .chart-header .muted {
+            font-size: 0.8rem;
+            margin: 0;
+        }
+
+        .audio-event-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.5);
+            border-left: 3px solid transparent;
+            transition: all 0.2s ease;
+        }
+
+        .audio-event-item:hover {
+            background: rgba(255, 255, 255, 0.8);
+            transform: translateX(4px);
+        }
+
+        .audio-event-item.cough {
+            border-left-color: #fb7185;
+        }
+
+        .audio-event-item.sneeze {
+            border-left-color: #f6c23e;
+        }
+
+        .audio-event-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            flex-shrink: 0;
+        }
+
+        .audio-event-icon.cough {
+            background: rgba(251, 113, 133, 0.15);
+            color: #fb7185;
+        }
+
+        .audio-event-icon.sneeze {
+            background: rgba(246, 194, 62, 0.15);
+            color: #f6c23e;
+        }
+
+        .audio-event-details {
+            flex: 1;
+        }
+
+        .audio-event-type {
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: var(--text);
+            margin-bottom: 2px;
+        }
+
+        .audio-event-time {
+            font-size: 0.75rem;
+            color: var(--muted);
+        }
+
+        .audio-event-confidence {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .summary-text {
+            white-space: pre-line;
+            line-height: 1.5;
+            color: var(--text);
+        }
+
+        .report-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 320px;
+            overflow-y: auto;
+        }
+
+        .report-card {
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.6);
+        }
+
+        .report-card h4 {
+            margin: 0 0 6px;
+            color: var(--text);
+        }
+
+        .report-meta {
+            color: var(--muted);
+            font-size: 0.85rem;
+        }
+
+        .report-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .report-preview {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px dashed rgba(148, 163, 184, 0.2);
+            font-size: 0.9rem;
+            color: var(--text);
+        }
+
+        .muted {
+            color: var(--muted);
+        }
+
+        /* Medical Summary Visualization */
+        .summary-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+            margin-top: 16px;
+        }
+
+        .summary-section {
+            background: rgba(255, 255, 255, 0.4);
+            border-radius: 20px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        /* Make the environment section span full width */
+        .summary-section.full-width {
+            grid-column: 1 / -1;
+            background: linear-gradient(135deg, rgba(74, 144, 226, 0.05), rgba(110, 231, 183, 0.05));
+            border: 1px solid rgba(74, 144, 226, 0.2);
+        }
+
+        .summary-section:hover {
+            background: rgba(255, 255, 255, 0.95);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+            transform: translateY(-4px);
+            border-color: var(--accent);
+        }
+
+        .summary-section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .summary-section-header i {
+            font-size: 1.1rem;
+            width: 36px;
+            height: 36px;
+            display: grid;
+            place-items: center;
+            border-radius: 12px;
+            background: white;
+            color: var(--accent);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+        }
+
+        .summary-section-header h4 {
+            margin: 0;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--muted);
+            font-weight: 800;
+        }
+
+        .summary-content {
+            font-size: 0.95rem;
+            color: var(--text);
+            line-height: 1.7;
+            flex: 1;
+        }
+
+        .summary-ul {
+            margin: 0;
+            padding-left: 18px;
+            list-style-type: none;
+        }
+
+        .summary-ul li {
+            position: relative;
+            margin-bottom: 10px;
+            padding-left: 5px;
+        }
+
+        .summary-ul li::before {
+            content: "â€¢";
+            color: var(--accent);
+            font-weight: bold;
+            position: absolute;
+            left: -15px;
+        }
+
+        .summary-thresholds {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin-top: 16px;
+        }
+
+        .threshold-pill {
+            background: white;
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            border-radius: 18px;
+            padding: 16px 12px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
+            transition: all 0.2s ease;
+        }
+
+        .threshold-pill:hover {
+            border-color: var(--accent);
+            transform: scale(1.05);
+            box-shadow: 0 6px 15px rgba(74, 144, 226, 0.1);
+        }
+
+        .threshold-pill i {
+            display: block;
+            font-size: 1.3rem;
+            color: var(--accent);
+            margin-bottom: 10px;
+        }
+
+        .threshold-pill .label {
+            display: block;
+            font-size: 0.7rem;
+            color: var(--muted);
+            font-weight: 700;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .threshold-pill .value {
+            display: block;
+            font-size: 1.15rem;
+            color: var(--text);
+            font-weight: 900;
+        }
+
+        @media (max-width: 1080px) {
+            .summary-container {
+                grid-template-columns: 1fr;
+            }
+
+            .summary-thresholds {
+                grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            }
+        }
+
+        .reports-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+        }
+
+        @media (max-width: 1200px) {
+            .reports-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ---- Upload Area ---- */
+        .upload-drop-zone {
+            border: 2px dashed rgba(74, 144, 226, 0.35);
+            border-radius: 18px;
+            padding: 24px 20px;
+            text-align: center;
+            background: rgba(74, 144, 226, 0.04);
+            transition: all 0.25s ease;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .upload-drop-zone:hover,
+        .upload-drop-zone.dragover {
+            border-color: var(--accent);
+            background: rgba(74, 144, 226, 0.09);
+            transform: translateY(-2px);
+        }
+
+        .upload-drop-zone input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+            width: 100%;
+            height: 100%;
+        }
+
+        .upload-icon {
+            font-size: 2rem;
+            color: var(--accent);
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .upload-label-text {
+            font-size: 0.9rem;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .upload-label-text strong {
+            color: var(--accent);
+        }
+
+        .upload-file-name {
+            margin-top: 10px;
+            font-size: 0.85rem;
+            color: var(--text);
+            font-weight: 600;
+            display: none;
+        }
+
+        .upload-progress {
+            display: none;
+            height: 6px;
+            border-radius: 999px;
+            background: rgba(74, 144, 226, 0.15);
+            margin-top: 12px;
+            overflow: hidden;
+        }
+
+        .upload-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), var(--accent-2));
+            border-radius: 999px;
+            width: 0%;
+            transition: width 0.3s ease;
+            animation: progressPulse 1.2s ease-in-out infinite alternate;
+        }
+
+        @keyframes progressPulse {
+            from {
+                opacity: 0.7;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        /* ---- Per-report highlight ---- */
+        .report-card.selected {
+            border-color: var(--accent);
+            background: rgba(74, 144, 226, 0.06);
+            box-shadow: 0 4px 14px rgba(74, 144, 226, 0.12);
+        }
+
+        .report-card .report-select-indicator {
+            display: inline-block;
+            background: var(--accent);
+            color: white;
+            border-radius: 999px;
+            padding: 2px 10px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            margin-left: 8px;
+            vertical-align: middle;
+            display: none;
+        }
+
+        .report-card.selected .report-select-indicator {
+            display: inline-block;
+        }
+
+        /* ---- Toast Notification ---- */
+        #uploadToast {
+            position: fixed;
+            bottom: 32px;
+            right: 32px;
+            background: white;
+            border: 1px solid rgba(74, 144, 226, 0.25);
+            border-radius: 18px;
+            padding: 16px 22px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text);
+            z-index: 9999;
+            transform: translateY(120px);
+            opacity: 0;
+            transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        #uploadToast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        #uploadToast.success .toast-icon {
+            color: var(--success);
+        }
+
+        #uploadToast.error .toast-icon {
+            color: var(--danger);
+        }
+
+        .toast-icon {
+            font-size: 1.2rem;
+        }
+
+        /* ---- Mind Map Optimization ---- */
+        #medicalInsightsContainer {
+            position: relative;
+            padding: 20px 0;
+            overflow: visible;
+        }
+
+        .mind-map-spine {
+            position: absolute;
+            top: 60px;
+            bottom: 40px;
+            left: 50%;
+            width: 2px;
+            background: linear-gradient(to bottom, var(--accent), var(--accent-2), transparent);
+            transform: translateX(-50%);
+            opacity: 0.3;
+            z-index: 0;
+        }
+
+        .mind-map-hub {
+            width: 64px;
+            height: 64px;
+            background: white;
+            border: 3px solid var(--accent);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 30px;
+            position: relative;
+            z-index: 2;
+            box-shadow: 0 0 20px rgba(74, 144, 226, 0.4);
+            animation: pulse-glow 2s infinite;
+        }
+
+        @keyframes pulse-glow {
+            0% {
+                box-shadow: 0 0 0px rgba(74, 144, 226, 0.4);
+            }
+
+            50% {
+                box-shadow: 0 0 25px rgba(74, 144, 226, 0.6);
+            }
+
+            100% {
+                box-shadow: 0 0 0px rgba(74, 144, 226, 0.4);
+            }
+        }
+
+        .insight-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-top: 20px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .insight-card {
+            background: white;
+            border: 1px solid rgba(74, 144, 226, 0.1);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
+            position: relative;
+            animation: slideUp 0.6s ease backwards;
+        }
+
+        /* Connecting arms */
+        .insight-card::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            width: 15px;
+            height: 2px;
+            background: var(--accent);
+            opacity: 0.3;
+        }
+
+        /* Alternating sides for spine connectivity */
+        .insight-card:nth-child(odd) {
+            margin-right: 15px;
+        }
+
+        .insight-card:nth-child(odd)::after {
+            right: -15px;
+        }
+
+        .insight-card:nth-child(even) {
+            margin-left: 15px;
+        }
+
+        .insight-card:nth-child(even)::after {
+            left: -15px;
+        }
+
+        .insight-card:hover {
+            transform: translateY(-5px) scale(1.02);
+            box-shadow: 0 12px 32px rgba(74, 144, 226, 0.15);
+            border-color: rgba(74, 144, 226, 0.3);
+            z-index: 5;
+        }
+
+        .insight-content ul {
+            list-style: none;
+            padding: 0;
+            margin: 8px 0 0 0;
+        }
+
+        .insight-content li {
+            position: relative;
+            padding-left: 20px;
+            margin-bottom: 8px;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            color: var(--text);
+        }
+
+        .insight-content li::before {
+            content: "ðŸ‘‰";
+            position: absolute;
+            left: 0;
+            font-size: 0.8rem;
+            filter: grayscale(1);
+            opacity: 0.6;
+        }
+
+        @media (max-width: 1200px) {
+            .insight-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .mind-map-spine {
+                left: 24px;
+                left: 24px;
+                transform: none;
+            }
+
+            .insight-card {
+                margin-left: 45px !important;
+                margin-right: 0 !important;
+            }
+
+            .insight-card::after {
+                left: -21px !important;
+                width: 21px;
+            }
+
+            .mind-map-hub {
+                margin-left: 0;
+            }
+        }
+
+        /* Spinner Component */
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(74, 144, 226, 0.1);
+            border-top: 3px solid var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Environmental Dashboard Section */
+        .env-dashboard {
+            background: linear-gradient(135deg, rgba(30, 144, 255, 0.04), rgba(30, 144, 255, 0.01));
+            border: 1px solid rgba(30, 144, 255, 0.12);
+            border-radius: 20px;
+            padding: 20px;
+            margin-top: 16px;
+            animation: slideUp 0.6s ease 0.2s backwards;
+        }
+
+        .env-items {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 14px;
+            margin-top: 16px;
+        }
+
+        .env-stat {
+            background: white;
+            padding: 16px 12px;
+            border-radius: 16px;
+            text-align: center;
+            border: 1px solid rgba(0, 0, 0, 0.04);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
+            transition: transform 0.3s ease;
+        }
+
+        .env-stat:hover {
+            transform: translateY(-3px);
+            border-color: rgba(30, 144, 255, 0.3);
+        }
+
+        .env-stat label {
+            display: block;
+            font-size: 0.7rem;
+            font-weight: 800;
+            color: var(--muted);
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            letter-spacing: 0.04em;
+        }
+
+        .env-stat span {
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: #1e90ff;
+        }
+
+        @media (max-width: 1080px) {
+            .app-shell {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+            }
+
+            .recipient-list {
+                max-height: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div class="brand">Care<span>Taker</span></div>
+            <div class="caretaker-chip">
+                <div class="avatar">CT</div>
+                <div>
+                    <h4 id="sidebarCaretakerName">â€”</h4>
+                    <span id="sidebarCaretakerEmail">Loadingâ€¦</span>
+                </div>
+            </div>
+
+            <div class="nav-group">
+                <button class="nav-chip" data-target="overview">
+                    <span>Profile Overview</span>
+                    âžœ
+                </button>
+                <button class="nav-chip" data-target="audio-section">
+                    <span>Audio Monitoring</span>
+                    âžœ
+                </button>
+                <button class="nav-chip" data-target="video-section">
+                    <span>Video Monitoring</span>
+                    âžœ
+                </button>
+                <a href="medical_reports.html" class="nav-chip" style="text-decoration:none;">
+                    <span>Medical Reports &amp; History</span>
+                    âžœ
+                </a>
+                <a href="insights.html" class="nav-chip"
+                    style="text-decoration:none; background: linear-gradient(135deg, rgba(74,144,226,0.12), rgba(139,92,246,0.08)); border-color: rgba(74,144,226,0.2);">
+                    <span>Patient Intelligence</span>
+                    âžœ
+                </a>
+
+                <button class="nav-chip" id="voiceBotBtn">
+                    <span>Voice Bot</span>
+                    âžœ
+                </button>
+                <div style="margin-top: 10px; border-top: 1px solid rgba(0,0,0,0.05); padding-top: 10px;">
+                    <a href="settings.html" class="nav-chip"
+                        style="text-decoration: none; background: rgba(74, 144, 226, 0.05); border-color: rgba(74, 144, 226, 0.2);">
+                        <span style="color: var(--accent); font-weight: 600;">Account Settings</span>
+                        <i class="fas fa-cog" style="color: var(--accent);"></i>
+                    </a>
+                </div>
+            </div>
+
+            <div>
+                <div class="section-title">Care Recipients</div>
+                <input id="recipientSearch" type="search" class="recipient-search" placeholder="Search recipients">
+                <div id="recipientsList" class="recipient-list">
+                    <p class="muted">Loading recipientsâ€¦</p>
+                </div>
+            </div>
+        </aside>
+
+        <main class="content">
+            <section class="panel" id="overview">
+                <div class="panel-head">
+                    <div>
+                        <p class="eyebrow">Profile Hub</p>
+                        <h1>Welcome back, <span id="caretakerName">â€”</span></h1>
+                        <p class="muted">Stay close to every care recipient from a single, modern workspace.</p>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <a href="settings.html" class="ghost-btn"
+                            style="padding: 6px 14px; border-radius: 20px; font-weight: 500; font-size: 0.85rem; display: flex; align-items: center; gap: 6px; text-decoration: none; color: var(--muted);">
+                            <i class="fas fa-cog"></i>
+                            <span>Settings</span>
+                        </a>
+                        <div class="status-pill">
+                            Logged in
+                        </div>
+                        <button id="logoutBtn" class="ghost-btn"
+                            style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border-color: #ef4444; padding: 6px 12px; border-radius: 20px; font-weight: 500; font-size: 0.85rem; display: flex; align-items: center; gap: 6px;">
+                            <i class="fas fa-sign-out-alt" style="font-size: 0.9em;"></i>
+                            <span>Logout</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid-two" style="margin-top:24px;">
+                    <article class="info-card">
+                        <p class="eyebrow">Caretaker</p>
+                        <h2 id="caretakerFullName">â€”</h2>
+                        <div class="info-row">
+                            <span>Email: <strong id="caretakerEmail">â€”</strong></span>
+                            <span>Phone: <strong id="caretakerPhone">â€”</strong></span>
+                        </div>
+                    </article>
+
+                    <article class="info-card">
+                        <p class="eyebrow">Focus recipient</p>
+                        <h2 id="recipientCardTitle">All recipients</h2>
+                        <div class="info-row" id="recipientCardMeta">Select a care recipient from the left panel to see
+                            details.</div>
+                        <div class="tag-row" id="recipientBadges"></div>
+                    </article>
+                </div>
+            </section>
+
+            <!-- Add this Weather Widget Section -->
+            <section class="panel" id="weather-section">
+                <div class="panel-head">
+                    <div>
+                        <h2>Environment Conditions</h2>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <div id="weather-widget-container"></div>
+                </div>
+            </section>
+
+            <!-- Vitals/Sensor Status Section -->
+            <section class="panel" id="vitals-section">
+                <div class="panel-head">
+                    <div>
+                        <p class="eyebrow">Health Signals</p>
+                        <h2>Vitals & Sensor Status</h2>
+                    </div>
+                    <div class="status-pill">
+                        Updated: <span id="last-updated">--</span>
+                    </div>
+                </div>
+
+                <div class="grid-two"
+                    style="margin-top:24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+
+                    <!-- Heart Rate -->
+                    <div class="stat-pill"
+                        style="display:flex; flex-direction:column; align-items:center; position:relative; padding-bottom:10px;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; width:100%;">
+                            <i class="fas fa-heart" style="color:#fb7185;"></i>
+                            <span style="font-weight:600; font-size:0.9rem;">Heart Rate</span>
+                        </div>
+                        <div style="position:relative; width:140px; height:80px;">
+                            <canvas id="chart-hr"></canvas>
+                            <div
+                                style="position:absolute; bottom:0; left:50%; transform:translateX(-50%); text-align:center;">
+                                <strong id="val-hr"
+                                    style="font-size:1.4rem; color:var(--text); line-height:1;">--</strong>
+                                <span style="font-size:0.8rem; display:block; color:var(--muted);">bpm</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Blood Pressure (Systolic) -->
+                    <div class="stat-pill"
+                        style="display:flex; flex-direction:column; align-items:center; position:relative; padding-bottom:10px;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; width:100%;">
+                            <i class="fas fa-heartbeat" style="color:#4A90E2;"></i>
+                            <span style="font-weight:600; font-size:0.9rem;">BP (Sys/Dia)</span>
+                        </div>
+                        <div style="position:relative; width:140px; height:80px;">
+                            <canvas id="chart-bp"></canvas>
+                            <div
+                                style="position:absolute; bottom:0; left:50%; transform:translateX(-50%); text-align:center;">
+                                <strong id="val-bp"
+                                    style="font-size:1.1rem; color:var(--text); line-height:1;">--/--</strong>
+                                <span style="font-size:0.8rem; display:block; color:var(--muted);">mmHg</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SpO2 -->
+                    <div class="stat-pill"
+                        style="display:flex; flex-direction:column; align-items:center; position:relative; padding-bottom:10px;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; width:100%;">
+                            <i class="fas fa-tint" style="color:#36b9cc;"></i>
+                            <span style="font-weight:600; font-size:0.9rem;">SpO2</span>
+                        </div>
+                        <div style="position:relative; width:140px; height:80px;">
+                            <canvas id="chart-o2"></canvas>
+                            <div
+                                style="position:absolute; bottom:0; left:50%; transform:translateX(-50%); text-align:center;">
+                                <strong id="val-o2"
+                                    style="font-size:1.4rem; color:var(--text); line-height:1;">--</strong>
+                                <span style="font-size:0.8rem; display:block; color:var(--muted);">%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Temperature -->
+                    <div class="stat-pill"
+                        style="display:flex; flex-direction:column; align-items:center; position:relative; padding-bottom:10px;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; width:100%;">
+                            <i class="fas fa-thermometer-half" style="color:#f6c23e;"></i>
+                            <span style="font-weight:600; font-size:0.9rem;">Temp</span>
+                        </div>
+                        <div style="position:relative; width:140px; height:80px;">
+                            <canvas id="chart-temp"></canvas>
+                            <div
+                                style="position:absolute; bottom:0; left:50%; transform:translateX(-50%); text-align:center;">
+                                <strong id="val-temp"
+                                    style="font-size:1.4rem; color:var(--text); line-height:1;">--</strong>
+                                <span style="font-size:0.8rem; display:block; color:var(--muted);">Â°F</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sleep Score -->
+                    <div class="stat-pill"
+                        style="display:flex; flex-direction:column; align-items:center; position:relative; padding-bottom:10px;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; width:100%;">
+                            <i class="fas fa-moon" style="color:#8b5cf6;"></i>
+                            <span style="font-weight:600; font-size:0.9rem;">Sleep</span>
+                        </div>
+                        <div style="position:relative; width:140px; height:80px;">
+                            <canvas id="chart-sleep"></canvas>
+                            <div
+                                style="position:absolute; bottom:0; left:50%; transform:translateX(-50%); text-align:center;">
+                                <strong id="val-sleep"
+                                    style="font-size:1.4rem; color:var(--text); line-height:1;">--</strong>
+                                <span style="font-size:0.8rem; display:block; color:var(--muted);">Score</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- BMI -->
+                    <div class="stat-pill"
+                        style="display:flex; flex-direction:column; align-items:center; position:relative; padding-bottom:10px;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; width:100%;">
+                            <i class="fas fa-calculator" style="color:#a855f7;"></i>
+                            <span style="font-weight:600; font-size:0.9rem;">BMI</span>
+                        </div>
+                        <div style="position:relative; width:140px; height:80px;">
+                            <canvas id="chart-bmi"></canvas>
+                            <div
+                                style="position:absolute; bottom:0; left:50%; transform:translateX(-50%); text-align:center;">
+                                <strong id="val-bmi"
+                                    style="font-size:1.4rem; color:var(--text); line-height:1;">--</strong>
+                                <span id="val-hw"
+                                    style="font-size:0.65rem; display:block; color:var(--muted); white-space:nowrap;">H:--
+                                    W:--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+            <section class="panel" id="audio-section">
+                <div class="panel-head">
+                    <div>
+                        <p class="eyebrow">Monitoring</p>
+                        <h2>Audio Monitoring & Analytics</h2>
+                        <p class="muted">Real-time detection and long-term analysis for <strong
+                                id="audioRecipientName">All</strong>.
+                        </p>
+                    </div>
+                    <div id="status" class="status-pill">Status: Not listening</div>
+                </div>
+
+                <!-- Quick Stats Row -->
+                <div class="control-row" style="margin-bottom: 24px;">
+                    <a href="audio_monitoring.html" id="audioMonitorLink" target="_blank" class="primary-btn"
+                        style="background-color: #7c3aed; text-decoration: none; display: inline-flex; align-items: center; gap: 8px;">
+                        <i class="fas fa-microphone"></i> Open Live Monitor
+                    </a>
+                    <div class="stat-pill"
+                        style="background: linear-gradient(135deg, rgba(251, 113, 133, 0.1), rgba(251, 113, 133, 0.05)); border-left: 3px solid #fb7185;">
+                        <span>Total Coughs (7d)</span>
+                        <strong id="totalCoughs" style="color: #fb7185;">0</strong>
+                    </div>
+                    <div class="stat-pill"
+                        style="background: linear-gradient(135deg, rgba(246, 194, 62, 0.1), rgba(246, 194, 62, 0.05)); border-left: 3px solid #f6c23e;">
+                        <span>Total Sneezes (7d)</span>
+                        <strong id="totalSneezes" style="color: #f6c23e;">0</strong>
+                    </div>
+                    <div class="stat-pill"
+                        style="background: linear-gradient(135deg, rgba(74, 144, 226, 0.1), rgba(74, 144, 226, 0.05)); border-left: 3px solid #4A90E2;">
+                        <span>Total Events (7d)</span>
+                        <strong id="totalAudioEvents" style="color: #4A90E2;">0</strong>
+                    </div>
+                </div>
+
+                <!-- Time Range Selector -->
+                <div style="display: flex; gap: 12px; margin-bottom: 20px; align-items: center;">
+                    <label style="font-weight: 600; color: var(--text-secondary); font-size: 0.85rem;">Analysis
+                        Period:</label>
+                    <select id="audioTimeRange"
+                        style="padding: 8px 16px; border-radius: 12px; border: 1px solid rgba(74, 144, 226, 0.2); background: rgba(255, 255, 255, 0.6); font-size: 0.85rem; cursor: pointer; outline: none;">
+                        <option value="7">Last 7 Days</option>
+                        <option value="14">Last 14 Days</option>
+                        <option value="30">Last 30 Days</option>
+                        <option value="90">Last 90 Days</option>
+                    </select>
+                    <button id="refreshAudioStats" class="secondary-btn" style="margin-left: auto;">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+
+                <!-- Charts Grid -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                    <!-- Trend Chart -->
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3>Detection Trend</h3>
+                            <p class="muted">Daily cough & sneeze frequency</p>
+                        </div>
+                        <div style="position: relative; height: 250px;">
+                            <canvas id="audioTrendChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Hourly Distribution -->
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3>Hourly Distribution</h3>
+                            <p class="muted">Peak detection times</p>
+                        </div>
+                        <div style="position: relative; height: 250px;">
+                            <canvas id="audioHourlyChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Event Type Breakdown -->
+                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px;">
+                    <!-- Recent Events List -->
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3>Recent Detections</h3>
+                            <p class="muted">Latest audio events</p>
+                        </div>
+                        <div id="recentAudioEvents" style="max-height: 300px; overflow-y: auto;">
+                            <div style="text-align: center; padding: 40px; color: var(--muted);">
+                                <i class="fas fa-headphones"
+                                    style="font-size: 2rem; opacity: 0.3; margin-bottom: 12px;"></i>
+                                <p>No recent events</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Event Type Pie Chart -->
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3>Event Distribution</h3>
+                            <p class="muted">By type</p>
+                        </div>
+                        <div style="position: relative; height: 250px;">
+                            <canvas id="audioTypeChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+
+
+            <section class="panel" id="video-section">
+                <div class="panel-head">
+                    <div>
+                        <p class="eyebrow">Monitoring</p>
+                        <h2>Video Monitoring</h2>
+                        <p class="muted">Monitor for falls and other activities using your webcam or upload a video
+                            file.</p>
+                    </div>
+                    <div id="emotionStatus" class="status-pill">Status: Ready</div>
+                </div>
+
+                <div class="control-row">
+                    <div class="file-upload" style="position:relative; display:inline-block;">
+                        <a href="video_monitoring.html" id="videoMonitoringLink" class="primary-btn"
+                            style="margin:0; cursor:pointer; text-decoration:none; color:white;">
+                            Go to Video Monitoring Dashboard
+                        </a>
+                    </div>
+                </div>
+
+                <div id="videoStatsContainer" class="mt-4" style="display: none;">
+                    <div class="grid-two" style="margin-top: 20px;">
+                        <div class="stat-pill">
+                            <span>Total Analyzed</span>
+                            <strong id="totalVideos">0</strong>
+                        </div>
+                        <div class="stat-pill">
+                            <span>Total Falls Detected</span>
+                            <strong id="totalFalls" style="color: var(--danger);">0</strong>
+                        </div>
+                        <div class="stat-pill">
+                            <span>Avg. Activity Score</span>
+                            <strong id="avgActivity">0/10</strong>
+                        </div>
+                    </div>
+
+                    <div class="grid-two" style="margin-top: 24px;">
+                        <div class="wave-shell">
+                            <p class="eyebrow">Fall Events History</p>
+                            <canvas id="fallsHistoryChart"></canvas>
+                        </div>
+                        <div class="wave-shell">
+                            <p class="eyebrow">Health & Mobility Trends</p>
+                            <canvas id="mobilityHistoryChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+
+                <div id="fallDetectionResults" style="margin-top: 20px; display: none;">
+                    <h3>Fall Detection Results</h3>
+                    <div id="fallDetectionStatus" class="status-pill">Processing video...</div>
+                    <div id="fallDetectionOutput" style="margin-top: 15px;"></div>
+                </div>
+                <!-- Medical Reports and Medical History sections removed - now in medical_reports.html -->
+            </section>
+
+            <!-- Toast Notification -->
+            <div id="uploadToast">
+                <span class="toast-icon" id="toastIcon">âœ“</span>
+                <span id="toastMessage">Report uploaded successfully!</span>
+            </div>
+
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/speech-commands"></script>
+    <script>
+        const API_BASE = 'http://127.0.0.1:8000/api';
+        const EMOTION_API_BASE = API_BASE + '/emotion';
+        const token = localStorage.getItem('token');
+
+        if (!token) {
+            window.location.href = 'index.html';
+        }
+
+        const clearReportSelectBtn = document.getElementById('clearReportSelectBtn');
+        if (clearReportSelectBtn) {
+            clearReportSelectBtn.addEventListener('click', () => clearReportSelection());
+        }
+
+        const caretakerNameEl = document.getElementById('caretakerName');
+        const caretakerFullEl = document.getElementById('caretakerFullName');
+        const caretakerEmailEl = document.getElementById('caretakerEmail');
+        const caretakerPhoneEl = document.getElementById('caretakerPhone');
+        const sidebarNameEl = document.getElementById('sidebarCaretakerName');
+        const sidebarEmailEl = document.getElementById('sidebarCaretakerEmail');
+        const recipientsListEl = document.getElementById('recipientsList');
+        const recipientSearchEl = document.getElementById('recipientSearch');
+        const recipientTitleEl = document.getElementById('recipientCardTitle');
+        const recipientMetaEl = document.getElementById('recipientCardMeta');
+        const recipientBadgesEl = document.getElementById('recipientBadges');
+        const selectedRecipientEl = document.getElementById('selectedRecipient');
+        const historyRecipientEl = document.getElementById('historyRecipient');
+        const refreshHistoryBtn = document.getElementById('refreshHistory');
+        const medicalSummaryEl = document.getElementById('medicalSummaryText');
+        const summaryStatusEl = document.getElementById('summaryStatus');
+        const reportsListEl = document.getElementById('reportsList');
+        const refreshReportsBtn = document.getElementById('refreshReports');
+        const regenerateSummaryBtn = document.getElementById('regenerateSummary');
+        const reportSortOrderSelect = document.getElementById('reportSortOrder');
+
+        let currentRecipientReports = [];
+
+        // Video monitoring DOM refs
+        const startEmotionMonitorBtn = document.getElementById('startEmotionMonitorBtn');
+        const emotionStatusEl = document.getElementById('emotionStatus');
+        const emotionVideoEl = document.getElementById('emotionVideo');
+        const emotionCurrentEl = document.getElementById('emotionCurrent');
+        const emotionConfidenceEl = document.getElementById('emotionConfidence');
+
+        let recipientsCache = [];
+        let selectedRecipientId = null;
+        let selectedRecipientName = 'All';
+        let sessionPredictions = [];
+        let summaryGenerating = false;
+        let reportsRefreshing = false;
+
+        // Video monitoring state
+        let emotionMonitoringActive = false;
+        let emotionStream = null;
+        let emotionCaptureInterval = null;
+
+        document.querySelectorAll('.nav-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                const targetId = chip.getAttribute('data-target');
+                const section = document.getElementById(targetId);
+                if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        });
+
+        // Add event listeners only if elements exist
+        if (refreshHistoryBtn) {
+            refreshHistoryBtn.addEventListener('click', () => fetchAndRenderRecordings());
+        }
+        if (refreshReportsBtn) {
+            refreshReportsBtn.addEventListener('click', () => fetchRecipientReports());
+        }
+        if (regenerateSummaryBtn) {
+            regenerateSummaryBtn.addEventListener('click', () => handleRegenerateSummary());
+        }
+
+        recipientSearchEl.addEventListener('input', (e) => {
+            const term = e.target.value.toLowerCase();
+            const filtered = recipientsCache.filter(r => (r.full_name || '').toLowerCase().includes(term));
+            renderRecipients(filtered);
+        });
+
+        async function fetchProfile() {
+            try {
+                const res = await fetch(API_BASE + '/profile', {
+                    method: 'GET',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!res.ok) throw new Error('Failed to fetch profile');
+                const data = await res.json();
+                if (!data || !data.caretaker) return;
+
+                const caretaker = data.caretaker;
+                caretakerNameEl.textContent = caretaker.full_name || caretaker.username;
+                caretakerFullEl.textContent = caretaker.full_name || caretaker.username;
+                caretakerEmailEl.textContent = caretaker.email || 'â€”';
+                caretakerPhoneEl.textContent = caretaker.phone_number || 'â€”';
+                sidebarNameEl.textContent = caretaker.full_name || caretaker.username;
+                sidebarEmailEl.textContent = caretaker.email || '';
+
+                recipientsCache = data.care_recipients || [];
+                renderRecipients(recipientsCache);
+            } catch (err) {
+                console.error('Error fetching profile', err);
+                recipientsListEl.innerHTML = '<p class="muted">Unable to load recipients.</p>';
+            }
+        }
+
+        function renderRecipients(list) {
+            recipientsListEl.innerHTML = '';
+            const allCard = createRecipientCard({ id: '', full_name: 'All recipients', meta: 'Monitor every care recipient' });
+            recipientsListEl.appendChild(allCard);
+            if (!list.length) {
+                const empty = document.createElement('p');
+                empty.className = 'muted';
+                empty.textContent = 'No recipients added yet.';
+                recipientsListEl.appendChild(empty);
+                return;
+            }
+            list.forEach(r => recipientsListEl.appendChild(createRecipientCard(r)));
+            highlightActiveCard();
+        }
+
+        function createRecipientCard(recipient) {
+            const card = document.createElement('div');
+            card.className = 'recipient-card';
+            card.dataset.recipientId = recipient.id || '';
+            const metaText = recipient.meta || `Age: ${recipient.age || '-'} Â· ${recipient.gender || '-'} Â· ${recipient.respiratory_condition_status ? 'Respiratory care' : 'General care'}`;
+            card.innerHTML = `<h5>${recipient.full_name}</h5><p>${metaText}</p>`;
+            card.addEventListener('click', () => selectRecipient(recipient.id || null, recipient.full_name));
+            return card;
+        }
+
+        function selectRecipient(id, name) {
+            selectedRecipientId = id;
+            localStorage.setItem('selectedRecipientId', id);
+            selectedRecipientName = name || 'All';
+            const recipient = recipientsCache.find(r => String(r.id) === String(id));
+
+            if (selectedRecipientEl) {
+                selectedRecipientEl.textContent = selectedRecipientName;
+            }
+            if (historyRecipientEl) {
+                historyRecipientEl.textContent = selectedRecipientName;
+            }
+
+            // Update Video Monitoring Link
+            const videoLink = document.getElementById('videoMonitoringLink');
+            if (videoLink) {
+                if (id) {
+                    videoLink.href = `video_monitoring.html?recipient_id=${id}&name=${encodeURIComponent(name || '')}`;
+                    videoLink.textContent = `Monitor ${name || 'Recipient'}`;
+                } else {
+                    videoLink.href = `video_monitoring.html`;
+                    videoLink.textContent = "Video Monitoring Dashboard";
+                }
+            }
+
+            // Fetch stats if function exists (defined below)
+            if (typeof fetchVideoStats === 'function') {
+                fetchVideoStats(id);
+            }
+
+            // Update audio recipient name
+            const audioRecipientNameEl = document.getElementById('audioRecipientName');
+            if (audioRecipientNameEl) {
+                audioRecipientNameEl.textContent = selectedRecipientName;
+            }
+
+            // Update audio monitor link with recipient ID
+            const audioMonitorLink = document.getElementById('audioMonitorLink');
+            if (audioMonitorLink) {
+                if (id) {
+                    audioMonitorLink.href = `audio_monitoring.html?recipient_id=${id}&name=${encodeURIComponent(name || '')}`;
+                } else {
+                    audioMonitorLink.href = 'audio_monitoring.html';
+                }
+            }
+
+            // Fetch audio analytics
+            if (typeof fetchAudioAnalytics === 'function') {
+                fetchAudioAnalytics();
+            }
+
+            updateRecipientPanel();
+            highlightActiveCard();
+            fetchAndRenderRecordings();
+            clearReportSelection();
+            renderMedicalSummary();
+            fetchRecipientReports();
+
+            // Update Weather Widget
+            if (window.weatherWidget) {
+                window.weatherWidget.setRecipient(id);
+            }
+
+            // Check if recipient found (defined at start of function)
+            if (recipient) {
+                updateVitalsPanel(recipient);
+            } else {
+                resetVitalsPanel();
+            }
+        }
+
+        function highlightActiveCard() {
+            document.querySelectorAll('.recipient-card').forEach(card => {
+                const cardId = card.dataset.recipientId || null;
+                if (!selectedRecipientId && !cardId) {
+                    card.classList.add('active');
+                } else if (selectedRecipientId && cardId && String(cardId) === String(selectedRecipientId)) {
+                    card.classList.add('active');
+                } else {
+                    card.classList.remove('active');
+                }
+            });
+        }
+
+        function updateRecipientPanel() {
+            if (!selectedRecipientId) {
+                recipientTitleEl.textContent = 'All recipients';
+                recipientMetaEl.textContent = 'Session will monitor every care recipient assigned to you.';
+                recipientBadgesEl.innerHTML = '';
+                return;
+            }
+            const recipient = recipientsCache.find(r => String(r.id) === String(selectedRecipientId));
+            if (!recipient) return;
+            recipientTitleEl.textContent = recipient.full_name || 'Recipient';
+            recipientMetaEl.innerHTML = `Email: <strong>${recipient.email || 'â€”'}</strong><br>Phone: <strong>${recipient.phone_number || 'â€”'}</strong>`;
+            const badges = [
+                `Age ${recipient.age || 'â€”'}`,
+                recipient.gender || 'â€”',
+                recipient.respiratory_condition_status ? 'Respiratory care' : 'General care'
+            ];
+            recipientBadgesEl.innerHTML = badges.map(b => `<span class="tag">${b}</span>`).join('');
+        }
+
+        // --- Vitals Charts ---
+        let charts = {};
+
+        function initVitalChart(canvasId, label, maxVal) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            return new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: [label, 'Remaining'],
+                    datasets: [{
+                        data: [0, maxVal],
+                        backgroundColor: ['#e2e8f0', '#e2e8f0'],
+                        borderWidth: 0,
+                        circumference: 180,
+                        rotation: 270
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '75%',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { enabled: false }
+                    },
+                    animation: {
+                        animateScale: true,
+                        animateRotate: true
+                    }
+                }
+            });
+        }
+
+        function updateVitalChart(chartInstance, value, maxVal, color) {
+            chartInstance.data.datasets[0].data = [value, maxVal - value];
+            chartInstance.data.datasets[0].backgroundColor = [color, '#e2e8f0'];
+            chartInstance.update();
+        }
+
+        // Initialize Charts on Load
+        document.addEventListener('DOMContentLoaded', () => {
+            charts.hr = initVitalChart('chart-hr', 'Heart Rate', 200);
+            charts.bp = initVitalChart('chart-bp', 'Systolic BP', 200);
+            charts.o2 = initVitalChart('chart-o2', 'SpO2', 100);
+            charts.temp = initVitalChart('chart-temp', 'Temp', 110);
+            charts.sleep = initVitalChart('chart-sleep', 'Sleep', 100);
+            charts.bmi = initVitalChart('chart-bmi', 'BMI', 50);
+        });
+
+        function resetVitalsPanel() {
+            document.getElementById('val-hr').textContent = '--';
+            document.getElementById('val-bp').textContent = '--/--';
+            document.getElementById('val-o2').textContent = '--';
+            document.getElementById('val-sleep').textContent = '--';
+            document.getElementById('val-temp').textContent = '--';
+            document.getElementById('val-bmi').textContent = '--';
+            document.getElementById('val-hw').textContent = 'H:-- W:--';
+            document.getElementById('last-updated').textContent = '--';
+
+            // Reset charts
+            Object.values(charts).forEach(chart => updateVitalChart(chart, 0, 100, '#e2e8f0'));
+        }
+
+        function getStatusColor(type, value) {
+            const green = '#34d399'; // mild/success
+            const red = '#fb7185';   // danger
+            const yellow = '#f6c23e'; // warning
+
+            if (value === null || value === undefined) return '#e2e8f0';
+
+            switch (type) {
+                case 'hr': return (value >= 60 && value <= 100) ? green : red;
+                case 'bp': return (value >= 90 && value <= 120) ? green : red; // Systolic
+                case 'o2': return (value >= 95) ? green : red;
+                case 'temp': return (value >= 97 && value <= 99.5) ? green : red;
+                case 'sleep': return (value >= 70) ? green : (value >= 50 ? yellow : red);
+                case 'bmi': return (value >= 18.5 && value <= 24.9) ? green : (value < 18.5 || value > 30 ? red : yellow);
+                default: return green;
+            }
+        }
+
+        function updateVitalsPanel(recipient) {
+            const vitals = recipient.vitals;
+            if (!vitals) {
+                resetVitalsPanel();
+                return;
+            }
+
+            // Update Text
+            document.getElementById('val-hr').textContent = vitals.heart_rate || '--';
+            document.getElementById('val-bp').textContent = `${vitals.systolic_bp || '--'}/${vitals.diastolic_bp || '--'}`;
+            document.getElementById('val-o2').textContent = vitals.oxygen_saturation || '--';
+            document.getElementById('val-sleep').textContent = vitals.sleep_score || '--';
+            document.getElementById('val-temp').textContent = vitals.temperature || '--';
+            document.getElementById('val-bmi').textContent = vitals.bmi || '--';
+            document.getElementById('val-hw').textContent = `H:${vitals.height || '-'}cm W:${vitals.weight || '-'}kg`;
+
+            if (vitals.recorded_at) {
+                const date = new Date(vitals.recorded_at);
+                document.getElementById('last-updated').textContent = date.toLocaleString();
+            } else {
+                document.getElementById('last-updated').textContent = 'Unknown';
+            }
+
+            // Update Charts
+            if (charts.hr) updateVitalChart(charts.hr, vitals.heart_rate || 0, 200, getStatusColor('hr', vitals.heart_rate));
+            if (charts.bp) updateVitalChart(charts.bp, vitals.systolic_bp || 0, 200, getStatusColor('bp', vitals.systolic_bp)); // Using Systolic for gauge
+            if (charts.o2) updateVitalChart(charts.o2, vitals.oxygen_saturation || 0, 100, getStatusColor('o2', vitals.oxygen_saturation));
+            if (charts.temp) updateVitalChart(charts.temp, vitals.temperature || 0, 120, getStatusColor('temp', vitals.temperature));
+            if (charts.sleep) updateVitalChart(charts.sleep, vitals.sleep_score || 0, 100, getStatusColor('sleep', vitals.sleep_score));
+            if (charts.bmi) updateVitalChart(charts.bmi, vitals.bmi || 0, 50, getStatusColor('bmi', vitals.bmi));
+        }
+
+        function getSelectedRecipient() {
+            if (!selectedRecipientId) return null;
+            return recipientsCache.find(r => String(r.id) === String(selectedRecipientId)) || null;
+        }
+
+        function updateReportControlsState() {
+            const hasRecipient = Boolean(selectedRecipientId);
+            refreshReportsBtn.disabled = !hasRecipient || reportsRefreshing;
+            regenerateSummaryBtn.disabled = !hasRecipient || summaryGenerating;
+            // Show / hide upload area
+            const uploadArea = document.getElementById('uploadArea');
+            if (uploadArea) uploadArea.style.display = hasRecipient ? 'block' : 'none';
+        }
+
+        function renderMedicalSummary(statusMessage = '') {
+            const recipient = getSelectedRecipient();
+            const container = document.getElementById('medicalInsightsContainer');
+            const summaryStatusEl = document.getElementById('summaryStatus');
+
+            if (statusMessage) {
+                summaryStatusEl.textContent = statusMessage;
+                // If we are actively generating, show a spinner in the main container
+                if (statusMessage.includes('Generating')) {
+                    container.innerHTML = `
+                        <div style="text-align:center; padding: 60px 20px;">
+                            <div class="spinner" style="margin: 0 auto 15px;"></div>
+                            <p class="muted">Gemini is analyzing reports and health historyâ€¦</p>
+                        </div>`;
+                }
+            }
+
+            if (!recipient) {
+                container.innerHTML = `
+                    <div style="text-align:center; padding: 60px 20px; color: var(--muted);">
+                        <div style="font-size: 2.5rem; margin-bottom: 15px; opacity: 0.5;">ðŸ“‹</div>
+                        <p>No recipient selected.</p>
+                    </div>`;
+                return;
+            }
+
+            if (!recipient.report_summary) {
+                container.innerHTML = `
+                    <div style="text-align:center; padding: 60px 20px; color: var(--muted);">
+                        <div style="font-size: 2.5rem; margin-bottom: 15px; opacity: 0.5;">ðŸ”</div>
+                        <p>No summary available yet for this recipient.</p>
+                        <p style="font-size: 0.8rem; margin-top: 8px;">Upload a report or click "Regenerate Summary" to begin.</p>
+                    </div>`;
+                return;
+            }
+
+            // Use the professional formatter
+            renderFormattedInsights(recipient.report_summary, 'medicalInsightsContainer', true);
+            updateReportControlsState();
+        }
+
+        /**
+         * Robust Mind Map Parsing Engine
+         * Divides text into sections using strict header detection and point-based splitting.
+         */
+        function renderFormattedInsights(text, containerId, showEnv = true) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+
+            container.innerHTML = '';
+
+            // Add Visualization Infrastructure
+            const spine = document.createElement('div');
+            spine.className = 'mind-map-spine';
+            container.appendChild(spine);
+
+            const hub = document.createElement('div');
+            hub.className = 'mind-map-hub';
+            hub.innerHTML = '<span style="font-size:1.5rem;">ðŸ§ </span>';
+            container.appendChild(hub);
+
+            const grid = document.createElement('div');
+            grid.className = 'insight-grid';
+
+            const sections = [];
+            const lines = text.split('\n');
+            let currentSection = null;
+            let envData = { temp: '', hum: '', aqi: '' };
+            let hasEnvData = false;
+
+            const clinicalHeaders = [
+                'DIAGNOSES', 'DIAGNOSIS', 'SYMPTOMS', 'SYMPTOM', 'VITALS', 'VITAL', 'MEDICATIONS', 'MEDICATION', 'MEDS',
+                'CARE PLAN', 'FOLLOW-UP', 'ADVICE', 'LABS', 'LAB', 'HISTORY', 'TIMELINE', 'TRENDS', 'PLAN', 'MANAGEMENT'
+            ];
+
+            lines.forEach(line => {
+                // Pre-process: Strip bold, trim, remove markers
+                let trimmed = line.trim().replace(/\*\*/g, '').replace(/^###\s+/, '');
+                if (!trimmed || trimmed.includes('START_') || trimmed.includes('END_') || trimmed.toUpperCase().includes('CLINICAL SUMMARY')) return;
+
+                // 1. Environmental Threshold Detection
+                if (trimmed.includes('Temperature Range') || (trimmed.toLowerCase().includes('recommended') && trimmed.toLowerCase().includes('temperature'))) {
+                    envData.temp = trimmed.split(':', 2)[1]?.trim() || trimmed;
+                    hasEnvData = true;
+                    return;
+                }
+                if (trimmed.includes('Humidity Range') || (trimmed.toLowerCase().includes('recommended') && trimmed.toLowerCase().includes('humidity'))) {
+                    envData.hum = trimmed.split(':', 2)[1]?.trim() || trimmed;
+                    hasEnvData = true;
+                    return;
+                }
+                if (trimmed.includes('Air Quality') || (trimmed.toLowerCase().includes('recommended') && trimmed.toLowerCase().includes('air quality'))) {
+                    envData.aqi = trimmed.split(':', 2)[1]?.trim() || trimmed;
+                    hasEnvData = true;
+                    return;
+                }
+
+                // 2. Section Header Detection
+                // Supports bullets: â€¢, âˆ™, Â·, *, + OR keywords followed by colons
+                const hasBullet = /^[â€¢âˆ™Â·\*\+]\s*/.test(trimmed);
+                const hasKeyword = clinicalHeaders.some(h => trimmed.toUpperCase().includes(h));
+                const isHeader = (hasBullet && trimmed.includes(':')) || (trimmed.includes(':') && hasKeyword && !trimmed.startsWith('-'));
+
+                if (isHeader) {
+                    const cleanHeader = trimmed.replace(/^[â€¢âˆ™Â·\*\+]\s*/, '').trim();
+                    const colonIdx = cleanHeader.indexOf(':');
+                    const title = cleanHeader.substring(0, colonIdx).trim();
+                    const remainder = cleanHeader.substring(colonIdx + 1).trim();
+
+                    if (title.length > 2 && title.length < 40) {
+                        currentSection = {
+                            title: title,
+                            points: remainder ? [remainder] : [],
+                            type: title.toLowerCase()
+                        };
+                        sections.push(currentSection);
+                        return;
+                    }
+                }
+
+                // 3. Point Capture
+                if (currentSection) {
+                    const point = trimmed.replace(/^[â€¢âˆ™Â·\*\+\-]\s*/, '').trim();
+                    if (point && !point.toUpperCase().includes('ENVIRONMENTAL RECOMMENDATIONS')) {
+                        // Avoid duplicates of the title itself
+                        if (point !== currentSection.title && !point.startsWith(currentSection.title + ':')) {
+                            currentSection.points.push(point);
+                        }
+                    }
+                }
+            });
+
+            // 4. Render Category Cards
+            if (sections.length > 0) {
+                sections.forEach(sec => {
+                    const rawPoints = Array.from(new Set(sec.points.filter(p => p.length > 1)));
+                    if (!rawPoints.length) return;
+
+                    const card = document.createElement('div');
+                    let typeClass = 'careplan';
+                    let icon = 'ðŸ“';
+
+                    const titleLower = sec.title.toLowerCase();
+                    if (titleLower.includes('diagnos')) { typeClass = 'diagnoses'; icon = 'ðŸ¥'; }
+                    else if (titleLower.includes('symptom') || titleLower.includes('history')) { typeClass = 'symptoms'; icon = 'ðŸ¤’'; }
+                    else if (titleLower.includes('vital') || titleLower.includes('lab')) { typeClass = 'vitals'; icon = 'ðŸ“Š'; }
+                    else if (titleLower.includes('medication')) { typeClass = 'meds'; icon = 'ðŸ’Š'; }
+                    else if (titleLower.includes('plan') || titleLower.includes('advice')) { typeClass = 'careplan'; icon = 'ðŸ“‹'; }
+
+                    let processedPoints = [];
+                    rawPoints.forEach(p => {
+                        if (p.includes(';')) {
+                            p.split(';').forEach(s => { if (s.trim()) processedPoints.push(s.trim()); });
+                        } else if (p.length > 65 && p.includes('. ')) {
+                            p.split(/\.\s+/).forEach(s => { if (s.trim()) processedPoints.push(s.trim()); });
+                        } else {
+                            processedPoints.push(p);
+                        }
+                    });
+
+                    card.className = `insight-card ${typeClass}`;
+                    card.innerHTML = `
+                        <div class="insight-header"><div class="insight-icon">${icon}</div>${sec.title}</div>
+                        <div class="insight-content"><ul>${processedPoints.map(p => `<li>${p}</li>`).join('')}</ul></div>
+                    `;
+                    grid.appendChild(card);
+                });
+            } else if (text && text.length > 10) {
+                // Fallback for unstructured text (e.g., Gemini didn't use headers or returned an error message)
+                const fallbackCard = document.createElement('div');
+                fallbackCard.className = 'insight-card careplan';
+                fallbackCard.style.gridColumn = '1 / -1';
+                fallbackCard.innerHTML = `
+                    <div class="insight-header"><div class="insight-icon">â„¹ï¸</div>Clinical Summary</div>
+                    <div class="insight-content" style="white-space: pre-line; line-height: 1.6;">${text}</div>
+                `;
+                grid.appendChild(fallbackCard);
+            }
+
+            container.appendChild(grid);
+
+            // 5. Render Environmental Monitoring dashboard - Only if enabled
+            if (showEnv && hasEnvData) {
+                const envDash = document.createElement('div');
+                envDash.className = 'env-dashboard';
+                envDash.style.zIndex = "2";
+                envDash.style.position = "relative";
+                envDash.innerHTML = `
+                    <div class="insight-header"><div class="insight-icon">ðŸ </div>Optimized Health Environment</div>
+                    <div class="env-items">
+                        <div class="env-stat"><label>Temperature</label><span>${envData.temp}</span></div>
+                        <div class="env-stat"><label>Humidity</label><span>${envData.hum}</span></div>
+                        <div class="env-stat"><label>Air Quality</label><span>${envData.aqi}</span></div>
+                    </div>
+                `;
+                container.appendChild(envDash);
+            }
+        }
+
+        function parseSummaryText(text) {
+            // Helper to create a section
+            const createSection = (title, icon, content) => {
+                return `
+                    <div class="summary-section">
+                        <div class="summary-section-header">
+                            <i class="${icon}"></i>
+                            <h4>${title}</h4>
+                        </div>
+                        <div class="summary-content">${content}</div>
+                    </div>
+                `;
+            };
+
+            // Parse sections
+            // Extract recommendations (numbered 1-3)
+            let recommendations = '';
+            const recMatch = text.match(/(\d+\.\s*Recommended[\s\S]*?)(?=\n\n|$)/);
+            let summaryText = text;
+
+            if (recMatch) {
+                const recText = recMatch[1];
+                const lines = recText.split('\n');
+                let temp = '-', hum = '-', aqi = '-';
+                lines.forEach(line => {
+                    const lowerLine = line.toLowerCase();
+                    if (lowerLine.includes('temperature')) temp = line.split(':')[1]?.trim() || line.split(')').pop().trim();
+                    if (lowerLine.includes('humidity')) hum = line.split(':')[1]?.trim() || line.split(')').pop().trim();
+                    if (lowerLine.includes('air quality')) aqi = line.split(':')[1]?.trim() || line.split(')').pop().trim();
+                });
+                recommendations = `
+                    <div class="summary-thresholds">
+                        <div class="threshold-pill">
+                            <i class="fas fa-thermometer-half"></i>
+                            <span class="label">Temperature</span>
+                            <span class="value">${temp}</span>
+                        </div>
+                        <div class="threshold-pill">
+                            <i class="fas fa-tint"></i>
+                            <span class="label">Humidity</span>
+                            <span class="value">${hum}</span>
+                        </div>
+                        <div class="threshold-pill">
+                            <i class="fas fa-wind"></i>
+                            <span class="label">Air Quality</span>
+                            <span class="value">${aqi}</span>
+                        </div>
+                    </div>
+                `;
+                summaryText = text.replace(recText, '').trim();
+            }
+
+            // Split into sections using bullet points or headings
+            const sectionMap = [
+                { key: 'Diagnoses', icon: 'fas fa-stethoscope', title: 'Diagnoses' },
+                { key: 'Symptoms / Complaints', icon: 'fas fa-user-md', title: 'Symptoms' },
+                { key: 'Important Vitals', icon: 'fas fa-heartbeat', title: 'Key Vitals' },
+                { key: 'Medications', icon: 'fas fa-pills', title: 'Medications' },
+                { key: 'Follow-up Advice', icon: 'fas fa-clipboard-check', title: 'Follow-up' }
+            ];
+
+            let html = '<div class="summary-container">';
+
+            // Collect all indices and matched sections
+            const matchedSections = [];
+            sectionMap.forEach(s => {
+                const index = summaryText.indexOf(s.key);
+                if (index !== -1) {
+                    matchedSections.push({ ...s, index });
+                }
+            });
+
+            // Sort sections by their position in text
+            matchedSections.sort((a, b) => a.index - b.index);
+
+            matchedSections.forEach((s, i) => {
+                const start = s.index + s.key.length + 1; // +1 for colon
+                const end = i < matchedSections.length - 1 ? matchedSections[i + 1].index : summaryText.length;
+                let content = summaryText.substring(start, end).trim();
+
+                if (content) {
+                    // Extract bullet points
+                    const lines = content.split('\n')
+                        .map(l => l.trim().replace(/^[\-\â€¢\*\s]+/g, ''))
+                        .filter(l => l && !l.startsWith('Based on the')); // Filter out the transition sentence
+
+                    if (lines.length > 0) {
+                        const listHtml = `<ul class="summary-ul">${lines.map(l => `<li>${l}</li>`).join('')}</ul>`;
+                        html += createSection(s.title, s.icon, listHtml);
+                    }
+                }
+            });
+
+            if (recommendations) {
+                html += `
+                    <div class="summary-section full-width" style="border-top: 2px solid var(--accent);">
+                        <div class="summary-section-header">
+                            <i class="fas fa-leaf"></i>
+                            <h4>Care Environment</h4>
+                        </div>
+                        <p style="font-size: 0.8rem; color: var(--muted); margin-bottom: 12px;">AI-generated recommendations based on clinical diagnosis.</p>
+                        ${recommendations}
+                    </div>
+                `;
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        async function fetchRecipientReports() {
+            const recipient = getSelectedRecipient();
+            if (!recipient) {
+                reportsListEl.innerHTML = '<p class="muted">Select a care recipient to list their medical reports.</p>';
+                reportsRefreshing = false;
+                updateReportControlsState();
+                return;
+            }
+            reportsRefreshing = true;
+            updateReportControlsState();
+            reportsListEl.innerHTML = '<p class="muted">Loading reportsâ€¦</p>';
+            try {
+                const res = await fetch(`${API_BASE}/recipients/${recipient.id}/reports`, {
+                    method: 'GET',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!res.ok) throw new Error('Failed to list reports');
+                const payload = await res.json();
+                currentRecipientReports = payload?.result?.reports || [];
+                sortAndRenderReports();
+            } catch (err) {
+                console.error('Error fetching medical reports', err);
+                reportsListEl.innerHTML = '<p class="muted">Unable to load reports.</p>';
+            } finally {
+                reportsRefreshing = false;
+                updateReportControlsState();
+            }
+        }
+
+        let selectedReportId = null;
+
+        function sortAndRenderReports() {
+            const recipient = getSelectedRecipient();
+            if (!recipient) return;
+
+            const sortVal = reportSortOrderSelect.value;
+            const sorted = [...currentRecipientReports].sort((a, b) => {
+                if (sortVal === 'date_desc') return new Date(b.uploaded_at) - new Date(a.uploaded_at);
+                if (sortVal === 'date_asc') return new Date(a.uploaded_at) - new Date(b.uploaded_at);
+                if (sortVal === 'name_asc') return a.filename.localeCompare(b.filename);
+                if (sortVal === 'name_desc') return b.filename.localeCompare(a.filename);
+                return 0;
+            });
+
+            renderReportsList(recipient.id, sorted);
+        }
+
+        if (reportSortOrderSelect) {
+            reportSortOrderSelect.addEventListener('change', () => sortAndRenderReports());
+        }
+
+        async function deleteMedicalReport(recipientId, reportId) {
+            if (!confirm('Are you sure you want to delete this report? This will also remove its associated AI insights.')) return;
+
+            try {
+                const res = await fetch(`${API_BASE}/recipients/${recipientId}/reports/${reportId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!res.ok) throw new Error('Delete failed');
+
+                showToast('Report deleted successfully');
+
+                if (selectedReportId === reportId) {
+                    clearReportSelection();
+                }
+
+                // Refresh the list
+                fetchRecipientReports();
+
+                // Automatically regenerate aggregate summary to reflect the removal
+                handleRegenerateSummary();
+            } catch (err) {
+                console.error('Delete error', err);
+                showToast('Failed to delete report', 'error');
+            }
+        }
+
+        function renderReportsList(recipientId, reports = []) {
+            const countBadge = document.getElementById('reportsCountBadge');
+            if (!reports.length) {
+                reportsListEl.innerHTML = '<p class="muted">No reports uploaded yet. Use the upload area above to add one.</p>';
+                if (countBadge) countBadge.style.display = 'none';
+                return;
+            }
+            if (countBadge) {
+                countBadge.style.display = 'block';
+                countBadge.innerHTML = `<span class="tag" style="background:rgba(74,144,226,0.1); border-color:rgba(74,144,226,0.3); color:var(--accent); font-weight:700;">${reports.length} file${reports.length > 1 ? 's' : ''}</span>`;
+            }
+            reportsListEl.innerHTML = '';
+            reports.forEach(report => {
+                const card = document.createElement('div');
+                card.className = 'report-card';
+                card.dataset.reportId = report.id;
+                card.style.cursor = 'pointer';
+
+                const ext = (report.filename.split('.').pop() || '').toLowerCase();
+                const icon = ext === 'pdf' ? 'ðŸ“„' : ['png', 'jpg', 'jpeg'].includes(ext) ? 'ðŸ–¼ï¸' : 'ðŸ“';
+
+                card.innerHTML = `
+                    <h4 style="display:flex; align-items:center; gap:6px;">
+                        <span>${icon}</span>
+                        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${report.filename}">${report.filename}</span>
+                        <span class="report-select-indicator">Viewing</span>
+                    </h4>
+                    <div class="report-meta">Uploaded ${new Date(report.uploaded_at).toLocaleString()}</div>
+                `;
+
+                // Click card â†’ load its individual preview into the summary pane
+                card.addEventListener('click', (e) => {
+                    if (e.target.closest('button')) return; // let action buttons handle themselves
+                    selectReport(card, recipientId, report.id, report.filename);
+                });
+
+                const actions = document.createElement('div');
+                actions.className = 'report-actions';
+
+                const downloadBtn = document.createElement('button');
+                downloadBtn.className = 'ghost-btn';
+                downloadBtn.innerHTML = 'â¬‡ Download';
+                downloadBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    downloadMedicalReport(recipientId, report.id, report.filename);
+                });
+
+                const refreshBtn = document.createElement('button');
+                refreshBtn.className = 'ghost-btn';
+                refreshBtn.innerHTML = 'ðŸ”„ Regenerate Analysis';
+                refreshBtn.style.padding = '4px 8px';
+                refreshBtn.style.fontSize = '0.7rem';
+                refreshBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    selectReport(card, recipientId, report.id, report.filename, true);
+                });
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'ghost-btn';
+                deleteBtn.innerHTML = 'ðŸ—‘ Delete';
+                deleteBtn.style.color = '#ef4444';
+                deleteBtn.style.padding = '4px 8px';
+                deleteBtn.style.fontSize = '0.7rem';
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    deleteMedicalReport(recipientId, report.id);
+                });
+
+                actions.appendChild(downloadBtn);
+                actions.appendChild(refreshBtn);
+                actions.appendChild(deleteBtn);
+                card.appendChild(actions);
+                reportsListEl.appendChild(card);
+            });
+        }
+
+        async function selectReport(cardEl, recipientId, reportId, filename, forceRefresh = false) {
+            // Deselect all
+            document.querySelectorAll('#reportsList .report-card').forEach(c => c.classList.remove('selected'));
+            cardEl.classList.add('selected');
+            selectedReportId = reportId;
+
+            const container = document.getElementById('medicalInsightsContainer');
+            const summaryStatusEl = document.getElementById('summaryStatus');
+            const typeLabel = document.getElementById('summaryTypeLabel');
+            const clearBtn = document.getElementById('clearReportSelectBtn');
+
+            // Show loading state in container
+            container.innerHTML = `
+                <div style="text-align:center; padding: 60px 20px;">
+                    <div class="spinner" style="margin: 0 auto 15px;"></div>
+                    <p class="muted">Generating clinical snapshot for "${filename}"â€¦</p>
+                </div>`;
+
+            summaryStatusEl.textContent = `Analyzing Report: ${filename}`;
+            typeLabel.textContent = 'Report Analysis';
+            typeLabel.style.color = '#7c3aed'; // distinct color for single report
+            if (clearBtn) clearBtn.style.display = 'inline-block';
+
+            try {
+                const url = new URL(`${API_BASE}/recipients/${recipientId}/reports/${reportId}/extract_preview`);
+                if (forceRefresh) url.searchParams.append('force_refresh', 'true');
+
+                const res = await fetch(url.toString(), {
+                    method: 'GET',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!res.ok) throw new Error('Preview fetch failed');
+                const payload = await res.json();
+                const preview = (payload?.result?.extracted_preview || '').trim();
+
+                if (preview) {
+                    renderFormattedInsights(preview, 'medicalInsightsContainer', false);
+                } else {
+                    container.innerHTML = '<p class="muted" style="text-align:center; padding:20px;">No clinical insights could be extracted from this document.</p>';
+                }
+            } catch (err) {
+                console.error('selectReport preview error', err);
+                container.innerHTML = '<p class="danger" style="text-align:center; padding:20px;">Unable to load insights for this report.</p>';
+            }
+        }
+
+        function clearReportSelection() {
+            selectedReportId = null;
+            document.querySelectorAll('#reportsList .report-card').forEach(c => c.classList.remove('selected'));
+
+            const typeLabel = document.getElementById('summaryTypeLabel');
+            if (typeLabel) {
+                typeLabel.textContent = 'Aggregate Summary';
+                typeLabel.style.color = 'var(--accent)';
+            }
+
+            const summaryStatusEl = document.getElementById('summaryStatus');
+            if (summaryStatusEl) summaryStatusEl.textContent = 'Browse insights from medical documentation.';
+
+            const clearBtn = document.getElementById('clearReportSelectBtn');
+            if (clearBtn) clearBtn.style.display = 'none';
+
+            // Re-render aggregate summary
+            renderMedicalSummary();
+        }
+
+        async function toggleReportPreview(card, recipientId, reportId) {
+            const previewArea = card.querySelector('.report-preview');
+            const isVisible = previewArea.style.display === 'block';
+            if (isVisible) {
+                previewArea.style.display = 'none';
+                previewArea.textContent = '';
+                return;
+            }
+            previewArea.style.display = 'block';
+            previewArea.textContent = 'Loading previewâ€¦';
+            try {
+                const res = await fetch(`${API_BASE}/recipients/${recipientId}/reports/${reportId}/extract_preview`, {
+                    method: 'GET',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!res.ok) throw new Error('Failed to fetch preview');
+                const payload = await res.json();
+                const preview = payload?.result?.extracted_preview?.trim();
+                previewArea.textContent = preview || 'No textual preview available for this report.';
+            } catch (err) {
+                console.error('Error fetching report preview', err);
+                previewArea.textContent = 'Unable to load preview.';
+            }
+        }
+
+        async function downloadMedicalReport(recipientId, reportId, filename) {
+            try {
+                const res = await fetch(`${API_BASE}/recipients/${recipientId}/reports/${reportId}/download`, {
+                    method: 'GET',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!res.ok) throw new Error('Failed to download report');
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const anchor = document.createElement('a');
+                anchor.href = url;
+                anchor.download = filename || `report_${reportId}`;
+                document.body.appendChild(anchor);
+                anchor.click();
+                anchor.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 4000);
+            } catch (err) {
+                console.error('Error downloading medical report', err);
+            }
+        }
+
+        async function handleRegenerateSummary() {
+            const recipient = getSelectedRecipient();
+            if (!recipient) return;
+            summaryGenerating = true;
+            updateReportControlsState();
+            renderMedicalSummary('Generating summaryâ€¦');
+            try {
+                const res = await fetch(`${API_BASE}/recipients/${recipient.id}/summarize`, {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!res.ok) throw new Error('Failed to generate summary');
+                const payload = await res.json();
+                const summary = payload?.result?.summary || '';
+                recipient.report_summary = summary;
+                renderMedicalSummary('Summary updated.');
+            } catch (err) {
+                console.error('Error regenerating summary', err);
+                summaryStatusEl.textContent = 'Unable to generate summary right now.';
+            } finally {
+                summaryGenerating = false;
+                updateReportControlsState();
+            }
+        }
+
+        // ---- Medical Report Upload Logic ----
+        document.addEventListener('DOMContentLoaded', function initUpload() {
+            const fileInput = document.getElementById('reportFileInput');
+            const uploadBtn = document.getElementById('uploadReportBtn');
+            const fileNameEl = document.getElementById('uploadFileName');
+            const progressWrap = document.getElementById('uploadProgress');
+            const progressBar = document.getElementById('uploadProgressBar');
+            const dropZone = document.getElementById('uploadDropZone');
+
+            if (!fileInput) return; // not in DOM yet, skip
+
+            // Show chosen file name and enable upload button
+            fileInput.addEventListener('change', () => {
+                const file = fileInput.files[0];
+                if (file) {
+                    fileNameEl.textContent = 'ðŸ“Ž ' + file.name;
+                    fileNameEl.style.display = 'block';
+                    uploadBtn.disabled = false;
+                } else {
+                    fileNameEl.style.display = 'none';
+                    uploadBtn.disabled = true;
+                }
+            });
+
+            // Drag-and-drop visual feedback
+            ['dragover', 'dragenter'].forEach(evt => {
+                dropZone.addEventListener(evt, (e) => {
+                    e.preventDefault();
+                    dropZone.classList.add('dragover');
+                });
+            });
+            ['dragleave', 'dragend', 'drop'].forEach(evt => {
+                dropZone.addEventListener(evt, () => dropZone.classList.remove('dragover'));
+            });
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                const file = e.dataTransfer?.files?.[0];
+                if (file) {
+                    // Programmatically assign to the hidden input
+                    const dt = new DataTransfer();
+                    dt.items.add(file);
+                    fileInput.files = dt.files;
+                    fileNameEl.textContent = 'ðŸ“Ž ' + file.name;
+                    fileNameEl.style.display = 'block';
+                    uploadBtn.disabled = false;
+                }
+            });
+
+            uploadBtn.addEventListener('click', () => uploadReport());
+
+            async function uploadReport() {
+                const recipient = getSelectedRecipient();
+                if (!recipient) return;
+                const file = fileInput.files[0];
+                if (!file) return;
+
+                // --- UI: start state ---
+                uploadBtn.disabled = true;
+                uploadBtn.textContent = 'Uploadingâ€¦';
+                progressWrap.style.display = 'block';
+                progressBar.style.width = '30%';
+
+                const formData = new FormData();
+                formData.append('file', file);
+
+                try {
+                    // Animate progress bar while waiting
+                    const animTimer = setInterval(() => {
+                        const cur = parseFloat(progressBar.style.width) || 30;
+                        if (cur < 85) progressBar.style.width = (cur + 5) + '%';
+                    }, 300);
+
+                    const res = await fetch(`${API_BASE}/recipients/${recipient.id}/reports`, {
+                        method: 'POST',
+                        headers: { 'Authorization': 'Bearer ' + token },
+                        body: formData
+                    });
+
+                    clearInterval(animTimer);
+                    progressBar.style.width = '100%';
+
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({ detail: 'Upload failed' }));
+                        throw new Error(err.detail || 'Upload failed');
+                    }
+
+                    showToast('âœ“ Report uploaded successfully!', 'success');
+
+                    // Reset file input
+                    resetUploadUI();
+
+                    // Refresh the list and regenerate summary
+                    await fetchRecipientReports();
+                    await handleRegenerateSummary();
+
+                } catch (err) {
+                    console.error('Upload error', err);
+                    progressBar.style.width = '100%';
+                    progressBar.style.background = 'linear-gradient(90deg, var(--danger), #ff6b6b)';
+                    showToast('âœ• ' + (err.message || 'Upload failed'), 'error');
+                    setTimeout(() => resetUploadUI(), 2000);
+                }
+            }
+
+            function resetUploadUI() {
+                fileInput.value = '';
+                fileNameEl.style.display = 'none';
+                fileNameEl.textContent = '';
+                uploadBtn.disabled = true;
+                uploadBtn.textContent = 'â¬† Upload Report';
+                progressBar.style.width = '0%';
+                progressBar.style.background = 'linear-gradient(90deg, var(--accent), var(--accent-2))';
+                progressWrap.style.display = 'none';
+            }
+        });
+
+
+        // ---- Toast helper ----
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('uploadToast');
+            const iconEl = document.getElementById('toastIcon');
+            const msgEl = document.getElementById('toastMessage');
+            if (!toast) return;
+
+            toast.className = type;  // sets .success or .error for icon color
+            iconEl.textContent = type === 'success' ? 'âœ“' : 'âœ•';
+            msgEl.textContent = message;
+            toast.classList.add('show');
+
+            setTimeout(() => toast.classList.remove('show'), 3500);
+        }
+
+        // ---- Audio monitoring logic (adapted from dashboard) ----
+        let audioContext, analyser, dataArray;
+        let recognitionActive = false;
+        let audioStream = null;
+        let processorNode = null;
+        let silentGainNode = null;
+        let pcmBuffer = [];
+        let pcmBufferLength = 0;
+        const PCM_BUFFER_SECONDS = 6;
+        const MIN_RECORDING_DURATION = 4000;
+        let coughDetectionActive = false;
+        let coughStartTime = null;
+        let coughRecordingTimeout = null;
+        let coughCount = 0;
+        let snoreDetectionActive = false;
+        let snoreStartTime = null;
+        let snoreRecordingTimeout = null;
+        let snoreCount = 0;
+        const AUTO_DOWNLOAD = false;
+        const startBtn = document.getElementById('startBtn');
+        const statusEl = document.getElementById('status');
+        const labelContainer = document.getElementById('label-container');
+
+        if (startBtn) {
+            startBtn.addEventListener('click', toggleRecording);
+        }
+
+        async function toggleRecording() {
+            if (!recognitionActive) {
+                await initRecognizer();
+                startBtn.textContent = 'Stop Listening';
+                recognitionActive = true;
+            } else {
+                stopRecording();
+                startBtn.textContent = 'Start Listening';
+                recognitionActive = false;
+            }
+        }
+
+        async function initRecognizer() {
+            const MODEL_BASE = API_BASE + '/model';
+            const recognizer = speechCommands.create('BROWSER_FFT', undefined, MODEL_BASE + '/model.json', MODEL_BASE + '/metadata.json');
+            try {
+                await recognizer.ensureModelLoaded();
+                labelContainer.innerHTML = '';
+                const labels = recognizer.wordLabels();
+                labels.forEach(() => labelContainer.appendChild(document.createElement('div')));
+
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                audioStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 } });
+                const source = audioContext.createMediaStreamSource(audioStream);
+                startContinuousRecording(source);
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048;
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+                source.connect(analyser);
+                drawWaveform();
+
+                const labelMap = {};
+                labels.forEach((label, index) => {
+                    labelMap[label.toLowerCase()] = index;
+                });
+
+                const coughIndex = labelMap['cough'] !== undefined ? labelMap['cough'] : -1;
+                const snoreIndex = labelMap['snore'] !== undefined ? labelMap['snore'] : -1;
+                const detectionThreshold = 0.65;
+
+                recognizer.listen(result => {
+                    const scores = result.scores;
+                    scores.forEach((score, i) => {
+                        if (labelContainer.childNodes[i]) {
+                            labelContainer.childNodes[i].textContent = `${labels[i]}: ${score.toFixed(2)}`;
+                        }
+                    });
+
+                    const coughScore = coughIndex >= 0 ? scores[coughIndex] : 0;
+                    const snoreScore = snoreIndex >= 0 ? scores[snoreIndex] : 0;
+
+                    if (!coughDetectionActive && !snoreDetectionActive) {
+                        statusEl.textContent = `Listeningâ€¦ (Cough: ${coughScore.toFixed(2)} | Snore: ${snoreScore.toFixed(2)})`;
+                        statusEl.style.color = '#38bdf8';
+                    }
+
+                    if (coughScore >= detectionThreshold) {
+                        addSessionPrediction({
+                            type: 'cough',
+                            score: coughScore,
+                            timestamp: Date.now(),
+                            recipient_id: selectedRecipientId,
+                            recipient_name: selectedRecipientName
+                        });
+
+                        if (!coughDetectionActive) {
+                            coughDetectionActive = true;
+                            coughStartTime = Date.now();
+                            coughCount++;
+                            document.getElementById('coughCount').textContent = coughCount;
+                            statusEl.textContent = `ðŸš¨ Cough #${coughCount} detected! (${coughScore.toFixed(2)}) - Recordingâ€¦`;
+                            statusEl.style.color = '#fb7185';
+                            if (coughRecordingTimeout) clearTimeout(coughRecordingTimeout);
+                            coughRecordingTimeout = setTimeout(() => saveDetectionRecording('cough', coughScore), MIN_RECORDING_DURATION);
+                        } else {
+                            const elapsed = Date.now() - coughStartTime;
+                            if (elapsed < MIN_RECORDING_DURATION) {
+                                if (coughRecordingTimeout) clearTimeout(coughRecordingTimeout);
+                                coughRecordingTimeout = setTimeout(
+                                    () => saveDetectionRecording('cough', coughScore),
+                                    MIN_RECORDING_DURATION - elapsed
+                                );
+                            }
+                        }
+                    }
+
+                    if (snoreScore >= detectionThreshold) {
+                        addSessionPrediction({
+                            type: 'snore',
+                            score: snoreScore,
+                            timestamp: Date.now(),
+                            recipient_id: selectedRecipientId,
+                            recipient_name: selectedRecipientName
+                        });
+
+                        if (!snoreDetectionActive) {
+                            snoreDetectionActive = true;
+                            snoreStartTime = Date.now();
+                            snoreCount++;
+                            document.getElementById('snoreCount').textContent = snoreCount;
+                            statusEl.textContent = `ðŸ˜´ Snore #${snoreCount} detected! (${snoreScore.toFixed(2)}) - Recordingâ€¦`;
+                            statusEl.style.color = '#a78bfa';
+                            if (snoreRecordingTimeout) clearTimeout(snoreRecordingTimeout);
+                            snoreRecordingTimeout = setTimeout(() => saveDetectionRecording('snore', snoreScore), MIN_RECORDING_DURATION);
+                        } else {
+                            const elapsed = Date.now() - snoreStartTime;
+                            if (elapsed < MIN_RECORDING_DURATION) {
+                                if (snoreRecordingTimeout) clearTimeout(snoreRecordingTimeout);
+                                snoreRecordingTimeout = setTimeout(
+                                    () => saveDetectionRecording('snore', snoreScore),
+                                    MIN_RECORDING_DURATION - elapsed
+                                );
+                            }
+                        }
+                    }
+                }, {
+                    includeSpectrogram: true,
+                    overlapFactor: 0.5,
+                    invokeCallbackOnNoiseAndUnknown: true,
+                    probabilityThreshold: 0.5
+                });
+
+                statusEl.textContent = 'Listening for coughs and snoresâ€¦';
+            } catch (err) {
+                console.error('Error init audio:', err);
+                statusEl.textContent = `Error: ${err.message}`;
+                statusEl.style.color = '#fb7185';
+            }
+        }
+
+        function startContinuousRecording(source) {
+            pcmBuffer = [];
+            pcmBufferLength = 0;
+            const bufferSize = 4096;
+            const channelCount = source.channelCount || 1;
+            const maxSamples = audioContext.sampleRate * PCM_BUFFER_SECONDS;
+
+            processorNode = audioContext.createScriptProcessor(bufferSize, channelCount, channelCount);
+            processorNode.onaudioprocess = (event) => {
+                const inputBuffer = event.inputBuffer;
+                const chunkChannels = [];
+                for (let ch = 0; ch < inputBuffer.numberOfChannels; ch++) {
+                    const channelData = new Float32Array(inputBuffer.length);
+                    channelData.set(inputBuffer.getChannelData(ch));
+                    chunkChannels.push(channelData);
+                }
+                pcmBuffer.push({ channels: chunkChannels, length: inputBuffer.length });
+                pcmBufferLength += inputBuffer.length;
+
+                while (pcmBufferLength > maxSamples && pcmBuffer.length > 0) {
+                    const removed = pcmBuffer.shift();
+                    pcmBufferLength -= removed.length;
+                }
+            };
+
+            silentGainNode = audioContext.createGain();
+            silentGainNode.gain.value = 0;
+            source.connect(processorNode);
+            processorNode.connect(silentGainNode);
+            silentGainNode.connect(audioContext.destination);
+        }
+
+        async function saveDetectionRecording(type, score) {
+            if (!pcmBuffer.length) return;
+
+            const wavBlob = encodeWAV(pcmBuffer, 1, audioContext.sampleRate);
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const filename = `${type}_${type === 'cough' ? coughCount : snoreCount}_${timestamp}.wav`;
+
+            // Upload to server
+            const formData = new FormData();
+            formData.append('file', wavBlob, filename);
+            formData.append('type', type);
+            formData.append('score', score);
+            if (selectedRecipientId) {
+                formData.append('care_recipient_id', selectedRecipientId);
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/recordings/upload`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to upload recording');
+                }
+
+                const data = await response.json();
+                console.log(`${type} recording saved:`, data);
+
+                // Update UI
+                const url = URL.createObjectURL(wavBlob);
+                showRecording(filename, url);
+
+            } catch (error) {
+                console.error(`Error saving ${type} recording:`, error);
+            } finally {
+                // Reset state for the specific type
+                if (type === 'cough') {
+                    coughDetectionActive = false;
+                } else if (type === 'snore') {
+                    snoreDetectionActive = false;
+                }
+
+                // Only clear buffers if neither detection is active
+                if (!coughDetectionActive && !snoreDetectionActive) {
+                    pcmBuffer = [];
+                    pcmBufferLength = 0;
+                    statusEl.textContent = 'Listeningâ€¦';
+                    statusEl.style.color = '#38bdf8';
+                }
+            }
+        }
+
+        function startWaveAnimation() {
+            drawWaveform();
+        }
+
+        function drawWaveform() {
+            requestAnimationFrame(drawWaveform);
+            const canvas = document.getElementById('waveCanvas');
+            const ctx = canvas.getContext('2d');
+            if (!analyser) return;
+            analyser.getByteTimeDomainData(dataArray);
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#38bdf8';
+            ctx.beginPath();
+            const sliceWidth = canvas.width * 1.0 / analyser.frequencyBinCount;
+            let x = 0;
+            for (let i = 0; i < analyser.frequencyBinCount; i++) {
+                const v = dataArray[i] / 128.0;
+                const y = v * canvas.height / 2;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                x += sliceWidth;
+            }
+            ctx.lineTo(canvas.width, canvas.height / 2);
+            ctx.stroke();
+        }
+
+        function stopRecording() {
+            if (processorNode) { processorNode.disconnect(); processorNode.onaudioprocess = null; processorNode = null; }
+            if (silentGainNode) { silentGainNode.disconnect(); silentGainNode = null; }
+            if (coughRecordingTimeout) clearTimeout(coughRecordingTimeout);
+            if (snoreRecordingTimeout) clearTimeout(snoreRecordingTimeout);
+            if (audioStream) audioStream.getTracks().forEach(track => track.stop());
+            if (audioContext && audioContext.state !== 'closed') audioContext.close();
+            pcmBuffer = [];
+            pcmBufferLength = 0;
+            coughDetectionActive = false;
+            snoreDetectionActive = false;
+            statusEl.textContent = 'Stopped';
+            statusEl.style.color = '#fb7185';
+        }
+
+        function addSessionPrediction(pred) {
+            const emoji = pred.type === 'cough' ? 'ðŸ¤§' : pred.type === 'snore' ? 'ðŸ˜´' : 'ðŸ”Š';
+            pred.displayText = `${emoji} ${(pred.score * 100).toFixed(0)}% ${pred.type}${pred.recipient_name ? ` (${pred.recipient_name})` : ''}`;
+
+            sessionPredictions.unshift(pred);
+            if (sessionPredictions.length > 200) sessionPredictions.pop();
+            renderSessionPredictions();
+        }
+
+        function renderSessionPredictions() {
+            const el = document.getElementById('sessionPredictions');
+            el.innerHTML = '';
+            if (!sessionPredictions.length) {
+                el.innerHTML = '<p class="muted">No predictions yet in this session.</p>';
+                return;
+            }
+
+            const groupedPredictions = {
+                cough: [],
+                snore: [],
+                other: []
+            };
+
+            sessionPredictions.slice(0, 100).forEach(pred => {
+                const type = pred.type || 'other';
+                if (groupedPredictions[type] !== undefined) {
+                    groupedPredictions[type].push(pred);
+                } else {
+                    groupedPredictions.other.push(pred);
+                }
+            });
+
+            const sections = [
+                { type: 'cough', title: 'ðŸ¤§ Coughs', predictions: groupedPredictions.cough },
+                { type: 'snore', title: 'ðŸ˜´ Snores', predictions: groupedPredictions.snore },
+                { type: 'other', title: 'ðŸ”Š Other Sounds', predictions: groupedPredictions.other }
+            ];
+
+            sections.forEach(section => {
+                if (section.predictions.length === 0) return;
+
+                const sectionEl = document.createElement('div');
+                sectionEl.className = 'prediction-section';
+                sectionEl.innerHTML = `<h4 style="margin: 16px 0 8px; color: var(--accent);">${section.title} (${section.predictions.length})</h4>`;
+
+                section.predictions.slice(0, 10).forEach(pred => {
+                    const item = document.createElement('div');
+                    item.className = 'session-item';
+                    const time = new Date(pred.timestamp).toLocaleTimeString();
+                    const score = (pred.score * 100).toFixed(0);
+                    item.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; width: 100%;">
+                        <span>${time}</span>
+                        <span>${score}% confidence</span>
+                    </div>
+                `;
+                    sectionEl.appendChild(item);
+                });
+
+                if (section.predictions.length > 10) {
+                    const moreEl = document.createElement('div');
+                    moreEl.className = 'muted';
+                    moreEl.style.textAlign = 'center';
+                    moreEl.style.padding = '8px 0';
+                    moreEl.textContent = `+${section.predictions.length - 10} more`;
+                    sectionEl.appendChild(moreEl);
+                }
+
+                el.appendChild(sectionEl);
+            });
+        }
+
+        async function uploadRecording(blob, filename, care_recipient_id = null) {
+            const form = new FormData();
+            const file = new File([blob], filename, { type: 'audio/wav' });
+            form.append('file', file);
+            if (care_recipient_id) {
+                form.append('care_recipient_id', care_recipient_id);
+            }
+            const res = await fetch(API_BASE + '/recordings/upload', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token },
+                body: form
+            });
+            if (!res.ok) {
+                const body = await res.text();
+                console.error('Upload failed', res.status, body);
+                return null;
+            }
+            return res.json();
+        }
+
+        async function fetchAndRenderRecordings() {
+            const container = document.getElementById('recordings-container');
+            if (!container) return; // Element removed, skip
+            container.innerHTML = '';
+            try {
+                let url = API_BASE + '/recordings/my';
+                if (selectedRecipientId) url += '?care_recipient_id=' + encodeURIComponent(selectedRecipientId);
+                const res = await fetch(url, {
+                    method: 'GET',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!res.ok) throw new Error('Failed to list recordings');
+                const data = await res.json();
+                if (!data.recordings || !data.recordings.length) {
+                    container.innerHTML = '<p class="muted">No recordings yet.</p>';
+                    return;
+                }
+                data.recordings.forEach(rec => {
+                    const div = document.createElement('div');
+                    div.className = 'history-card';
+                    div.innerHTML = `
+                    <h4>${rec.filename}</h4>
+                    <div class="meta">${new Date(rec.created_at).toLocaleString()}${rec.care_recipient_id ? ' â€¢ Recipient: ' + rec.care_recipient_id : ''}</div>
+                `;
+                    const controls = document.createElement('div');
+                    controls.style.marginTop = '12px';
+                    const playBtn = document.createElement('button');
+                    playBtn.className = 'ghost-btn';
+                    playBtn.textContent = 'Play';
+                    playBtn.style.marginRight = '8px';
+                    playBtn.addEventListener('click', () => playRecording(rec.id));
+                    const dlBtn = document.createElement('button');
+                    dlBtn.className = 'ghost-btn';
+                    dlBtn.textContent = 'Download';
+                    dlBtn.addEventListener('click', () => downloadRecording(rec.id, rec.filename));
+                    controls.appendChild(playBtn);
+                    controls.appendChild(dlBtn);
+                    div.appendChild(controls);
+                    container.appendChild(div);
+                });
+            } catch (err) {
+                console.error('Error fetching recordings', err);
+                container.innerHTML = '<p class="muted">Unable to load recordings.</p>';
+            }
+        }
+
+        async function playRecording(id) {
+            try {
+                const res = await fetch(`${API_BASE}/recordings/${id}/download`, {
+                    method: 'GET',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!res.ok) throw new Error('Failed to fetch recording');
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const audio = document.createElement('audio');
+                audio.src = url;
+                audio.controls = true;
+                audio.autoplay = true;
+                const container = document.getElementById('recordings-container');
+                const wrapper = document.createElement('div');
+                wrapper.appendChild(audio);
+                container.insertBefore(wrapper, container.firstChild);
+            } catch (err) {
+                console.error('Error playing recording', err);
+            }
+        }
+
+        async function downloadRecording(id, filename) {
+            try {
+                const res = await fetch(`${API_BASE}/recordings/${id}/download`, {
+                    method: 'GET',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!res.ok) throw new Error('Failed to fetch recording for download');
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename || `recording_${id}.wav`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 4000);
+            } catch (err) {
+                console.error('Error downloading recording', err);
+            }
+        }
+
+        function showRecording(filename, url, mimeType = 'audio/wav') {
+            const container = document.getElementById('recordings-container');
+            const div = document.createElement('div');
+            div.className = 'history-card';
+            div.innerHTML = `
+            <h4>${filename}</h4>
+            <div class="meta">Local session â€¢ ${selectedRecipientName}</div>
+            <audio controls style="width:100%;margin-top:12px;">
+                <source src="${url}" type="${mimeType}">
+            </audio>
+        `;
+            container.prepend(div);
+        }
+
+        function triggerDownload(url, filename) {
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => { if (a.parentNode) a.parentNode.removeChild(a); }, 0);
+        }
+
+        // ==============================
+        // Video / Emotion Monitoring & Fall Detection
+        // ==============================
+
+        // DOM elements for fall detection
+        const videoUpload = document.getElementById('videoUpload');
+        const fallDetectionResults = document.getElementById('fallDetectionResults');
+        const fallDetectionStatus = document.getElementById('fallDetectionStatus');
+        const fallDetectionOutput = document.getElementById('fallDetectionOutput');
+
+        // Fall detection API endpoint
+        const FALL_DETECTION_API = `${API_BASE}/api/fall-detection`;
+
+        // Initialize video monitoring button
+        if (startEmotionMonitorBtn) {
+            startEmotionMonitorBtn.addEventListener('click', toggleEmotionMonitoring);
+        }
+
+        // Handle video file upload for fall detection
+        if (videoUpload) {
+            videoUpload.addEventListener('change', handleVideoUpload);
+        }
+
+        /**
+         * Handles the video file upload for fall detection
+         * @param {Event} event - The file input change event
+         */
+        async function handleVideoUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // Show loading state
+            fallDetectionResults.style.display = 'block';
+            fallDetectionStatus.textContent = 'Processing video...';
+            fallDetectionStatus.style.color = '#38bdf8';
+            fallDetectionOutput.innerHTML = '';
+
+            const formData = new FormData();
+            formData.append('file', file);  // Changed from 'video' to 'file' to match backend
+
+            // Add recipient ID if one is selected
+            if (selectedRecipientId) {
+                formData.append('recipient_id', selectedRecipientId);
+            }
+
+            try {
+                // First, upload the video for processing
+                const response = await fetch(`${FALL_DETECTION_API}/process-video`, {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                    // Don't set Content-Type header - let the browser set it with the boundary
+                });
+
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.detail || 'Failed to process video');
+                }
+
+                const result = await response.json();
+
+                // If we get here, the request was successful
+                fallDetectionStatus.textContent = 'Video processed successfully!';
+                fallDetectionStatus.style.color = '#10b981';
+
+                // Show the results
+                if (result.falls_detected && result.falls_detected.length > 0) {
+                    fallDetectionOutput.innerHTML = `
+                    <div class="mt-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+                        <p class="font-bold">âš ï¸ Fall Detected!</p>
+                        <p>Falls detected: ${result.falls_detected.length}</p>
+                        <p>Confidence: ${(result.average_confidence * 100).toFixed(1)}%</p>
+                    </div>
+                `;
+
+                    // If we have a processed video URL, show a link to view it
+                    if (result.processed_video_url) {
+                        const videoUrl = new URL(result.processed_video_url, window.location.origin).href;
+                        fallDetectionOutput.innerHTML += `
+                        <div class="mt-4">
+                            <a href="${videoUrl}" target="_blank" 
+                               class="inline-block bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                                View Processed Video
+                            </a>
+                        </div>
+                    `;
+                    }
+                } else {
+                    fallDetectionOutput.innerHTML = `
+                    <div class="mt-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded">
+                        <p>âœ… No falls detected in the video.</p>
+                    </div>
+                `;
+                }
+            } catch (error) {
+                console.error('Error processing video:', error);
+                fallDetectionStatus.textContent = `Error: ${error.message}`;
+                fallDetectionStatus.style.color = '#ef4444';
+            } finally {
+                // Reset the file input
+                event.target.value = '';
+            }
+        }
+
+        /**
+         * Helper function to download the processed video
+         * @param {string} url - The URL of the video to download
+         * @param {string} filename - The filename to use for the downloaded file
+         */
+        function downloadVideo(url, filename) {
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                if (a.parentNode) a.parentNode.removeChild(a);
+            }, 0);
+        }
+
+        async function toggleEmotionMonitoring() {
+            if (!emotionMonitoringActive) {
+                await startEmotionMonitoring();
+            } else {
+                stopEmotionMonitoring();
+            }
+        }
+
+        async function startEmotionMonitoring() {
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    emotionStatusEl.textContent = 'Status: Camera not supported in this browser';
+                    emotionStatusEl.style.color = '#fb7185';
+                    return;
+                }
+
+                emotionStatusEl.textContent = 'Status: Requesting cameraâ€¦';
+                emotionStatusEl.style.color = '#38bdf8';
+
+                emotionStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+                emotionVideoEl.srcObject = emotionStream;
+
+                emotionMonitoringActive = true;
+                startEmotionMonitorBtn.textContent = 'Stop Video Monitoring';
+                emotionStatusEl.textContent = 'Status: Camera on - analyzingâ€¦';
+
+                if (emotionCaptureInterval) clearInterval(emotionCaptureInterval);
+            } catch (err) {
+                console.error('Error starting emotion monitoring:', err);
+                emotionStatusEl.textContent = 'Status: Failed to access camera';
+                emotionStatusEl.style.color = '#fb7185';
+            }
+        }
+
+        function stopEmotionMonitoring() {
+            emotionMonitoringActive = false;
+            if (startEmotionMonitorBtn) startEmotionMonitorBtn.textContent = 'Start Video Monitoring';
+            if (emotionCaptureInterval) {
+                clearInterval(emotionCaptureInterval);
+                emotionCaptureInterval = null;
+            }
+            if (emotionStream) {
+                emotionStream.getTracks().forEach(t => t.stop());
+                emotionStream = null;
+            }
+            if (emotionVideoEl) emotionVideoEl.srcObject = null;
+            emotionStatusEl.textContent = 'Status: Camera off';
+            emotionStatusEl.style.color = '#94a3b8';
+        }
+
+        async function captureAndSendEmotionFrame() {
+            if (!emotionMonitoringActive || !emotionVideoEl || emotionVideoEl.readyState < 2) return;
+
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = emotionVideoEl.videoWidth || 640;
+                canvas.height = emotionVideoEl.videoHeight || 480;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(emotionVideoEl, 0, 0, canvas.width, canvas.height);
+
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+
+                const res = await fetch(EMOTION_API_BASE + '/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: dataUrl })
+                });
+
+                if (!res.ok) {
+                    console.warn('Emotion API error', res.status);
+                    return;
+                }
+
+                const data = await res.json();
+
+                if (!data || data.user_id === null || data.dominant_emotion === null) {
+                    emotionCurrentEl.textContent = 'â€”';
+                    emotionConfidenceEl.textContent = 'â€”';
+                    return;
+                }
+
+                emotionCurrentEl.textContent = data.dominant_emotion;
+                emotionConfidenceEl.textContent = data.confidence != null ? data.confidence.toFixed(1) + '%' : 'â€”';
+            } catch (err) {
+                console.error('Error capturing/sending emotion frame:', err);
+            }
+        }
+
+        // Add click handler for Voice Bot button
+        document.getElementById('voiceBotBtn')?.addEventListener('click', () => {
+            window.open('voice_bot.html', '_blank');
+        });
+
+        // Add click handler for Logout button
+        document.getElementById('logoutBtn')?.addEventListener('click', () => {
+            localStorage.removeItem('token');
+            window.location.href = 'index.html';
+        });
+
+        // --- Video Analysis Stats ---
+        let fallsChartInstance = null;
+        let mobilityChartInstance = null;
+
+        async function fetchVideoStats(recipientId) {
+            const container = document.getElementById('videoStatsContainer');
+            if (!recipientId) {
+                if (container) container.style.display = 'none';
+                return;
+            }
+            if (container) container.style.display = 'block';
+
+            try {
+                const res = await fetch(`${API_BASE}/video-monitoring/recipient/${recipientId}/stats`, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+
+                if (!res.ok) throw new Error('Failed to fetch stats');
+                const data = await res.json();
+
+                // Update specific elements
+                const totalVideosEl = document.getElementById('totalVideos');
+                if (totalVideosEl) totalVideosEl.textContent = data.total_videos;
+
+                const totalFallsEl = document.getElementById('totalFalls');
+                if (totalFallsEl) totalFallsEl.textContent = data.total_falls;
+
+                const avgActivityEl = document.getElementById('avgActivity');
+                if (avgActivityEl) avgActivityEl.textContent = `${data.avg_activity_score}/10`;
+
+                updateVideoCharts(data.history);
+
+            } catch (err) {
+                console.error('Error fetching video stats:', err);
+                if (container) container.style.display = 'none';
+            }
+        }
+
+        function updateVideoCharts(history) {
+            const ctxFallsEl = document.getElementById('fallsHistoryChart');
+            const ctxMobilityEl = document.getElementById('mobilityHistoryChart');
+
+            if (!ctxFallsEl || !ctxMobilityEl) return;
+
+            // Destroy existing charts
+            if (fallsChartInstance) {
+                fallsChartInstance.destroy();
+                fallsChartInstance = null;
+            }
+            if (mobilityChartInstance) {
+                mobilityChartInstance.destroy();
+                mobilityChartInstance = null;
+            }
+
+            if (!history || history.length === 0) return;
+
+            const labels = history.map(h => new Date(h.date).toLocaleDateString());
+            const fallsData = history.map(h => h.falls);
+            const mobilityData = history.map(h => h.mobility);
+
+            fallsChartInstance = new Chart(ctxFallsEl.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Falls Detected',
+                        data: fallsData,
+                        borderColor: '#fb7185',
+                        backgroundColor: 'rgba(251, 113, 133, 0.2)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            mobilityChartInstance = new Chart(ctxMobilityEl.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Mobility Score',
+                        data: mobilityData,
+                        backgroundColor: '#4A90E2',
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: { y: { beginAtZero: true, max: 10 } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        // Audio Analytics Functions
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+        let audioTrendChart = null;
+        let audioHourlyChart = null;
+        let audioTypeChart = null;
+
+        async function fetchAudioAnalytics() {
+            const days = document.getElementById('audioTimeRange').value || 7;
+            const recipientParam = selectedRecipientId ? `&care_recipient_id=${selectedRecipientId}` : '';
+
+            try {
+                // Fetch statistics
+                const statsRes = await fetch(`${API_BASE}/audio-events/stats?days=${days}${recipientParam}`, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+
+                if (!statsRes.ok) throw new Error('Failed to fetch audio stats');
+                const stats = await statsRes.json();
+
+                // Update summary cards
+                document.getElementById('totalCoughs').textContent = stats.cough_count || 0;
+                document.getElementById('totalSneezes').textContent = stats.sneeze_count || 0;
+                document.getElementById('totalAudioEvents').textContent = stats.total_events || 0;
+
+                // Fetch detailed events
+                const eventsRes = await fetch(`${API_BASE}/audio-events?days=${days}&limit=100${recipientParam}`, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+
+                if (!eventsRes.ok) throw new Error('Failed to fetch audio events');
+                const events = await eventsRes.json();
+
+                // Process and render charts
+                renderAudioCharts(events, stats);
+                renderRecentEvents(events.slice(0, 10));
+
+            } catch (err) {
+                console.error('Error fetching audio analytics:', err);
+            }
+        }
+
+        function renderAudioCharts(events, stats) {
+            // Process data for trend chart (daily aggregation)
+            const dailyData = {};
+            events.forEach(event => {
+                const date = new Date(event.detected_at).toLocaleDateString();
+                if (!dailyData[date]) {
+                    dailyData[date] = { cough: 0, sneeze: 0 };
+                }
+                if (event.event_type === 'Cough') dailyData[date].cough++;
+                if (event.event_type === 'Sneeze') dailyData[date].sneeze++;
+            });
+
+            const dates = Object.keys(dailyData).sort();
+            const coughData = dates.map(d => dailyData[d].cough);
+            const sneezeData = dates.map(d => dailyData[d].sneeze);
+
+            // Trend Chart
+            const trendCtx = document.getElementById('audioTrendChart');
+            if (audioTrendChart) audioTrendChart.destroy();
+            audioTrendChart = new Chart(trendCtx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [
+                        {
+                            label: 'Coughs',
+                            data: coughData,
+                            borderColor: '#fb7185',
+                            backgroundColor: 'rgba(251, 113, 133, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: 'Sneezes',
+                            data: sneezeData,
+                            borderColor: '#f6c23e',
+                            backgroundColor: 'rgba(246, 194, 62, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top' }
+                    },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                    }
+                }
+            });
+
+            // Hourly Distribution
+            const hourlyData = Array(24).fill(0);
+            events.forEach(event => {
+                const hour = new Date(event.detected_at).getHours();
+                hourlyData[hour]++;
+            });
+
+            const hourlyCtx = document.getElementById('audioHourlyChart');
+            if (audioHourlyChart) audioHourlyChart.destroy();
+            audioHourlyChart = new Chart(hourlyCtx, {
+                type: 'bar',
+                data: {
+                    labels: Array.from({ length: 24 }, (_, i) => `${i}:00`),
+                    datasets: [{
+                        label: 'Events',
+                        data: hourlyData,
+                        backgroundColor: 'rgba(74, 144, 226, 0.6)',
+                        borderColor: '#4A90E2',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                    }
+                }
+            });
+
+            // Event Type Pie Chart
+            const typeCtx = document.getElementById('audioTypeChart');
+            if (audioTypeChart) audioTypeChart.destroy();
+            audioTypeChart = new Chart(typeCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Coughs', 'Sneezes', 'Talking', 'Noise'],
+                    datasets: [{
+                        data: [
+                            stats.cough_count || 0,
+                            stats.sneeze_count || 0,
+                            stats.talking_count || 0,
+                            stats.noise_count || 0
+                        ],
+                        backgroundColor: [
+                            'rgba(251, 113, 133, 0.8)',
+                            'rgba(246, 194, 62, 0.8)',
+                            'rgba(74, 144, 226, 0.8)',
+                            'rgba(148, 163, 184, 0.8)'
+                        ],
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom' }
+                    }
+                }
+            });
+        }
+
+        function renderRecentEvents(events) {
+            const container = document.getElementById('recentAudioEvents');
+
+            if (!events || events.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: var(--muted);">
+                        <i class="fas fa-headphones" style="font-size: 2rem; opacity: 0.3; margin-bottom: 12px;"></i>
+                        <p>No recent events</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = events.map(event => {
+                const date = new Date(event.detected_at);
+                const timeStr = date.toLocaleTimeString();
+                const dateStr = date.toLocaleDateString();
+                const type = event.event_type.toLowerCase();
+                const icon = type === 'cough' ? 'ðŸ¤§' : type === 'sneeze' ? 'ðŸ¤§' : 'ðŸ”Š';
+
+                return `
+                    <div class="audio-event-item ${type}">
+                        <div class="audio-event-icon ${type}">${icon}</div>
+                        <div class="audio-event-details">
+                            <div class="audio-event-type">${event.event_type}</div>
+                            <div class="audio-event-time">${dateStr} at ${timeStr}</div>
+                        </div>
+                        <div class="audio-event-confidence">${event.confidence.toFixed(1)}%</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Event listeners for audio analytics
+        const audioTimeRangeEl = document.getElementById('audioTimeRange');
+        const refreshAudioStatsBtn = document.getElementById('refreshAudioStats');
+
+        if (audioTimeRangeEl) {
+            audioTimeRangeEl.addEventListener('change', fetchAudioAnalytics);
+        }
+
+        if (refreshAudioStatsBtn) {
+            refreshAudioStatsBtn.addEventListener('click', fetchAudioAnalytics);
+        }
+
+        fetchProfile();
+        fetchAndRenderRecordings();
+        fetchAudioAnalytics(); // Load audio analytics on page load
+    </script>
+    <!-- Chart.js for Audio Analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <!-- Add these script tags right before the closing </body> tag -->
+    <script src="/js/weatherWidget.js?v=1.1"></script>
+    <script>
+        let weatherWidget = null;
+        document.addEventListener('DOMContentLoaded', function () {
+            weatherWidget = new WeatherWidget('weather-widget-container', 'http://127.0.0.1:8000/api');
+        });
+    </script>
+</body>
+
+</html>

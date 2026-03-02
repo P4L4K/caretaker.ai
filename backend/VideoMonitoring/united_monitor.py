@@ -11,7 +11,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 sys.path.append(os.path.join(current_dir, "BodyMovementDetection"))
 
-from fall_detection import FallDetector, VideoCaptureThread
+from fall_detection import FallDetector, VideoCaptureThread, draw_detections, SKELETON
 from inactivity_monitor import InactivityMonitor
 
 class UnitedMonitor:
@@ -65,8 +65,8 @@ class UnitedMonitor:
             cached_result["global_state"]["timestamp"] = time.strftime("%H:%M:%S")
             return cached_result
         
-        # 1. Run Fall Detector (includes YOLO inference)
-        # FallDetector returns: {fall_detected, boxes, keypoints, features, confidence, timestamp}
+        # 1. Run Fall Detector (uses enhanced 5-signal scoring)
+        # Returns: {fall_detected, boxes, keypoints, features, confidence, timestamp, persons}
         fall_res = self.fall_detector.detect_fall(frame)
         
         # Update persistent fall state
@@ -243,11 +243,13 @@ def draw_united_interface(frame, results, draw_skeleton=True):
     cv2.putText(frame_copy, status_msg[:30], (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
     y_pos += 25
     
-    # Fall Metrics (Angle/Speed)
+    # Fall Metrics (Angle/Aspect/Speed from 5-signal scoring)
     features = fall_res.get("features", {})
     angle = features.get("torso_angle_smooth", features.get("torso_angle", 0))
+    aspect = features.get("aspect_ratio_smooth", features.get("aspect_ratio", 0))
     speed = features.get("vertical_speed", 0)
-    cv2.putText(frame_copy, f"Angle: {angle:.1f} deg | Speed: {speed:.1f}", (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 255), 1)
+    conf = fall_res.get("confidence", 0)
+    cv2.putText(frame_copy, f"A:{angle:.0f} R:{aspect:.2f} S:{speed:.0f} C:{conf:.0%}", (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 255), 1)
 
     # Timestamp (Top Right)
     ts = global_state.get("timestamp", "")

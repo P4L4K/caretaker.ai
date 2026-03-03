@@ -5,7 +5,7 @@ Endpoints for patient medical state, conditions, trends, alerts, and AI analysis
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from config import SessionLocal
+from config import get_db
 
 from repository import medical_history as repo
 from services.disease_progression import detect_trend, calculate_volatility, volatility_label
@@ -23,14 +23,6 @@ router = APIRouter(
     prefix="/api/recipients",
     tags=["Medical History"]
 )
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 # ---------- Full Patient Medical State ----------

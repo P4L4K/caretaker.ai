@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Query, Header
 from sqlalchemy.orm import Session
-from config import SessionLocal
+from config import get_db
 from tables.audio_events import AudioEvent, AudioEventType
 from tables.users import CareTaker
 from repository.users import UsersRepo, JWTRepo
@@ -9,15 +9,6 @@ from typing import Optional, List
 from datetime import datetime, timedelta
 
 router = APIRouter()
-
-
-# Dependency to get database session
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 # Authentication helper

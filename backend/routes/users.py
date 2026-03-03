@@ -6,6 +6,8 @@ from typing import Optional, List, Dict
 
 from models.users import ResponseSchema, Register, Login, CaretakerUpdate
 from tables.users import CareTaker, CareRecipient
+from tables.vital_signs import VitalSign
+from sqlalchemy import desc
 from config import get_db, ACCESS_TOKEN_EXPIRE_MINUTES
 from repository.users import UsersRepo, JWTRepo
 from utils.email import send_registration_email
@@ -58,6 +60,26 @@ async def profile(authorization: Optional[str] = Header(None), db: Session = Dep
 
         recipients = []
         for r in user.care_recipients:
+            # Query vitals directly from DB (same approach as insights_engine)
+            latest_vital = db.query(VitalSign).filter(
+                VitalSign.care_recipient_id == r.id
+            ).order_by(desc(VitalSign.recorded_at)).first()
+
+            vitals_data = None
+            if latest_vital:
+                vitals_data = {
+                    'heart_rate': latest_vital.heart_rate,
+                    'systolic_bp': latest_vital.systolic_bp,
+                    'diastolic_bp': latest_vital.diastolic_bp,
+                    'oxygen_saturation': latest_vital.oxygen_saturation,
+                    'sleep_score': latest_vital.sleep_score,
+                    'temperature': latest_vital.temperature,
+                    'bmi': latest_vital.bmi,
+                    'height': latest_vital.height,
+                    'weight': latest_vital.weight,
+                    'recorded_at': latest_vital.recorded_at.isoformat() if latest_vital.recorded_at else None
+                }
+
             recipients.append({
                 'id': r.id,
                 'full_name': r.full_name,
@@ -67,27 +89,8 @@ async def profile(authorization: Optional[str] = Header(None), db: Session = Dep
                 'gender': r.gender.value if r.gender else None,
                 'respiratory_condition_status': bool(r.respiratory_condition_status),
                 'report_summary': r.report_summary,
-                'vitals': None
+                'vitals': vitals_data
             })
-
-            # Get latest vital sign
-            if r.vital_signs:
-                # Assuming r.vital_signs is a list, we want the most recent.
-                # Since we didn't specify order_by in relationship, we should sort or trust insertion order?
-                # Better to just sort by recorded_at in python for now (prototype)
-                latest = sorted(r.vital_signs, key=lambda v: v.recorded_at, reverse=True)[0]
-                recipients[-1]['vitals'] = {
-                    'heart_rate': latest.heart_rate,
-                    'systolic_bp': latest.systolic_bp,
-                    'diastolic_bp': latest.diastolic_bp,
-                    'oxygen_saturation': latest.oxygen_saturation,
-                    'sleep_score': latest.sleep_score,
-                    'temperature': latest.temperature,
-                    'bmi': latest.bmi,
-                    'height': latest.height,
-                    'weight': latest.weight,
-                    'recorded_at': latest.recorded_at.isoformat() if latest.recorded_at else None
-                }
 
         return {
             'status': 'success',

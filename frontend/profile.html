@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CareTaker Â· Profile Hub</title>
+    <title>CareTaker &middot; Profile Hub</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
@@ -1144,37 +1144,37 @@
             <div class="caretaker-chip">
                 <div class="avatar">CT</div>
                 <div>
-                    <h4 id="sidebarCaretakerName">â€”</h4>
-                    <span id="sidebarCaretakerEmail">Loadingâ€¦</span>
+                    <h4 id="sidebarCaretakerName">&mdash;</h4>
+                    <span id="sidebarCaretakerEmail">Loading&hellip;</span>
                 </div>
             </div>
 
             <div class="nav-group">
                 <button class="nav-chip" data-target="overview">
                     <span>Profile Overview</span>
-                    âžœ
+                    &#x279C;
                 </button>
                 <button class="nav-chip" data-target="audio-section">
                     <span>Audio Monitoring</span>
-                    âžœ
+                    &#x279C;
                 </button>
                 <button class="nav-chip" data-target="video-section">
                     <span>Video Monitoring</span>
-                    âžœ
+                    &#x279C;
                 </button>
                 <a href="medical_reports.html" class="nav-chip" style="text-decoration:none;">
                     <span>Medical Reports &amp; History</span>
-                    âžœ
+                    &#x279C;
                 </a>
                 <a href="insights.html" class="nav-chip"
                     style="text-decoration:none; background: linear-gradient(135deg, rgba(74,144,226,0.12), rgba(139,92,246,0.08)); border-color: rgba(74,144,226,0.2);">
                     <span>Patient Intelligence</span>
-                    âžœ
+                    &#x279C;
                 </a>
 
                 <button class="nav-chip" id="voiceBotBtn">
                     <span>Voice Bot</span>
-                    âžœ
+                    &#x279C;
                 </button>
                 <div style="margin-top: 10px; border-top: 1px solid rgba(0,0,0,0.05); padding-top: 10px;">
                     <a href="settings.html" class="nav-chip"
@@ -1189,7 +1189,7 @@
                 <div class="section-title">Care Recipients</div>
                 <input id="recipientSearch" type="search" class="recipient-search" placeholder="Search recipients">
                 <div id="recipientsList" class="recipient-list">
-                    <p class="muted">Loading recipientsâ€¦</p>
+                    <p class="muted">Loading recipients&hellip;</p>
                 </div>
             </div>
         </aside>
@@ -1642,8 +1642,15 @@
                     method: 'GET',
                     headers: { 'Authorization': 'Bearer ' + token }
                 });
+                if (res.status === 401) {
+                    localStorage.removeItem('token');
+                    window.location.href = 'index.html';
+                    return;
+                }
                 if (!res.ok) throw new Error('Failed to fetch profile');
                 const data = await res.json();
+                console.log('[DEBUG] Profile data keys:', Object.keys(data));
+                console.log('[DEBUG] care_recipients:', data.care_recipients);
                 if (!data || !data.caretaker) return;
 
                 const caretaker = data.caretaker;
@@ -1656,6 +1663,29 @@
 
                 recipientsCache = data.care_recipients || [];
                 renderRecipients(recipientsCache);
+
+                // Auto-select first recipient so vitals/audio load immediately
+                if (recipientsCache.length > 0 && !selectedRecipientId) {
+                    const firstRecipient = recipientsCache[0];
+                    selectRecipient(firstRecipient.id, firstRecipient.full_name);
+
+                    // Directly populate vitals from API data (in case selectRecipient timing doesn't work)
+                    if (firstRecipient.vitals) {
+                        const v = firstRecipient.vitals;
+                        const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+                        set('val-hr', v.heart_rate || '--');
+                        set('val-bp', (v.systolic_bp || '--') + '/' + (v.diastolic_bp || '--'));
+                        set('val-o2', v.oxygen_saturation || '--');
+                        set('val-temp', v.temperature || '--');
+                        set('val-sleep', v.sleep_score || '--');
+                        set('val-bmi', v.bmi || '--');
+                        set('val-hw', 'H:' + (v.height || '-') + 'cm W:' + (v.weight || '-') + 'kg');
+                        if (v.recorded_at) {
+                            set('last-updated', new Date(v.recorded_at).toLocaleString());
+                        }
+                        console.log('[Vitals] Populated directly from API:', v.heart_rate, v.oxygen_saturation);
+                    }
+                }
             } catch (err) {
                 console.error('Error fetching profile', err);
                 recipientsListEl.innerHTML = '<p class="muted">Unable to load recipients.</p>';
@@ -1681,7 +1711,7 @@
             const card = document.createElement('div');
             card.className = 'recipient-card';
             card.dataset.recipientId = recipient.id || '';
-            const metaText = recipient.meta || `Age: ${recipient.age || '-'} Â· ${recipient.gender || '-'} Â· ${recipient.respiratory_condition_status ? 'Respiratory care' : 'General care'}`;
+            const metaText = recipient.meta || `Age: ${recipient.age || '-'} &middot; ${recipient.gender || '-'} &middot; ${recipient.respiratory_condition_status ? 'Respiratory care' : 'General care'}`;
             card.innerHTML = `<h5>${recipient.full_name}</h5><p>${metaText}</p>`;
             card.addEventListener('click', () => selectRecipient(recipient.id || null, recipient.full_name));
             return card;
@@ -1910,8 +1940,8 @@
 
         function updateReportControlsState() {
             const hasRecipient = Boolean(selectedRecipientId);
-            refreshReportsBtn.disabled = !hasRecipient || reportsRefreshing;
-            regenerateSummaryBtn.disabled = !hasRecipient || summaryGenerating;
+            if (refreshReportsBtn) refreshReportsBtn.disabled = !hasRecipient || reportsRefreshing;
+            if (regenerateSummaryBtn) regenerateSummaryBtn.disabled = !hasRecipient || summaryGenerating;
             // Show / hide upload area
             const uploadArea = document.getElementById('uploadArea');
             if (uploadArea) uploadArea.style.display = hasRecipient ? 'block' : 'none';
@@ -1922,10 +1952,10 @@
             const container = document.getElementById('medicalInsightsContainer');
             const summaryStatusEl = document.getElementById('summaryStatus');
 
-            if (statusMessage) {
+            if (statusMessage && summaryStatusEl) {
                 summaryStatusEl.textContent = statusMessage;
                 // If we are actively generating, show a spinner in the main container
-                if (statusMessage.includes('Generating')) {
+                if (statusMessage.includes('Generating') && container) {
                     container.innerHTML = `
                         <div style="text-align:center; padding: 60px 20px;">
                             <div class="spinner" style="margin: 0 auto 15px;"></div>
@@ -1935,7 +1965,7 @@
             }
 
             if (!recipient) {
-                container.innerHTML = `
+                if (container) container.innerHTML = `
                     <div style="text-align:center; padding: 60px 20px; color: var(--muted);">
                         <div style="font-size: 2.5rem; margin-bottom: 15px; opacity: 0.5;">ðŸ“‹</div>
                         <p>No recipient selected.</p>
@@ -1944,7 +1974,7 @@
             }
 
             if (!recipient.report_summary) {
-                container.innerHTML = `
+                if (container) container.innerHTML = `
                     <div style="text-align:center; padding: 60px 20px; color: var(--muted);">
                         <div style="font-size: 2.5rem; margin-bottom: 15px; opacity: 0.5;">ðŸ”</div>
                         <p>No summary available yet for this recipient.</p>
@@ -2229,14 +2259,14 @@
         async function fetchRecipientReports() {
             const recipient = getSelectedRecipient();
             if (!recipient) {
-                reportsListEl.innerHTML = '<p class="muted">Select a care recipient to list their medical reports.</p>';
+                if (reportsListEl) reportsListEl.innerHTML = '<p class="muted">Select a care recipient to list their medical reports.</p>';
                 reportsRefreshing = false;
                 updateReportControlsState();
                 return;
             }
             reportsRefreshing = true;
             updateReportControlsState();
-            reportsListEl.innerHTML = '<p class="muted">Loading reportsâ€¦</p>';
+            if (reportsListEl) reportsListEl.innerHTML = '<p class="muted">Loading reports...</p>';
             try {
                 const res = await fetch(`${API_BASE}/recipients/${recipient.id}/reports`, {
                     method: 'GET',
@@ -2248,7 +2278,7 @@
                 sortAndRenderReports();
             } catch (err) {
                 console.error('Error fetching medical reports', err);
-                reportsListEl.innerHTML = '<p class="muted">Unable to load reports.</p>';
+                if (reportsListEl) reportsListEl.innerHTML = '<p class="muted">Unable to load reports.</p>';
             } finally {
                 reportsRefreshing = false;
                 updateReportControlsState();
@@ -2261,7 +2291,7 @@
             const recipient = getSelectedRecipient();
             if (!recipient) return;
 
-            const sortVal = reportSortOrderSelect.value;
+            const sortVal = reportSortOrderSelect ? reportSortOrderSelect.value : 'date_desc';
             const sorted = [...currentRecipientReports].sort((a, b) => {
                 if (sortVal === 'date_desc') return new Date(b.uploaded_at) - new Date(a.uploaded_at);
                 if (sortVal === 'date_asc') return new Date(a.uploaded_at) - new Date(b.uploaded_at);
@@ -2305,6 +2335,7 @@
         }
 
         function renderReportsList(recipientId, reports = []) {
+            if (!reportsListEl) return;
             const countBadge = document.getElementById('reportsCountBadge');
             if (!reports.length) {
                 reportsListEl.innerHTML = '<p class="muted">No reports uploaded yet. Use the upload area above to add one.</p>';

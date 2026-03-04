@@ -74,3 +74,7 @@ class CareRecipient(Base):
     patient_conditions = relationship('PatientCondition', back_populates='care_recipient', cascade='all, delete-orphan')
     lab_values = relationship('LabValue', back_populates='care_recipient', cascade='all, delete-orphan')
     medical_alerts = relationship('MedicalAlert', back_populates='care_recipient', cascade='all, delete-orphan')
+
+    # Voice Bot relations
+    conversation_messages = relationship('ConversationMessage', back_populates='care_recipient', cascade='all, delete-orphan')
+    proactive_reminders = relationship('ProactiveReminder', back_populates='care_recipient', cascade='all, delete-orphan')

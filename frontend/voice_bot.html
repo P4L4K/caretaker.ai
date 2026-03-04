@@ -101,6 +101,26 @@
         </div>
     </header>
 
+    <!-- Depression Alert Banner -->
+    <div id="depression-alert"
+        class="hidden bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 shadow-md max-w-6xl mx-auto mt-4 rounded-r-lg"
+        role="alert">
+        <div class="flex">
+            <div class="py-1">
+                <svg class="fill-current h-6 w-6 text-yellow-500 mr-4" xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20">
+                    <path
+                        d="M2.93 17.07A10 10 0 1 1 17.07 2.93 10 10 0 0 1 2.93 17.07zm12.73-1.41A8 8 0 1 0 4.34 4.34a8 8 0 0 0 11.32 11.32zM9 11V9h2v6H9v-4zm0-6h2v2H9V5z" />
+                </svg>
+            </div>
+            <div>
+                <p class="font-bold">Emotional Wellness Notice</p>
+                <p class="text-sm">We've noticed you might be feeling a bit down lately. Remember, you're not alone and
+                    we are here to support you.</p>
+            </div>
+        </div>
+    </div>
+
     <main class="max-w-6xl mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         <!-- Left Column: Vitals & Tools -->
@@ -193,13 +213,30 @@
 
             <!-- Reminders Card -->
             <div class="bg-white rounded-2xl shadow-sm p-6 border border-slate-100">
-                <h2 class="text-slate-500 text-sm font-semibold uppercase tracking-wider mb-4 flex items-center gap-2">
-                    <i data-lucide="clock" class="h-4 w-4"></i> Active Reminders
-                </h2>
-                <div id="reminders-list" class="space-y-2 max-h-40 overflow-y-auto">
-                    <!-- Reminders injected here -->
-                    <p class="text-sm text-slate-400 italic" id="no-reminders-msg">No active reminders.</p>
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-slate-500 text-sm font-semibold uppercase tracking-wider flex items-center gap-2">
+                        <i data-lucide="clock" class="h-4 w-4"></i> Active Reminders
+                    </h2>
+                    <button onclick="initDefaultReminders()" class="text-xs text-blue-500 hover:text-blue-700">Init
+                        Defaults</button>
                 </div>
+                <div id="reminders-list" class="space-y-2 max-h-40 overflow-y-auto mb-4">
+                    <!-- Reminders injected here -->
+                    <p class="text-sm text-slate-400 italic" id="no-reminders-msg">Loading reminders...</p>
+                </div>
+
+                <form id="add-reminder-form" onsubmit="addReminder(event)"
+                    class="text-sm border-t border-slate-100 pt-3">
+                    <p class="font-semibold text-slate-600 mb-2">New Reminder</p>
+                    <div class="flex gap-2 mb-2">
+                        <input type="text" id="rem-text" placeholder="Drink water..."
+                            class="flex-1 px-2 py-1 border rounded" required>
+                        <input type="time" id="rem-time" class="w-24 px-2 py-1 border rounded" required>
+                    </div>
+                    <button type="submit"
+                        class="w-full bg-blue-100 hover:bg-blue-200 text-blue-700 font-semibold py-1 rounded">Add
+                        Reminder</button>
+                </form>
             </div>
 
             <!-- Quick Actions -->
@@ -243,7 +280,7 @@
 
                     <form onsubmit="handleManualSubmit(event)" class="flex-1 flex gap-2">
                         <input type="text" id="user-input"
-                            placeholder="Try: 'Play my favorite song' or 'Restart monitoring'"
+                            placeholder="Try: 'Play my favorite song' or 'Remind me to take medicine in 10 minutes'"
                             class="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all">
                         <button type="submit"
                             class="p-3 bg-slate-100 text-slate-400 hover:text-[#4A90E2] hover:bg-[#ebf8ff] rounded-xl transition-colors cursor-pointer">
@@ -295,17 +332,24 @@
     </div>
 
     <script>
-        // ========== STATE ==========
+        const sessionId = "session_" + Math.random().toString(36).substr(2, 9);
+        const moodEmojis = {
+            "happy": "😊",
+            "sad": "😢",
+            "anxious": "😟",
+            "angry": "😠",
+            "neutral": "😐",
+            "distressed": "😫"
+        };
+
         let state = {
-            isListening: false, emergencyMode: false, supportMode: false, stressCount: 0,
-            messages: JSON.parse(localStorage.getItem('healthBotMessages')) || [
-                { id: 1, sender: 'bot', text: "Hello dear! 😊 I'm your CareTaker companion. I'm here to chat, play music, tell stories, or help you reach your family. How are you feeling today?" }
-            ],
-            vitals: JSON.parse(localStorage.getItem('healthBotVitals')) || {
+            isListening: false, emergencyMode: false,
+            messages: [],
+            vitals: {
                 heartRate: 72, bloodPressure: '120/80', temperature: 98.6, oxygen: 98,
                 sleepScore: 85, weight: 70, height: 175, bmi: 22.9, lastUpdated: new Date().toLocaleTimeString()
             },
-            reminders: JSON.parse(localStorage.getItem('healthBotReminders')) || [],
+            reminders: [],
             musicIndex: 0, musicPlaying: false,
             recipientInfo: null,
             healthSummary: ""
@@ -323,7 +367,7 @@
         const audioPlayer = new Audio();
         audioPlayer.addEventListener('ended', () => { state.musicIndex = (state.musicIndex + 1) % playlist.length; playSong(); });
         audioPlayer.addEventListener('error', () => {
-            addMessage('bot', `Couldn't play "${playlist[state.musicIndex].title}". Please add the MP3 to the music/ folder.`);
+            console.log('Audio error or blocked');
         });
 
         function playSong(index) {
@@ -337,16 +381,6 @@
             document.getElementById('song-genre').textContent = song.genre;
             document.getElementById('play-pause-btn').textContent = '\u23f8 Pause';
             lucide.createIcons();
-        }
-
-        function playFavorite() {
-            const favIdx = playlist.findIndex(s => s.favorite);
-            playSong(favIdx >= 0 ? favIdx : 0);
-        }
-
-        function playCalming() {
-            const calmIdx = playlist.findIndex(s => s.genre.toLowerCase().includes('calm'));
-            playSong(calmIdx >= 0 ? calmIdx : 1);
         }
 
         function controlMusic(action) {
@@ -370,50 +404,14 @@
         function speak(text) {
             if (synth.speaking) synth.cancel();
             const u = new SpeechSynthesisUtterance(text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, ''));
-            u.rate = 0.9; u.pitch = 1.05;
+            u.rate = 1.0; u.pitch = 1.0;
             const voices = synth.getVoices();
             const pref = voices.find(v => v.name.includes('Google US English') || v.name.includes('Samantha') || v.name.includes('Zira'));
             if (pref) u.voice = pref;
             synth.speak(u);
         }
 
-        // ========== STRESS DETECTION ==========
-        const stressKeywords = {
-            severe: ['want to die', 'kill myself', 'end it all', 'no point living', 'nobody cares'],
-            high: ['hopeless', 'worthless', 'hate my life', 'can\'t take it', 'give up', 'all alone', 'no one loves me', 'suffering', 'can\'t breathe', 'panic'],
-            moderate: ['sad', 'depressed', 'anxious', 'worried', 'scared', 'lonely', 'alone', 'miss my', 'crying', 'stressed', 'upset', 'angry', 'frustrated', 'can\'t sleep', 'grief', 'hurt', 'pain'],
-            mild: ['not feeling well', 'a bit down', 'not great', 'bored', 'restless', 'uncomfortable', 'uneasy']
-        };
-        function detectStress(text) {
-            for (const [level, words] of Object.entries(stressKeywords)) {
-                for (const w of words) { if (text.includes(w)) return level; }
-            }
-            return null;
-        }
-        const supportResponses = {
-            severe: ["I hear you, and you matter deeply. Let me call your family right now. You are not alone. \u2764\ufe0f", "What you're feeling is real. I'm connecting you with your family immediately. You are loved. \ud83d\udc9c"],
-            high: ["I can tell you're going through something difficult. Let's breathe together \u2014 in for 4... hold for 4... out for 6. You're not alone in this. \ud83d\udc9c", "That sounds really hard. Can you name 5 things you can see right now? It helps ground us. I'm right here with you. \ud83c\udf1f"],
-            moderate: ["I understand, and your feelings are completely valid. Would you like to talk more, or shall I play some calming music? \ud83c\udfb5", "It's okay to have days like this. I'm here to listen, always. What's been on your mind? \ud83d\udc9a", "Thank you for sharing that with me. That takes courage. Would you like to hear a soothing song or just talk? \ud83c\udf19"],
-            mild: ["I hear you. Even on not-so-great days, you're doing wonderfully. Want to chat, hear a joke, or listen to some music? \ud83d\ude0a", "That's okay! How about I tell you a nice story or play your favourite song to brighten things up? \ud83c\udf1f"]
-        };
-        function handleStress(level) {
-            state.stressCount++;
-            if (level === 'severe') { setTimeout(() => startVideoCall(), 3000); }
-            return pick(supportResponses[level]);
-        }
-
-        // ========== COMPANION AI ==========
-        function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
-        function getTimeGreeting() {
-            const h = new Date().getHours();
-            if (h < 6) return "It's quite late! Can't sleep?";
-            if (h < 12) return "Good morning, sunshine! \u2600\ufe0f";
-            if (h < 17) return "Good afternoon! Hope you're having a lovely day.";
-            if (h < 21) return "Good evening! How was your day?";
-            return "It's getting late. Ready to wind down? \ud83c\udf19";
-        }
-
+        // ========== DATA & FETCHES ==========
         async function loadBackendData() {
             const token = localStorage.getItem('token');
             const rid = localStorage.getItem('selectedRecipientId');
@@ -447,284 +445,161 @@
             } catch (e) { console.error('Data sync error:', e); }
         }
 
-        function processCommand(text) {
-            const t = text.toLowerCase();
-            // --- Stress check first ---
-            const stress = detectStress(t);
-            if (stress) return handleStress(stress);
-
-            // --- Music ---
-            if (t.includes('play my fav') || t.includes('play my favourite') || t.includes('play pal pal') || t.includes('favourite song') || t.includes('favorite song')) {
-                playFavorite();
-                return "Playing your favourite \u2014 'Pal Pal Dil Ke Paas' by Kishore Kumar. Enjoy! \u2764\ufe0f\ud83c\udfb6";
-            }
-            if (t.includes('hindi') || t.includes('bollywood') || t.includes('indian')) {
-                const classicIdx = playlist.findIndex(s => s.genre === 'Classic' || s.favorite);
-                playSong(classicIdx >= 0 ? classicIdx : 0);
-                return `Playing some Hindi classics for you \u2014 "${playlist[state.musicIndex].title}". Beautiful music for a beautiful day! \ud83c\udfb5`;
-            }
-            if (t.includes('play a song') || t.includes('play song') || t.includes('play music') || t.includes('play something') || t.includes('some music') || t.includes('music please')) {
-                playCalming();
-                return `Playing some calming music for you \u2014 "${playlist[state.musicIndex].title}". Let me know if you'd like something different! \ud83c\udfb5`;
-            }
-            if (t.includes('another') && (t.includes('song') || t.includes('music') || t.includes('one'))) {
-                controlMusic('next');
-                return `Sure constant! Here's another one for you \u2014 "${playlist[state.musicIndex].title}". Enjoy! \ud83c\udfb5`;
-            }
-            if (t.includes('stop') && (t.includes('music') || t.includes('song') || t.includes('that'))) {
-                controlMusic('stop');
-                return "Music stopped. Let me know if you'd like to hear something later! \ud83d\ude0a";
-            }
-            if (t.includes('next song') || t.includes('change') && (t.includes('song') || t.includes('music') || t.includes('it'))) {
-                controlMusic('next');
-                return `Now playing "${playlist[state.musicIndex].title}". How's this one? \ud83c\udfb5`;
-            }
-            if (t.includes('pause')) { controlMusic('toggle'); return "Music paused. Say 'play music' to resume! \ud83c\udfb6"; }
-
-            // --- Calling ---
-            if (t.includes('call') && (t.includes('caretaker') || t.includes('family') || t.includes('son') || t.includes('daughter') || t.includes('caregiver'))) {
-                startVideoCall(); return "Calling your caretaker right now! \ud83d\udcde";
-            }
-
-            // --- Emergency ---
-            if (t.includes('emergency') || t.includes('911') || t.includes('ambulance')) {
-                toggleEmergencyMode(true); return "\ud83d\udea8 EMERGENCY ALERT TRIGGERED. I'm notifying your caretaker immediately. Stay calm, help is on the way.";
-            }
-
-            // --- Greetings ---
-            if (['hello', 'hi ', 'hey', 'good morning', 'good afternoon', 'good evening', 'namaste'].some(g => t.includes(g))) {
-                return pick([getTimeGreeting() + " I'm so happy to talk with you! How are you feeling? \ud83d\ude0a", "Hello dear! " + getTimeGreeting() + " What would you like to do today?"]);
-            }
-            if (t.includes('how are you') || t.includes('how do you feel')) {
-                return pick(["I'm doing great because I get to talk to you! How are *you* feeling today? \ud83d\ude0a", "I'm wonderful! More importantly, how are you doing?"]);
-            }
-
-            // --- Identity ---
-            if (t.includes('my name') || t.includes('who am i') || t.includes('who is this')) {
-                const name = state.recipientInfo?.full_name || "dear";
-                return `Your name is ${name}! And I'm your CareTaker companion, always here for you. \ud83d\ude0a`;
-            }
-
-            // --- Feelings (positive) ---
-            if (['i feel good', 'i\'m fine', 'i\'m great', 'i\'m happy', 'feeling good', 'doing well', 'feeling great', 'i feel fantastic'].some(p => t.includes(p))) {
-                return pick(["That's wonderful to hear! \ud83d\ude04 What made your day good?", "I'm so happy you're feeling great! Keep that beautiful spirit going! \ud83c\udf1f"]);
-            }
-
-            // --- Goodbye ---
-            if (['bye', 'goodbye', 'good night', 'goodnight', 'see you'].some(g => t.includes(g))) {
-                return pick(["Good night, sleep tight! I'll be right here when you wake up. \ud83c\udf19\u2728", "Take care, dear! I'm always just a word away. \ud83d\ude0a\ud83d\udc9c"]);
-            }
-
-            // --- Stories ---
-            if (t.includes('story') || t.includes('tell me something')) {
-                return pick([
-                    "Once there was a wise old owl in a big oak tree. Animals came with their worries. The owl said, 'Close your eyes and listen to the wind \u2014 it carries away what you don't need.' And they always felt better. \ud83c\udf1f",
-                    "A little girl planted a seed and waited. Days passed, nothing happened. She kept watering it. One morning, the most beautiful flower bloomed \u2014 brighter than any other. Patience, she learned, is the truest magic. \u2728",
-                    "A river was afraid of the ocean. 'I'll disappear!' it cried. A wise mountain said, 'You won't disappear \u2014 you'll become something bigger.' When the river met the sea, it became infinite. \ud83c\udf0a"
-                ]);
-            }
-
-            // --- Jokes ---
-            if (t.includes('joke') || t.includes('make me laugh') || t.includes('something funny')) {
-                return pick(["Why don't scientists trust atoms? Because they make up everything! \ud83d\ude04", "What do you call a bear with no teeth? A gummy bear! \ud83d\udc3b", "Why did the scarecrow win an award? He was outstanding in his field! \ud83c\udf3e", "What did the ocean say to the shore? Nothing, it just waved! \ud83c\udf0a"]);
-            }
-
-            // --- Health advice ---
-            if (t.includes('health') || t.includes('daily') && t.includes('basis') || t.includes('tips') || t.includes('advice') || t.includes('what should') || t.includes('routine') || t.includes('healthy')) {
-                return pick([
-                    "Great question! Here are key daily habits for good health: 1) Walk for at least 20\u201330 minutes, 2) Drink 6\u20138 glasses of water, 3) Eat fruits, vegetables \u0026 whole grains, 4) Take medicines on time, 5) Get 7\u20138 hours of sleep, 6) Do light stretching or yoga, 7) Stay socially connected \u2014 talk to someone you love! \ud83d\udcaa\ud83d\ude0a",
-                    "For elderly health, these are very important daily habits: Morning walk or chair exercises, balanced meals with less salt and sugar, proper hydration, taking prescribed medications on time, mental stimulation like reading or puzzles, and most importantly \u2014 staying connected with loved ones. You're already doing great by talking to me! \u2764\ufe0f"
-                ]);
-            }
-
-            // --- Food ---
-            if (['food', 'hungry', 'eat', 'breakfast', 'lunch', 'dinner', 'meal'].some(w => t.includes(w))) {
-                return pick(["Eating well is so important! Have you had your meals today? Remember to drink plenty of water too! \ud83e\udd5b", "How about something warm and comforting? Make sure you're eating your fruits and veggies! \ud83c\udf4e"]);
-            }
-            // --- Medicine ---
-            if (['medicine', 'tablet', 'pill', 'medication'].some(w => t.includes(w))) {
-                return "Taking your medicine on time is very important! Want me to set a reminder? Just say 'remind me to take medicine in X minutes'. \ud83d\udc8a";
-            }
-            // --- Exercise ---
-            if (t.includes('walk') || t.includes('time to go')) {
-                const hour = new Date().getHours();
-                if (hour >= 6 && hour <= 9) return "It's a beautiful morning! Right now is actually the perfect time for a gentle 20-minute walk. The air is fresh and the sun is mild. 😊";
-                if (hour >= 17 && hour <= 19) return "The evening air is lovely right now. It's a great time for a short stroll before dinner! 🌅";
-                if (hour > 9 && hour < 17) return "It might be a bit warm outside right now. Perhaps wait until the evening, around 5 or 6 PM? In the meantime, we could do some light chair stretches! 🪑";
-                return "It's a bit late for a walk right now. How about we plan one for tomorrow morning? For now, some deep breathing would be wonderful. 🌙";
-            }
-            if (['exercise', 'yoga', 'stretch', 'workout'].some(w => t.includes(w))) {
-                return pick(["Light exercise is wonderful! Even a short walk or gentle stretching can make you feel much better. Take it slow! \ud83d\udcaa", "Movement is medicine! How about some gentle chair exercises? Remember to breathe deeply! \ud83e\uddd8"]);
-            }
-            // --- Sleep ---
-            if (['sleep', 'tired', 'sleepy', 'nap', 'insomnia', 'can\'t sleep', 'rest'].some(w => t.includes(w))) {
-                return pick(["Rest is so important. Would you like me to play calming music to help you relax? \ud83c\udf19", "Good sleep matters a lot. Try deep breathing \u2014 in through the nose, out through the mouth. Want me to guide you? \ud83c\udf19"]);
-            }
-            // --- Gratitude ---
-            if (['thank you', 'thanks', 'grateful', 'appreciate'].some(w => t.includes(w))) {
-                return pick(["You're very welcome, dear! It makes me happy to help. \ud83e\udd17", "The pleasure is all mine! I'm always here for you. \ud83d\udc9a"]);
-            }
-            // --- Compliments ---
-            if (['you\'re nice', 'you\'re kind', 'love you', 'you\'re great', 'you help me'].some(w => t.includes(w))) {
-                return pick(["That means the world to me! YOU are the wonderful one! \ud83e\udd17\ud83d\udc9c", "You just made my day! I'm so glad I can be here with you. \ud83d\ude0a\u2764\ufe0f"]);
-            }
-            // --- Memories ---
-            if (['remember', 'memory', 'old days', 'when i was young', 'back then'].some(w => t.includes(w))) {
-                return pick(["I love hearing about your memories! Every memory is a treasure. What's a favourite that makes you smile? \ud83c\udf1f", "The past holds so many beautiful moments. Would you like to share one with me? \u2728"]);
-            }
-            // --- Breathing ---
-            if (['breathing', 'breathe', 'calm down', 'anxiety', 'panicking'].some(w => t.includes(w))) {
-                return "Let's do this together. Breathe in slowly... 1... 2... 3... 4... Hold... 1... 2... 3... 4... Now out slowly... 1... 2... 3... 4... 5... 6. You're doing wonderfully. \ud83c\udf3f";
-            }
-            // --- Time/Date ---
-            if (t.includes('what time') || t.includes('time is it')) { return `It's ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. ${getTimeGreeting()}`; }
-            if (t.includes('what day') || t.includes('what date') || t.includes('today')) { return `Today is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}. \ud83d\udcc5`; }
-
-            // --- Weather ---
-            if (t.includes('weather')) { return "I wish I could peek outside! Why don't you look out your window and tell me what you see? Is it nice today? \ud83c\udf24\ufe0f"; }
-
-            // --- Reminders ---
-            if (t.includes('remind me')) {
-                const tm = t.match(/in (\d+) (second|minute|hour)/), am = t.match(/remind me to (.+?) in/);
-                if (tm && am) {
-                    let ms = parseInt(tm[1]) * 1000;
-                    if (tm[2].startsWith('minute')) ms *= 60;
-                    if (tm[2].startsWith('hour')) ms *= 3600;
-                    state.reminders.push({ id: Date.now(), text: am[1], time: Date.now() + ms, displayTime: new Date(Date.now() + ms).toLocaleTimeString() });
-                    saveData(); renderReminders();
-                    return `Got it! I'll remind you to ${am[1]} in ${tm[1]} ${tm[2]}(s). \u23f0`;
+        async function fetchReminders() {
+            const token = localStorage.getItem('token');
+            const rid = localStorage.getItem('selectedRecipientId');
+            if (!token || !rid) return;
+            try {
+                const res = await fetch(`http://127.0.0.1:8000/api/voice-bot/reminders/${rid}`, { headers: { 'Authorization': 'Bearer ' + token } });
+                const data = await res.json();
+                if (data.code === 200) {
+                    state.reminders = data.result.reminders;
+                    renderReminders();
                 }
-                return "Sure! Say 'remind me to [task] in [X] minutes'. \u23f0";
-            }
+            } catch (e) { }
+        }
 
-            // --- Vitals ---
-            if (t.includes('heart rate') || t.includes('pulse')) {
-                const n = t.match(/\d+/);
-                if (n) { state.vitals.heartRate = parseInt(n[0]); updateVitals(); return `Heart rate logged: ${n[0]} bpm. ${parseInt(n[0]) > 100 ? 'That seems elevated. Are you okay?' : 'Looking good!'} \u2764\ufe0f`; }
-                return `Your heart rate is ${state.vitals.heartRate} bpm. Want to update it?`;
-            }
-            if (t.includes('blood pressure') || t.includes('bp')) {
-                const n = t.match(/(\d{2,3})\s*(?:over|\/)\s*(\d{2,3})/);
-                if (n) { state.vitals.bloodPressure = `${n[1]}/${n[2]}`; updateVitals(); return `BP logged: ${n[1]}/${n[2]}. ${parseInt(n[1]) > 140 ? 'That\'s a bit high, let\'s watch it.' : 'Looks normal!'} \ud83d\udc99`; }
-                return `Your BP is ${state.vitals.bloodPressure}.`;
-            }
-            if (t.includes('temperature') || t.includes('fever')) {
-                const n = t.match(/\d+\.?\d*/);
-                if (n) { state.vitals.temperature = parseFloat(n[0]); updateVitals(); return `Temp recorded: ${n[0]}\u00b0F. ${parseFloat(n[0]) > 100 ? 'Slight fever! Please rest and drink fluids.' : 'Normal range!'} \ud83c\udf21\ufe0f`; }
-                return `Your temperature is ${state.vitals.temperature}\u00b0F.`;
-            }
-            if (t.includes('oxygen') || t.includes('o2')) { return `Oxygen saturation is ${state.vitals.oxygen}%. Looking good! \ud83d\udca8`; }
-            if (t.includes('vitals') || t.includes('how am i doing') || t.includes('health status')) {
-                return `Here are your vitals: Heart Rate ${state.vitals.heartRate} bpm, BP ${state.vitals.bloodPressure}, Oxygen ${state.vitals.oxygen}%, Temp ${state.vitals.temperature}\u00b0F, Sleep ${state.vitals.sleepScore}/100. Everything looks good! \ud83d\udc9a`;
-            }
-            if (t.includes('restart monitoring') || t.includes('reset sensor') || t.includes('reset vital')) {
-                state.vitals = { heartRate: 72, bloodPressure: '120/80', temperature: 98.6, oxygen: 98, sleepScore: 85, weight: 70, height: 175, bmi: 22.9, lastUpdated: new Date().toLocaleTimeString() };
-                updateVitals(); return "All sensors reset to defaults. Monitoring restarted! \u2705";
-            }
-            if (t.includes('daily report') || t.includes('summary')) {
-                return `Today's Summary: Heart Rate avg ${state.vitals.heartRate} bpm, Sleep Score ${state.vitals.sleepScore}/100, Oxygen ${state.vitals.oxygen}%. ${state.stressCount > 0 ? 'We had some tough moments, but you handled them beautifully.' : 'It\'s been a good day!'} \ud83d\udccb`;
-            }
+        async function initDefaultReminders() {
+            const token = localStorage.getItem('token');
+            const rid = localStorage.getItem('selectedRecipientId');
+            await fetch(`http://127.0.0.1:8000/api/voice-bot/init-reminders/${rid}`, { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+            fetchReminders();
+        }
 
-            // --- Real Health Analysis Access ---
-            if (t.includes('health analysis') || t.includes('my reports') || t.includes('medical summary') || t.includes('what did the doctor say') || (t.includes('health') && t.includes('status'))) {
-                if (!state.healthSummary) {
-                    return "I don't have your latest medical summary yet. If your caretaker has uploaded any reports, I'll be able to discuss them with you soon! In the meantime, your vitals looking good. \ud83d\ude0a";
+        async function addReminder(e) {
+            e.preventDefault();
+            const text = document.getElementById('rem-text').value;
+            const time = document.getElementById('rem-time').value;
+            const token = localStorage.getItem('token');
+            const rid = localStorage.getItem('selectedRecipientId');
+
+            await fetch(`http://127.0.0.1:8000/api/voice-bot/reminders`, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recipient_id: parseInt(rid), reminder_type: 'custom', reminder_text: text, scheduled_time: time, recurrence: 'daily' })
+            });
+            e.target.reset();
+            fetchReminders();
+        }
+
+        async function deleteReminder(id) {
+            const token = localStorage.getItem('token');
+            await fetch(`http://127.0.0.1:8000/api/voice-bot/reminders/${id}`, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token } });
+            fetchReminders();
+        }
+
+        async function pollTriggers() {
+            const token = localStorage.getItem('token');
+            const rid = localStorage.getItem('selectedRecipientId');
+            if (!token || !rid) return;
+            try {
+                const res = await fetch(`http://127.0.0.1:8000/api/voice-bot/triggers/${rid}`, { headers: { 'Authorization': 'Bearer ' + token } });
+                const data = await res.json();
+                if (data.code === 200 && data.result.triggers && data.result.triggers.length > 0) {
+                    data.result.triggers.forEach(trigger => {
+                        const msg = trigger.text;
+                        addUIMessage('bot', msg);
+                        speak(msg);
+                    });
                 }
-                // Extract plain text from the HTML summary if needed, but for now we'll just give a high level overview
-                const summaryLines = state.healthSummary.replace(/<[^>]*>/g, '').split('.').slice(0, 3).join('.') + '.';
-                return `Based on your recent medical records for ${state.recipientInfo?.full_name || 'you'}: ${summaryLines} \ud83d\udccb Would you like me to play some music while you rest?`;
-            }
-
-            // --- Fallback used to be here, now returning null to trigger Gemini ---
-            return null;
+            } catch (e) { }
         }
 
-        // ========== HELPERS ==========
-        function updateVitals() { state.vitals.lastUpdated = new Date().toLocaleTimeString(); saveData(); renderVitals(); }
-
-        function startVideoCall() {
-            document.getElementById('call-modal').classList.remove('hidden');
-            lucide.createIcons();
-        }
-        function endVideoCall() {
-            document.getElementById('call-modal').classList.add('hidden');
-            addMessage('bot', 'Call ended. Hope that was a nice chat! \ud83d\ude0a');
-        }
-        function triggerEmergency() { handleUserMessage("Emergency help me!"); }
-        function toggleEmergencyMode(active) {
-            state.emergencyMode = active;
-            localStorage.setItem('healthBotEmergency', active);
-            const header = document.getElementById('header'), badge = document.getElementById('emergency-badge');
-            if (active) { header.classList.remove('bg-[#4A90E2]'); header.classList.add('bg-red-600'); badge.classList.remove('hidden'); }
-            else { header.classList.add('bg-[#4A90E2]'); header.classList.remove('bg-red-600'); badge.classList.add('hidden'); }
-        }
-
-        // ========== CHAT ==========
-        async function handleUserMessage(text) {
+        // ========== BACKEND CHAT INTEGRATION ==========
+        async function handleUserMessage(text, triggerType = "user_initiated") {
             if (!text.trim()) return;
-            addMessage('user', text);
 
-            // Try local command matching first
-            const localReply = processCommand(text);
-            if (localReply) {
-                setTimeout(() => { addMessage('bot', localReply); speak(localReply); }, 400);
+            // Add user message to UI immediately for feedback
+            if (triggerType === "user_initiated") {
+                addUIMessage('user', text);
+            }
+
+            // Local Music Controls Before Gemini (For fast response)
+            const t = text.toLowerCase();
+            if (t.includes('play my fav') || t.includes('play my favourite')) { playSong(0); addUIMessage('bot', "Playing your favourite song. Enjoy! \u2764\ufe0f"); return; }
+            if (t.includes('play a song') || t.includes('play music')) { playSong(1); addUIMessage('bot', "Playing some calming music. \ud83c\udfb5"); return; }
+            if (t.includes('stop') && (t.includes('music') || t.includes('song'))) { controlMusic('stop'); addUIMessage('bot', "Music stopped."); return; }
+
+            // Local Calling Emergency Before Gemini
+            if (t.includes('emergency') || t.includes('911')) {
+                toggleEmergencyMode(true);
+                addUIMessage('bot', "🚨 EMERGENCY ALERT TRIGGERED. Notifying caretaker immediately.");
                 return;
             }
 
-            // If no local match, call backend Gemini AI
             try {
                 const token = localStorage.getItem('token');
                 const rid = localStorage.getItem('selectedRecipientId');
                 const res = await fetch('http://127.0.0.1:8000/api/voice-bot/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                    body: JSON.stringify({
-                        text: text,
-                        recipient_id: rid,
-                        context: { vitals: state.vitals }
-                    })
+                    body: JSON.stringify({ text: text, recipient_id: parseInt(rid), session_id: sessionId, trigger_type: triggerType })
                 });
                 const data = await res.json();
                 if (data.code === 200 && data.result.reply) {
-                    addMessage('bot', data.result.reply);
+                    const mood = data.result.mood_detected;
+
+                    if (triggerType === "user_initiated" && state.messages.length > 0) {
+                        // Update the last user message with mood
+                        state.messages[state.messages.length - 1].mood = mood;
+                    }
+
+                    addUIMessage('bot', data.result.reply);
                     speak(data.result.reply);
+
+                    // Show Depression Alert if Flagged
+                    if (data.result.depression_risk) {
+                        document.getElementById('depression-alert').classList.remove('hidden');
+                    } else {
+                        document.getElementById('depression-alert').classList.add('hidden');
+                    }
+
                 } else {
                     throw new Error("API Error");
                 }
             } catch (e) {
-                const fallback = "I'm having a little trouble thinking of the right answer right now. But I'm always here to listen! Would you like to hear some music instead? \ud83d\ude0a";
-                addMessage('bot', fallback);
+                const fallback = "I'm having a little trouble thinking of the right answer right now. Would you like to hear some music instead? \ud83d\ude0a";
+                addUIMessage('bot', fallback);
                 speak(fallback);
             }
         }
+
         function handleManualSubmit(e) { e.preventDefault(); const input = document.getElementById('user-input'); handleUserMessage(input.value); input.value = ''; }
-        function addMessage(sender, text) {
-            state.messages.push({ id: Date.now(), sender, text });
+
+        function addUIMessage(sender, text, mood = null) {
+            state.messages.push({ id: Date.now(), sender, text, mood });
             if (state.messages.length > 100) state.messages = state.messages.slice(-80);
-            saveData(); renderMessages();
+            renderMessages();
         }
+
         function clearChat() {
-            state.messages = [{ id: Date.now(), sender: 'bot', text: "Chat cleared and health data refreshed! \ud83d\ude0a Hello again, dear. How can I help you today?" }];
-            state.stressCount = 0; state.supportMode = false;
-            loadBackendData();
-            saveData(); renderMessages();
-            speak("Chat cleared and health data refreshed! Hello again, dear. How can I help you today?");
+            state.messages = [];
+            document.getElementById('depression-alert').classList.add('hidden');
+            renderMessages();
+            handleUserMessage("Hello again!", "proactive_checkin"); // greet again
         }
+
         function renderMessages() {
             const c = document.getElementById('chat-container');
-            c.innerHTML = state.messages.map(m => `
-            <div class="flex w-full ${m.sender === 'user' ? 'justify-end' : 'justify-start'}">
-                <div class="flex max-w-[80%] ${m.sender === 'user' ? 'flex-row-reverse' : 'flex-row'} items-start gap-2">
-                    <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${m.sender === 'user' ? 'bg-indigo-500' : 'bg-[#4A90E2]'} text-white shadow-sm">
-                        <i data-lucide="${m.sender === 'user' ? 'user' : 'heart-handshake'}" class="w-4 h-4"></i>
+            c.innerHTML = state.messages.map(m => {
+                const moodBadge = m.mood && moodEmojis[m.mood] ? `<span class="text-lg ml-2" title="Detected Mood: ${m.mood}">${moodEmojis[m.mood]}</span>` : '';
+                return `
+                <div class="flex w-full ${m.sender === 'user' ? 'justify-end' : 'justify-start'}">
+                    <div class="flex max-w-[80%] ${m.sender === 'user' ? 'flex-row-reverse' : 'flex-row'} items-start gap-2">
+                        <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${m.sender === 'user' ? 'bg-indigo-500' : 'bg-[#4A90E2]'} text-white shadow-sm">
+                            <i data-lucide="${m.sender === 'user' ? 'user' : 'heart-handshake'}" class="w-4 h-4"></i>
+                        </div>
+                        <div class="flex items-center p-3 rounded-2xl text-sm leading-relaxed shadow-sm ${m.sender === 'user' ? 'bg-indigo-500 text-white rounded-tr-none' : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none'}">
+                            <span>${m.text}</span>
+                            ${m.sender === 'user' ? moodBadge : ''}
+                        </div>
                     </div>
-                    <div class="p-3 rounded-2xl text-sm leading-relaxed shadow-sm ${m.sender === 'user' ? 'bg-indigo-500 text-white rounded-tr-none' : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none'}">${m.text}</div>
-                </div>
-            </div>`).join('');
+                </div>`
+            }).join('');
             lucide.createIcons(); c.scrollTop = c.scrollHeight;
         }
 
-        // ========== VITALS & REMINDERS ==========
+        // ========== VITALS & REMINDERS RENDER ==========
         function renderVitals() {
             document.getElementById('val-hr').innerText = state.vitals.heartRate;
             document.getElementById('val-bp').innerText = state.vitals.bloodPressure;
@@ -735,13 +610,36 @@
             document.getElementById('val-hw').innerText = `H:${state.vitals.height} W:${state.vitals.weight}`;
             document.getElementById('last-updated').innerText = state.vitals.lastUpdated;
         }
+
         function renderReminders() {
             const list = document.getElementById('reminders-list');
             if (state.reminders.length === 0) { list.innerHTML = '<p class="text-sm text-slate-400 italic">No active reminders.</p>'; }
-            else { list.innerHTML = state.reminders.map(r => `<div class="flex justify-between items-center bg-yellow-50 p-2 rounded-lg border border-yellow-100"><div class="text-xs text-yellow-800"><span class="font-bold block">${r.text}</span><span class="opacity-75">${r.displayTime}</span></div><button onclick="deleteReminder(${r.id})" class="text-yellow-600 hover:text-red-500 p-1 cursor-pointer"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button></div>`).join(''); lucide.createIcons(); }
+            else {
+                list.innerHTML = state.reminders.map(r => `
+                <div class="flex justify-between items-center bg-yellow-50 p-2 rounded-lg border border-yellow-100 mb-1">
+                    <div class="text-xs text-yellow-800">
+                        <span class="font-bold block">${r.text}</span>
+                        <span class="opacity-75">${r.time} (${r.recurrence})</span>
+                    </div>
+                    <button onclick="deleteReminder(${r.id})" class="text-yellow-600 hover:text-red-500 p-1 cursor-pointer">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>`).join('');
+                lucide.createIcons();
+            }
         }
-        function deleteReminder(id) { state.reminders = state.reminders.filter(r => r.id !== id); saveData(); renderReminders(); }
-        function saveData() { localStorage.setItem('healthBotMessages', JSON.stringify(state.messages)); localStorage.setItem('healthBotVitals', JSON.stringify(state.vitals)); localStorage.setItem('healthBotReminders', JSON.stringify(state.reminders)); }
+
+        // ========== HELPERS ==========
+        function startVideoCall() { document.getElementById('call-modal').classList.remove('hidden'); lucide.createIcons(); }
+        function endVideoCall() { document.getElementById('call-modal').classList.add('hidden'); addUIMessage('bot', 'Call ended. Hope that was a nice chat! \ud83d\ude0a'); }
+        function triggerEmergency() { handleUserMessage("Emergency help me!", "user_initiated"); }
+        function toggleEmergencyMode(active) {
+            state.emergencyMode = active;
+            localStorage.setItem('healthBotEmergency', active);
+            const header = document.getElementById('header'), badge = document.getElementById('emergency-badge');
+            if (active) { header.classList.remove('bg-[#4A90E2]'); header.classList.add('bg-red-600'); badge.classList.remove('hidden'); }
+            else { header.classList.add('bg-[#4A90E2]'); header.classList.remove('bg-red-600'); badge.classList.add('hidden'); }
+        }
 
         // ========== LISTENING ==========
         function setListening(status) {
@@ -755,14 +653,22 @@
 
         // ========== INIT ==========
         function init() {
-            lucide.createIcons(); renderVitals(); renderReminders(); renderMessages();
+            lucide.createIcons(); renderVitals(); renderReminders();
             loadBackendData();
+            fetchReminders();
+
             if (localStorage.getItem('healthBotEmergency') === 'true') toggleEmergencyMode(true);
-            setInterval(() => {
-                let changed = false;
-                state.reminders = state.reminders.filter(r => { if (r.time <= Date.now()) { addMessage('bot', `\u23f0 Reminder: ${r.text}`); speak(`Reminder: ${r.text}`); changed = true; return false; } return true; });
-                if (changed) { saveData(); renderReminders(); }
+
+            // Proactive Greet
+            setTimeout(() => {
+                handleUserMessage("Provide a gentle morning/evening contextual greeting directly based on my name and latest info.", "proactive_checkin");
             }, 1000);
+
+            // 60-Second Trigger Polling
+            setInterval(() => {
+                pollTriggers();
+            }, 60000);
+
             synth.getVoices();
             speechSynthesis.onvoiceschanged = () => synth.getVoices();
         }

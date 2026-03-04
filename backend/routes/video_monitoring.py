@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Header, UploadFile, File, BackgroundTasks, Request, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Header, UploadFile, File, BackgroundTasks, Request, Form, Query
 from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List, Dict
@@ -476,25 +476,31 @@ async def get_monitoring_history(
 
 @router.get("/stats")
 async def get_monitoring_stats(
-    authorization: Optional[str] = Header(None)
+    care_recipient_id: Optional[int] = Query(None, description="Filter by care recipient ID"),
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
 ):
     """
-    Get statistics for video monitoring.
+    Get true statistics for video monitoring from the database.
     """
     username = _get_username_from_auth(authorization)
     if not username:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token")
         
-    try:
-        output_dir = Path("processed_videos")
-        total_uploads = len(list(output_dir.glob("analyzed_*.mp4"))) if output_dir.exists() else 0
+    user = UsersRepo.find_by_username(db, CareTaker, username)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         
-        total_alerts = 0
-        for session_id in stream_manager.get_active_sessions():
-            s = stream_manager.get_session(session_id)
-            if s:
-                total_alerts += len(s.get_alerts())
+    try:
+        query = db.query(VideoAnalysis).filter(VideoAnalysis.caretaker_id == user.id)
+        if care_recipient_id:
+            query = query.filter(VideoAnalysis.recipient_id == care_recipient_id)
             
+        analyses = query.all()
+        
+        total_uploads = len(analyses)
+        total_alerts = sum((a.fall_count or 0) for a in analyses)
+        
         return {
             "total_uploads": total_uploads,
             "total_alerts": total_alerts
@@ -739,6 +745,7 @@ async def get_inactivity_threshold(authorization: Optional[str] = Header(None)):
 @router.get("/recipient/{recipient_id}/stats")
 async def get_recipient_video_stats(
     recipient_id: int,
+    days: int = Query(7, description="Number of days to analyze"),
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
@@ -749,8 +756,13 @@ async def get_recipient_video_stats(
     if not username:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token")
     
-    # 1. Get all analysis records for this recipient
-    analyses = db.query(VideoAnalysis).filter(VideoAnalysis.recipient_id == recipient_id).all()
+    # 1. Get all analysis records for this recipient within the time range
+    from datetime import timedelta
+    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    analyses = db.query(VideoAnalysis).filter(
+        VideoAnalysis.recipient_id == recipient_id,
+        VideoAnalysis.timestamp >= cutoff_date
+    ).all()
     
     if not analyses:
         return {

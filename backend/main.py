@@ -33,6 +33,7 @@ import tables.vital_signs as vital_signs_tables
 import tables.audio_events as audio_events_tables
 import tables.medical_conditions as medical_conditions_tables
 import tables.disease_dictionary as disease_dictionary_tables
+import tables.conversation_history as conversation_history_tables
 
 # Import routes
 import routes.users as user_routes
@@ -50,6 +51,7 @@ vital_signs_tables.Base.metadata.create_all(bind=engine)
 audio_events_tables.Base.metadata.create_all(bind=engine)
 medical_conditions_tables.Base.metadata.create_all(bind=engine)
 disease_dictionary_tables.Base.metadata.create_all(bind=engine)
+conversation_history_tables.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="CareTaker AI Backend")
 

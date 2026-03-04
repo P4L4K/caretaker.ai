@@ -585,7 +585,14 @@ function playAlertSound() {
 
 async function loadStats() {
     try {
-        const response = await fetch(`${API_BASE}/video-monitoring/stats`, {
+        const urlParams = new URLSearchParams(window.location.search);
+        const recipientId = urlParams.get('recipient_id');
+        let statsUrl = `${API_BASE}/video-monitoring/stats`;
+        if (recipientId) {
+            statsUrl += `?care_recipient_id=${recipientId}`;
+        }
+
+        const response = await fetch(statsUrl, {
             headers: {
                 'Authorization': `Bearer ${token}`
             }

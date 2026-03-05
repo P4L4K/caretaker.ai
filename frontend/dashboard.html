@@ -4,6 +4,9 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>CareTaker &middot; Profile Hub</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -1205,9 +1208,7 @@
                             <i class="fas fa-cog"></i>
                             <span>Settings</span>
                         </a>
-                        <div class="status-pill">
-                            Logged in
-                        </div>
+
                         <button id="logoutBtn" class="ghost-btn"
                             style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border-color: #ef4444; padding: 6px 12px; border-radius: 20px; font-weight: 500; font-size: 0.85rem; display: flex; align-items: center; gap: 6px;">
                             <i class="fas fa-sign-out-alt" style="font-size: 0.9em;"></i>
@@ -1304,6 +1305,7 @@
                             </div>
                         </div>
                     </div>
+
 
                     <!-- SpO2 -->
                     <div class="stat-pill"
@@ -1919,11 +1921,17 @@
         }
 
         function updateVitalsPanel(recipient) {
-            // Priority: recipient metadata -> vitals payload
-            const h = recipient.height || (recipient.vitals && recipient.vitals.height) || '-';
-            const w = recipient.weight || (recipient.vitals && recipient.vitals.weight) || '-';
+            // BMI is always calculated from profile height & weight — never from sensor
+            const h = parseFloat(recipient.height) || 0;   // cm
+            const w = parseFloat(recipient.weight) || 0;   // kg
             const hwEl = document.getElementById('val-hw');
-            if (hwEl) hwEl.textContent = `H:${h}cm W:${w}kg`;
+            if (hwEl) hwEl.textContent = `H:${h || '-'}cm W:${w || '-'}kg`;
+
+            // Calculate BMI: weight(kg) / (height(m))²
+            let calculatedBmi = null;
+            if (h > 0 && w > 0) {
+                calculatedBmi = parseFloat((w / ((h / 100) ** 2)).toFixed(1));
+            }
 
             const vitals = recipient.vitals;
             if (!vitals) {
@@ -1932,7 +1940,7 @@
                 document.getElementById('val-o2').textContent = '--';
                 document.getElementById('val-sleep').textContent = '--';
                 document.getElementById('val-temp').textContent = '--';
-                document.getElementById('val-bmi').textContent = '--';
+                document.getElementById('val-bmi').textContent = calculatedBmi !== null ? calculatedBmi : '--';
                 document.getElementById('last-updated').textContent = 'Unknown';
 
                 if (charts.hr) updateVitalChart(charts.hr, 0, 200, '#e2e8f0');
@@ -1940,17 +1948,17 @@
                 if (charts.o2) updateVitalChart(charts.o2, 0, 100, '#e2e8f0');
                 if (charts.temp) updateVitalChart(charts.temp, 0, 120, '#e2e8f0');
                 if (charts.sleep) updateVitalChart(charts.sleep, 0, 100, '#e2e8f0');
-                if (charts.bmi) updateVitalChart(charts.bmi, 0, 50, '#e2e8f0');
+                if (charts.bmi) updateVitalChart(charts.bmi, calculatedBmi || 0, 50, getStatusColor('bmi', calculatedBmi));
                 return;
             }
 
-            // Update Text
+            // Update Text — BMI always from profile, never from sensor
             document.getElementById('val-hr').textContent = vitals.heart_rate || '--';
             document.getElementById('val-bp').textContent = `${vitals.systolic_bp || '--'}/${vitals.diastolic_bp || '--'}`;
             document.getElementById('val-o2').textContent = vitals.oxygen_saturation || '--';
             document.getElementById('val-sleep').textContent = vitals.sleep_score || '--';
             document.getElementById('val-temp').textContent = vitals.temperature || '--';
-            document.getElementById('val-bmi').textContent = vitals.bmi || '--';
+            document.getElementById('val-bmi').textContent = calculatedBmi !== null ? calculatedBmi : '--';
 
             if (vitals.recorded_at) {
                 const date = new Date(vitals.recorded_at);
@@ -1965,7 +1973,7 @@
             if (charts.o2) updateVitalChart(charts.o2, vitals.oxygen_saturation || 0, 100, getStatusColor('o2', vitals.oxygen_saturation));
             if (charts.temp) updateVitalChart(charts.temp, vitals.temperature || 0, 120, getStatusColor('temp', vitals.temperature));
             if (charts.sleep) updateVitalChart(charts.sleep, vitals.sleep_score || 0, 100, getStatusColor('sleep', vitals.sleep_score));
-            if (charts.bmi) updateVitalChart(charts.bmi, vitals.bmi || 0, 50, getStatusColor('bmi', vitals.bmi));
+            if (charts.bmi) updateVitalChart(charts.bmi, calculatedBmi || 0, 50, getStatusColor('bmi', calculatedBmi));
         }
 
         function getSelectedRecipient() {

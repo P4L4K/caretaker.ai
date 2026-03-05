@@ -34,7 +34,6 @@ class WeatherWidget {
                 margin-bottom: 20px;
             ">
                 <div style="text-align: center; margin-bottom: 15px;">
-                    <h3 style="margin: 0; font-size: 1.2rem; font-weight: 600; color: #ffffff;" id="location">Loading...</h3>
                     <p id="current-time" style="margin: 4px 0 0; color: #cbd5e1; font-size: 0.9rem;">--:-- --</p>
                 </div>
                 
@@ -110,10 +109,8 @@ class WeatherWidget {
             return;
         }
 
-        // Update location
-        if (document.getElementById('location')) {
-            document.getElementById('location').textContent = data.location || 'Unknown';
-        }
+        // Weather data fetched
+
 
         // Update stats
         const updateElement = (id, value, suffix = '') => {

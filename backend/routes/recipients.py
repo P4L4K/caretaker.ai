@@ -742,7 +742,10 @@ async def get_care_recipient_profile(
             "test_value": l.normalized_value,
             "test_unit": l.normalized_unit,
             "test_date": str(l.recorded_date) if l.recorded_date else None,
-            "is_abnormal": l.is_abnormal
+            "is_abnormal": l.is_abnormal,
+            "report_id": l.report_id,
+            "reference_low": l.reference_range_low,
+            "reference_high": l.reference_range_high
         } for l in labs_raw
     ]
 

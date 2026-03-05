@@ -1050,54 +1050,138 @@
         function initLabCharts() {
             const labs = profileData.lab_values || [];
             const select = document.getElementById('labMetricSelect');
+            const chartContainer = document.getElementById('labChart').parentElement;
 
-            // Group labs by test_name
+            // Group labs by test_name, sorted by date within each group
             const grouped = {};
             labs.forEach(l => {
                 if (!grouped[l.test_name]) grouped[l.test_name] = [];
                 grouped[l.test_name].push(l);
             });
+            // Sort each group chronologically
+            Object.values(grouped).forEach(arr => arr.sort((a, b) => new Date(a.test_date) - new Date(b.test_date)));
 
-            const keys = Object.keys(grouped);
+            const keys = Object.keys(grouped).sort();
+
+            // Handle empty state — restore canvas if previously replaced
             if (!keys.length) {
-                document.getElementById('labChart').parentElement.innerHTML = '<div class="empty-state">No tracked lab results available for visualization.</div>';
+                chartContainer.innerHTML = '<div class="empty-state">No tracked lab results available for visualization.</div>';
                 select.style.display = 'none';
                 return;
             }
 
-            select.innerHTML = keys.map(k => `<option value="${k}">${k}</option>`).join('');
+            // Ensure canvas exists (may have been replaced by empty-state div)
+            if (!document.getElementById('labChart')) {
+                chartContainer.innerHTML = '<canvas id="labChart"></canvas>';
+            }
+            select.style.display = '';
+
+            // Preserve current selection if it still exists, else default to first
+            const prevSelection = select.value;
+            select.innerHTML = keys.map(k => `<option value="${k}"${k === prevSelection ? ' selected' : ''}>${k}</option>`).join('');
+            if (!grouped[select.value]) select.value = keys[0];
 
             const drawLabTrend = () => {
                 const metric = select.value;
                 const dataPoints = grouped[metric];
+                if (!dataPoints || !dataPoints.length) return;
+
                 const labels = dataPoints.map(d => new Date(d.test_date).toLocaleDateString());
                 const values = dataPoints.map(d => d.test_value);
                 const colors = dataPoints.map(d => d.is_abnormal ? '#e53e3e' : '#3182ce');
 
-                const ctx = document.getElementById('labChart').getContext('2d');
+                // Build datasets array
+                const datasets = [{
+                    label: metric + (dataPoints[0].test_unit ? ` (${dataPoints[0].test_unit})` : ''),
+                    data: values,
+                    borderColor: '#3182ce',
+                    backgroundColor: 'rgba(49,130,206,0.08)',
+                    pointBackgroundColor: colors,
+                    pointBorderColor: colors,
+                    pointRadius: 5,
+                    pointHoverRadius: 7,
+                    fill: true,
+                    tension: 0.3,
+                    borderWidth: 2
+                }];
+
+                // Add reference range bands if available
+                const refLow = dataPoints[0].reference_low;
+                const refHigh = dataPoints[0].reference_high;
+                if (refHigh != null) {
+                    datasets.push({
+                        label: 'Upper Limit',
+                        data: labels.map(() => refHigh),
+                        borderColor: 'rgba(229, 62, 62, 0.4)',
+                        borderDash: [6, 4],
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        fill: false
+                    });
+                }
+                if (refLow != null) {
+                    datasets.push({
+                        label: 'Lower Limit',
+                        data: labels.map(() => refLow),
+                        borderColor: 'rgba(56, 161, 105, 0.4)',
+                        borderDash: [6, 4],
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        fill: false
+                    });
+                }
+
+                const canvas = document.getElementById('labChart');
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
                 if (charts.labs) charts.labs.destroy();
+
                 charts.labs = new Chart(ctx, {
                     type: 'line',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: metric + (dataPoints[0].test_unit ? ` (${dataPoints[0].test_unit})` : ''),
-                            data: values,
-                            borderColor: '#3182ce',
-                            backgroundColor: 'rgba(49,130,206,0.1)',
-                            pointBackgroundColor: colors,
-                            pointRadius: 5,
-                            fill: true,
-                            tension: 0.2
-                        }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false }
+                    data: { labels, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: { boxWidth: 10, font: { size: 11 } }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    afterLabel: function (ctx) {
+                                        if (ctx.datasetIndex === 0) {
+                                            const pt = dataPoints[ctx.dataIndex];
+                                            let extra = [];
+                                            if (pt.is_abnormal) extra.push('⚠ Abnormal');
+                                            if (refLow != null && refHigh != null)
+                                                extra.push(`Normal: ${refLow} – ${refHigh}`);
+                                            return extra.join('\n');
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: { ticks: { maxRotation: 45, font: { size: 10 } } },
+                            y: {
+                                beginAtZero: false,
+                                title: { display: true, text: dataPoints[0].test_unit || 'Value' }
+                            }
+                        }
+                    }
                 });
             };
 
-            select.addEventListener('change', drawLabTrend);
-            drawLabTrend(); // Draw initially for first option
+            // Remove old listener to avoid duplicates, then add new one
+            const newSelect = select.cloneNode(true);
+            select.parentNode.replaceChild(newSelect, select);
+            newSelect.innerHTML = keys.map(k => `<option value="${k}"${k === (prevSelection && grouped[prevSelection] ? prevSelection : keys[0]) ? ' selected' : ''}>${k}</option>`).join('');
+            newSelect.addEventListener('change', drawLabTrend);
+            drawLabTrend(); // Draw initially
         }
+
 
         // ============================================
         //  TRIGGER BOOTSTRAP

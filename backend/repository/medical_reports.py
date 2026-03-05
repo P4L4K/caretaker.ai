@@ -37,6 +37,14 @@ def list_reports_for_recipient(db, care_recipient_id: int):
 def delete_medical_report(db, report_id: int):
     report = db.query(MedicalReport).filter(MedicalReport.id == report_id).first()
     if report:
+        # Delete associated lab values linked to this report
+        try:
+            from tables.medical_conditions import LabValue, ConditionHistory, MedicalAlert
+            deleted_labs = db.query(LabValue).filter(LabValue.report_id == report_id).delete(synchronize_session='fetch')
+            deleted_history = db.query(ConditionHistory).filter(ConditionHistory.report_id == report_id).delete(synchronize_session='fetch')
+            print(f"[repo.medical_reports] Cleaned up {deleted_labs} lab values, {deleted_history} condition history entries for report {report_id}")
+        except Exception as e:
+            print(f"[repo.medical_reports] Cleanup warning: {e}")
         db.delete(report)
         db.commit()
         return True

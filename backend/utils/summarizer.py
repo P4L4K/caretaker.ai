@@ -4,7 +4,7 @@ import re
 from dotenv import load_dotenv
 
 # Ensure environmental variables are loaded
-load_dotenv()
+load_dotenv(override=True)
 
 try:
     import requests
@@ -263,10 +263,7 @@ def summarize_text_via_gemini(text: str, target_words: int = 250) -> str:
 
     try:
         # Build the URL - use gemini-2.5-flash as default if endpoint not set
-        if endpoint:
-            url = f"{endpoint}?key={api_key}"
-        else:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
         
         # Set up headers and payload according to Gemini API spec
         headers = {

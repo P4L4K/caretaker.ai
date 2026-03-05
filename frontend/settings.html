@@ -931,6 +931,16 @@
             }, 3000);
         }
 
+        function showToast(msg, type) {
+            const t = document.getElementById('uploadToast');
+            const text = document.getElementById('toastText');
+            if (t && text) {
+                text.textContent = msg;
+                t.className = `show toast-${type}`;
+                setTimeout(() => t.classList.remove('show'), 3000);
+            }
+        }
+
         init();
     </script>
 </body>

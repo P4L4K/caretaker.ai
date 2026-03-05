@@ -10,7 +10,7 @@ import re
 from datetime import date
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 try:
     import requests

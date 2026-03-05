@@ -844,12 +844,28 @@ async def update_condition(recipient_id: int, condition_id: int, data: Condition
 @router.post("/care-recipients/{recipient_id}/medications", response_model=ResponseSchema)
 async def add_medication(recipient_id: int, data: MedicationInput, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
     from tables.medications import Medication, MedicationStatus
+    import datetime
+    # Parse start_date from request or default to today
+    start = datetime.date.today()
+    if data.start_date:
+        try:
+            start = datetime.date.fromisoformat(data.start_date)
+        except ValueError:
+            pass
+    # Compute end_date only if duration_days is set (None = lifetime)
+    end = None
+    if data.duration_days and data.duration_days > 0:
+        end = start + datetime.timedelta(days=data.duration_days)
+
     med = Medication(
         care_recipient_id=recipient_id,
         medicine_name=data.medicine_name,
         dosage=data.dosage,
         frequency=data.frequency,
         schedule_time=data.schedule_time,
+        duration_days=data.duration_days,
+        start_date=start,
+        end_date=end,
         status=MedicationStatus(data.status)
     )
     db.add(med)
@@ -859,16 +875,36 @@ async def add_medication(recipient_id: int, data: MedicationInput, authorization
 @router.patch("/care-recipients/{recipient_id}/medications/{med_id}", response_model=ResponseSchema)
 async def update_medication(recipient_id: int, med_id: int, data: MedicationInput, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
     from tables.medications import Medication, MedicationStatus
+    import datetime
     med = db.query(Medication).filter(Medication.medication_id == med_id, Medication.care_recipient_id == recipient_id).first()
-    if not med: raise HTTPException(404, "Medication not found")
-    
+    if not med:
+        raise HTTPException(404, "Medication not found")
+
     med.medicine_name = data.medicine_name
     med.dosage = data.dosage
     med.frequency = data.frequency
     med.schedule_time = data.schedule_time
+    med.duration_days = data.duration_days
     med.status = MedicationStatus(data.status)
+
+    # Update start_date if provided
+    if data.start_date:
+        try:
+            med.start_date = datetime.date.fromisoformat(data.start_date)
+        except ValueError:
+            pass
+    if not med.start_date:
+        med.start_date = datetime.date.today()
+
+    # Recompute end_date: None = lifetime (never auto-complete)
+    if data.duration_days and data.duration_days > 0 and med.start_date:
+        med.end_date = med.start_date + datetime.timedelta(days=data.duration_days)
+    else:
+        med.end_date = None  # lifetime — clear any previous end_date
+
     db.commit()
     return {"code": 200, "status": "success", "message": "Medication updated"}
+
 
 
 # Allergies

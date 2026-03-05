@@ -341,7 +341,7 @@
 <body>
 
     <div class="navbar">
-        <h1><i class="fas fa-user-circle"></i> Care-Recipient Patient Record</h1>
+        <h1><i class="fas fa-user-circle"></i> Medical Records</h1>
         <div>
             <button class="btn btn-outline" onclick="window.location.href='dashboard.html'"><i
                     class="fas fa-arrow-left"></i> Back to Hub</button>
@@ -364,7 +364,7 @@
         <!-- SECTION 1: OVERVIEW & SECTION 10: INSIGHTS -->
         <div class="card col-span-12">
             <div class="card-header">
-                <h2><i class="fas fa-id-card"></i> Recipient Overview & AI Insights</h2>
+                <h2><i class="fas fa-id-card"></i> Senior Overview & AI Insights</h2>
             </div>
             <div class="data-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));"
                 id="overviewGrid">
@@ -484,6 +484,21 @@
         </div>
     </div>
 
+    <!-- In-page Medication Toast -->
+    <div id="medReminderToast" style="display:none;position:fixed;top:20px;right:20px;z-index:9999;max-width:360px;
+         background:linear-gradient(135deg,#1a365d,#2a69ac);color:#fff;border-radius:14px;
+         padding:18px 22px;box-shadow:0 8px 32px rgba(0,0,0,0.35);font-family:'Segoe UI',sans-serif;">
+        <div style="display:flex;align-items:flex-start;gap:12px;">
+            <span style="font-size:28px;line-height:1;">💊</span>
+            <div style="flex:1;">
+                <div style="font-weight:700;font-size:15px;margin-bottom:4px;">Medicine Reminder</div>
+                <div id="medReminderToastBody" style="font-size:13px;opacity:0.9;"></div>
+            </div>
+            <button onclick="document.getElementById('medReminderToast').style.display='none';"
+                style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer;line-height:1;">×</button>
+        </div>
+    </div>
+
     <!-- Add/Update Medication -->
     <div id="medicationModal" class="modal">
         <div class="modal-content">
@@ -506,8 +521,30 @@
                     <input type="text" id="medFrequency" placeholder="e.g. Twice daily">
                 </div>
                 <div class="form-group">
-                    <label>Schedule Time</label>
+                    <label>Schedule Time <small style="color:#94a3b8;font-weight:400;">— for reminders (e.g. 08:00,
+                            20:00)</small></label>
                     <input type="text" id="medSchedule" placeholder="e.g. 08:00, 20:00">
+                </div>
+                <div class="form-group">
+                    <label>Start Date</label>
+                    <input type="date" id="medStartDate">
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:10px;">
+                        Duration (days)
+                        <span style="font-size:12px;color:#94a3b8;font-weight:400;">— leave blank or check
+                            Lifetime</span>
+                    </label>
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <input type="number" id="medDuration" min="1" max="3650" placeholder="e.g. 10" style="flex:1;"
+                            oninput="document.getElementById('medLifetime').checked=false;">
+                        <label
+                            style="display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap;cursor:pointer;">
+                            <input type="checkbox" id="medLifetime"
+                                onchange="if(this.checked){document.getElementById('medDuration').value='';document.getElementById('medDuration').disabled=true;}else{document.getElementById('medDuration').disabled=false;}">
+                            Lifetime / Ongoing
+                        </label>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>Status</label>
@@ -698,9 +735,7 @@
                 <div class="data-item"><div class="data-label">Age & Gender</div><div class="data-value">${info.age} / ${info.gender || '—'}</div></div>
                 <div class="data-item"><div class="data-label">Blood Group</div><div class="data-value">${info.blood_group || '—'}</div></div>
                 <div class="data-item"><div class="data-label">Height & Weight</div><div class="data-value">${info.height ? info.height + 'cm' : '—'} / ${info.weight ? info.weight + 'kg' : '—'}</div></div>
-                <div class="data-item"><div class="data-label">Location (City)</div><div class="data-value">${info.city || '—'}</div></div>
-                <div class="data-item"><div class="data-label">Emergency Contact</div><div class="data-value">${info.emergency_contact || '—'}</div></div>
-                <div class="data-item"><div class="data-label">Care Pathway</div><div class="data-value"><span class="badge ${info.respiratory_condition_status ? 'danger' : 'info'}">${info.respiratory_condition_status ? 'Respiratory' : 'General'}</span></div></div>
+               
                 ${riskHtml}
             `;
         }
@@ -729,22 +764,56 @@
         // Section 3: Medications
         function loadMedications() {
             const el = document.getElementById('medicationsList');
-            const items = (profileData.medications || []).filter(m => m.status === 'active');
+            const all = profileData.medications || [];
+            const items = all.filter(m => m.status === 'active');
             if (!items.length) { el.innerHTML = '<div class="empty-state">No active medications recorded.</div>'; return; }
 
-            el.innerHTML = items.map(m => `
-                <div class="list-item" style="display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <div class="list-item-title">
-                            ${m.medicine_name} <span class="badge info">${m.dosage || ''}</span>
+            el.innerHTML = items.map(m => {
+                const today = new Date();
+                const startDate = m.start_date ? new Date(m.start_date) : null;
+                const startLabel = startDate ? startDate.toLocaleDateString() : 'Today';
+
+                let endLabel = null, daysLeft = null;
+                if (m.end_date) {
+                    const ed = new Date(m.end_date);
+                    endLabel = ed.toLocaleDateString();
+                    daysLeft = Math.ceil((ed - today) / 86400000);
+                } else if (m.duration_days && startDate) {
+                    const ed = new Date(startDate);
+                    ed.setDate(ed.getDate() + m.duration_days);
+                    endLabel = ed.toLocaleDateString();
+                    daysLeft = Math.ceil((ed - today) / 86400000);
+                }
+
+                const isLifetime = !m.duration_days && !m.end_date;
+                const durationBadge = isLifetime
+                    ? `<span class="badge" style="background:#f0fdf4;color:#15803d;font-size:11px;">♾️ Lifetime</span>`
+                    : daysLeft !== null && daysLeft <= 3
+                        ? `<span class="badge" style="background:#fff3cd;color:#92400e;font-size:11px;">⚠️ ${daysLeft <= 0 ? 'Ends today' : daysLeft + ' day' + (daysLeft === 1 ? '' : 's') + ' left'}</span>`
+                        : `<span class="badge" style="background:#dbeafe;color:#1d4ed8;font-size:11px;">${m.duration_days}-day course</span>`;
+
+                const dateInfo = endLabel
+                    ? `📅 ${startLabel} → <strong>${endLabel}</strong>`
+                    : `📅 Started: ${startLabel}`;
+
+                return `
+                <div class="list-item" style="display:flex;justify-content:space-between;align-items:center;">
+                    <div style="flex:1;">
+                        <div class="list-item-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                            ${m.medicine_name}
+                            <span class="badge info">${m.dosage || ''}</span>
+                            ${durationBadge}
                         </div>
-                        <div class="list-item-meta">
-                            Schedule: ${m.frequency || ''} ${m.schedule_time ? 'at ' + m.schedule_time : ''}
+                        <div class="list-item-meta" style="margin-top:4px;">
+                            🕐 ${m.frequency || 'As needed'}${m.schedule_time ? ' at <strong>' + m.schedule_time + '</strong>' : ''}
+                        </div>
+                        <div class="list-item-meta" style="margin-top:3px;font-size:12px;color:#64748b;">
+                            ${dateInfo}
                         </div>
                     </div>
                     <button class="btn btn-sm btn-outline" onclick="showEditModal('medication', ${m.id})"><i class="fas fa-edit"></i></button>
                 </div>
-            `).join('');
+            `}).join('');
         }
 
         // Section 4: Allergies
@@ -782,6 +851,10 @@
                 document.getElementById('medicationModalTitle').innerText = 'Add Medication';
                 document.getElementById('medicationForm').reset();
                 document.getElementById('medicationId').value = '';
+                // Default start date to today
+                document.getElementById('medStartDate').value = new Date().toISOString().split('T')[0];
+                document.getElementById('medLifetime').checked = false;
+                document.getElementById('medDuration').disabled = false;
                 document.getElementById('medicationModal').style.display = 'flex';
             } else if (type === 'allergy') {
                 document.getElementById('allergyModalTitle').innerText = 'Add Allergy';
@@ -810,6 +883,11 @@
                 document.getElementById('medDosage').value = item.dosage || '';
                 document.getElementById('medFrequency').value = item.frequency || '';
                 document.getElementById('medSchedule').value = item.schedule_time || '';
+                document.getElementById('medStartDate').value = item.start_date || '';
+                const isLifetime = !item.duration_days && !item.end_date;
+                document.getElementById('medLifetime').checked = isLifetime;
+                document.getElementById('medDuration').value = item.duration_days || '';
+                document.getElementById('medDuration').disabled = isLifetime;
                 document.getElementById('medStatus').value = item.status || 'active';
                 document.getElementById('medicationModal').style.display = 'flex';
             } else if (type === 'allergy') {
@@ -848,16 +926,22 @@
         document.getElementById('medicationForm').onsubmit = async (e) => {
             e.preventDefault();
             const id = document.getElementById('medicationId').value;
+            const isLifetime = document.getElementById('medLifetime').checked;
+            const durationVal = document.getElementById('medDuration').value;
+            const startVal = document.getElementById('medStartDate').value;
             const data = {
                 medicine_name: document.getElementById('medName').value,
                 dosage: document.getElementById('medDosage').value,
                 frequency: document.getElementById('medFrequency').value,
                 schedule_time: document.getElementById('medSchedule').value,
+                duration_days: isLifetime ? null : (durationVal ? parseInt(durationVal) : null),
+                start_date: startVal || null,
                 status: document.getElementById('medStatus').value
             };
             const method = id ? 'PATCH' : 'POST';
-            const url = id ? `${API_BASE}/care-recipients/${recipientId}/medications/${id}` : `${API_BASE}/care-recipients/${recipientId}/medications`;
-
+            const url = id
+                ? `${API_BASE}/care-recipients/${recipientId}/medications/${id}`
+                : `${API_BASE}/care-recipients/${recipientId}/medications`;
             await handleManagementSubmit(url, method, data, 'medicationModal');
         };
 
@@ -1049,7 +1133,6 @@
         // Section 6: Lab Values Trends
         function initLabCharts() {
             const labs = profileData.lab_values || [];
-            const select = document.getElementById('labMetricSelect');
             const chartContainer = document.getElementById('labChart').parentElement;
 
             // Group labs by test_name, sorted by date within each group
@@ -1063,10 +1146,14 @@
 
             const keys = Object.keys(grouped).sort();
 
+            // Always read the live element — NEVER capture it in a closure
+            const getLiveSelect = () => document.getElementById('labMetricSelect');
+
             // Handle empty state — restore canvas if previously replaced
             if (!keys.length) {
                 chartContainer.innerHTML = '<div class="empty-state">No tracked lab results available for visualization.</div>';
-                select.style.display = 'none';
+                const sel = getLiveSelect();
+                if (sel) sel.style.display = 'none';
                 return;
             }
 
@@ -1074,15 +1161,20 @@
             if (!document.getElementById('labChart')) {
                 chartContainer.innerHTML = '<canvas id="labChart"></canvas>';
             }
-            select.style.display = '';
 
-            // Preserve current selection if it still exists, else default to first
-            const prevSelection = select.value;
-            select.innerHTML = keys.map(k => `<option value="${k}"${k === prevSelection ? ' selected' : ''}>${k}</option>`).join('');
-            if (!grouped[select.value]) select.value = keys[0];
+            // Populate dropdown — preserve previous selection if still valid
+            const sel = getLiveSelect();
+            if (!sel) return;
+            sel.style.display = '';
+            const prevSelection = sel.value;
+            sel.innerHTML = keys.map(k => `<option value="${k}"${k === prevSelection ? ' selected' : ''}>${k}</option>`).join('');
+            if (!grouped[sel.value]) sel.value = keys[0];
 
+            // drawLabTrend always reads from the LIVE dropdown element
             const drawLabTrend = () => {
-                const metric = select.value;
+                const liveSelect = document.getElementById('labMetricSelect');
+                if (!liveSelect) return;
+                const metric = liveSelect.value;
                 const dataPoints = grouped[metric];
                 if (!dataPoints || !dataPoints.length) return;
 
@@ -1174,11 +1266,13 @@
                 });
             };
 
-            // Remove old listener to avoid duplicates, then add new one
-            const newSelect = select.cloneNode(true);
-            select.parentNode.replaceChild(newSelect, select);
-            newSelect.innerHTML = keys.map(k => `<option value="${k}"${k === (prevSelection && grouped[prevSelection] ? prevSelection : keys[0]) ? ' selected' : ''}>${k}</option>`).join('');
-            newSelect.addEventListener('change', drawLabTrend);
+            // Remove old listener by replacing the handler reference, then re-add on the LIVE element
+            // We store the handler on the element itself to enable clean removal
+            if (sel._labTrendHandler) {
+                sel.removeEventListener('change', sel._labTrendHandler);
+            }
+            sel._labTrendHandler = drawLabTrend;
+            sel.addEventListener('change', drawLabTrend);
             drawLabTrend(); // Draw initially
         }
 
@@ -1187,6 +1281,47 @@
         //  TRIGGER BOOTSTRAP
         // ============================================
         fetchProfileData();
+
+        // ============================================
+        //  IN-PAGE MEDICATION REMINDERS
+        // ============================================
+        function checkInPageMedReminders() {
+            const meds = (profileData.medications || []).filter(m => m.status === 'active' && m.schedule_time);
+            if (!meds.length) return;
+
+            const now = new Date();
+            const currentHHMM = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+            const todayKey = now.toISOString().split('T')[0];
+
+            const dueMeds = [];
+            meds.forEach(m => {
+                const slots = m.schedule_time.split(',').map(s => {
+                    const parts = s.trim().split(':');
+                    return String(parseInt(parts[0])).padStart(2, '0') + ':' + String(parseInt(parts[1] || 0)).padStart(2, '0');
+                });
+                slots.forEach(slot => {
+                    const key = `medreminder_${m.medication_id}_${todayKey}_${slot}`;
+                    if (slot === currentHHMM && !sessionStorage.getItem(key)) {
+                        dueMeds.push({ name: m.medicine_name, dosage: m.dosage, slot });
+                        sessionStorage.setItem(key, '1');
+                    }
+                });
+            });
+
+            if (dueMeds.length) {
+                const lines = dueMeds.map(d => `<strong>${d.name}</strong>${d.dosage ? ' ' + d.dosage : ''} at ${d.slot}`).join('<br>');
+                document.getElementById('medReminderToastBody').innerHTML = `Time to take your medicine:<br>${lines}`;
+                const toast = document.getElementById('medReminderToast');
+                toast.style.display = 'block';
+                // Auto-dismiss after 30 seconds
+                setTimeout(() => { if (toast.style.display !== 'none') toast.style.display = 'none'; }, 30000);
+            }
+        }
+
+        // Check after data loads and then every 60 seconds
+        setTimeout(checkInPageMedReminders, 5000);
+        setInterval(checkInPageMedReminders, 60000);
+
 
     </script>
 </body>

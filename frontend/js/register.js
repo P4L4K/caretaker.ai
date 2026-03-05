@@ -1,7 +1,7 @@
 document.getElementById('registerForm').addEventListener('submit', async (e) => {
     alert('Registering... Please wait.');
     e.preventDefault();
-    
+
     try {
         // Get main caretaker details
         const formData = {
@@ -25,11 +25,14 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
 
             const genderSelect = div.querySelector('[name="recipient_gender"]');
             const gender = genderSelect.value;
-            
+
             if (!gender) {
                 validationError = 'Please select a gender for all care recipients';
                 return;
             }
+
+            const heightVal = div.querySelector('[name="recipient_height"]').value;
+            const weightVal = div.querySelector('[name="recipient_weight"]').value;
 
             const recipient = {
                 full_name: div.querySelector('[name="recipient_name"]').value,
@@ -37,7 +40,11 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
                 phone_number: div.querySelector('[name="recipient_phone"]').value,
                 age: parseInt(div.querySelector('[name="recipient_age"]').value),
                 gender: gender,
-                respiratory_condition_status: div.querySelector('[name="recipient_condition"]').value === 'true'
+                respiratory_condition_status: div.querySelector('[name="recipient_condition"]').value === 'true',
+                height: heightVal ? parseFloat(heightVal) : null,
+                weight: weightVal ? parseFloat(weightVal) : null,
+                blood_group: div.querySelector('[name="recipient_blood_group"]').value || null,
+                emergency_contact: div.querySelector('[name="recipient_emergency_contact"]').value || null
             };
 
             // Validate the data
@@ -45,7 +52,7 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
             else if (!recipient.email) validationError = 'Email is required for all care recipients';
             else if (!recipient.phone_number || recipient.phone_number.length !== 10) validationError = 'Valid 10-digit phone number is required for all care recipients';
             else if (!recipient.age || isNaN(recipient.age)) validationError = 'Valid age is required for all care recipients';
-            
+
             if (validationError) return;
 
             formData.care_recipients.push(recipient);
@@ -99,49 +106,49 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
             });
         }
 
-       // Replace the entire file upload block (lines 102-131) with this:
-for (let i = 0; i < recipientDivsAfter.length && i < createdRecipients.length; i++) {
-    const div = recipientDivsAfter[i];
-    const fileInput = div.querySelector('[name="recipient_report"]');
-    
-    if (fileInput && fileInput.files && fileInput.files.length > 0) {
-        const file = fileInput.files[0];
-        const formData = new FormData();
-        formData.append('file', file);
+        // Replace the entire file upload block (lines 102-131) with this:
+        for (let i = 0; i < recipientDivsAfter.length && i < createdRecipients.length; i++) {
+            const div = recipientDivsAfter[i];
+            const fileInput = div.querySelector('[name="recipient_report"]');
 
-        try {
-            const uploadResp = await fetch(
-                `${API_BASE}/api/recipients/${createdRecipients[i].id}/reports`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('token')}`
-                    },
-                    body: formData
+            if (fileInput && fileInput.files && fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                const formData = new FormData();
+                formData.append('file', file);
+
+                try {
+                    const uploadResp = await fetch(
+                        `${API_BASE}/api/recipients/${createdRecipients[i].id}/reports`,
+                        {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`
+                            },
+                            body: formData
+                        }
+                    );
+
+                    if (!uploadResp.ok) {
+                        const errorData = await uploadResp.json().catch(() => ({}));
+                        console.error('Upload failed:', uploadResp.status, errorData);
+                        throw new Error(`Failed to upload report: ${errorData.detail || 'Unknown error'}`);
+                    }
+
+                    const result = await uploadResp.json();
+                    console.log('Upload successful:', result);
+
+                } catch (error) {
+                    console.error('Upload error:', error);
+                    throw new Error(`Failed to upload medical report: ${error.message}`);
                 }
-            );
-
-            if (!uploadResp.ok) {
-                const errorData = await uploadResp.json().catch(() => ({}));
-                console.error('Upload failed:', uploadResp.status, errorData);
-                throw new Error(`Failed to upload report: ${errorData.detail || 'Unknown error'}`);
             }
-            
-            const result = await uploadResp.json();
-            console.log('Upload successful:', result);
-            
-        } catch (error) {
-            console.error('Upload error:', error);
-            throw new Error(`Failed to upload medical report: ${error.message}`);
         }
-    }
-}
 
         alert('Registration successful! You are now logged in. Redirecting to dashboard.');
-        window.location.href = 'profile.html';
+        window.location.href = 'dashboard.html';
     } catch (error) {
         console.error('Error details:', error);
-        
+
         // Handle validation errors from the backend
         if (error.response && error.response.status === 422) {
             const errorData = await error.response.json();
@@ -168,7 +175,7 @@ document.getElementById('addRecipient').addEventListener('click', () => {
 
 // Handle remove recipient
 document.getElementById('careRecipients').addEventListener('click', (e) => {
-    if (e.target.classList.contains('remove-recipient') || 
+    if (e.target.classList.contains('remove-recipient') ||
         e.target.closest('.remove-recipient')) {
         const recipientDiv = e.target.closest('.care-recipient');
         recipientDiv.remove();

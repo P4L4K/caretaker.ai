@@ -88,7 +88,6 @@
     <div class="container py-5">
         <div class="weather-widget">
             <div class="weather-location">
-                <h2 id="location">Loading...</h2>
                 <p id="current-time">--:-- --</p>
             </div>
 
@@ -217,7 +216,7 @@
             if (!data) return;
 
             // Update the UI
-            document.getElementById('location').textContent = data.location || 'Unknown';
+
             document.getElementById('tempValue').textContent = `${data.temperature}°C`;
             document.getElementById('humidityValue').textContent = `${data.humidity}%`;
             document.getElementById('aqiValue').textContent = data.aqi;

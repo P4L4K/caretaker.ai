@@ -290,6 +290,38 @@
         .toast-error {
             border-left: 4px solid var(--danger);
         }
+
+        /* Status Badges for Reports */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: capitalize;
+        }
+
+        .status-badge.pending {
+            background: rgba(246, 194, 62, 0.15);
+            color: #d97706;
+        }
+
+        .status-badge.processing {
+            background: rgba(74, 144, 226, 0.15);
+            color: var(--accent);
+        }
+
+        .status-badge.completed {
+            background: rgba(52, 211, 153, 0.15);
+            color: #059669;
+        }
+
+        .status-badge.failed {
+            background: rgba(251, 113, 133, 0.15);
+            color: #dc2626;
+        }
     </style>
 </head>
 
@@ -343,6 +375,82 @@
             </div>
         </section>
 
+        <!-- Medical Reports Management (Moved from separate page) -->
+        <section class="panel" id="reportsSection">
+            <h2 style="margin-bottom: 20px;"><i class="fas fa-file-medical"></i> Medical Reports</h2>
+            <div class="input-group" style="margin-bottom: 25px;">
+                <label>Select Recipient to Manage Reports</label>
+                <select id="reportRecipientSelect" onchange="onReportRecipientChange()"
+                    style="padding: 12px; border-radius: 12px; border: 1px solid rgba(148, 163, 184, 0.3); background: white; font-family: inherit; font-size: 0.95rem;">
+                    <option value="">-- Choose a recipient --</option>
+                </select>
+            </div>
+
+            <div id="reportsContent" style="display: none;">
+                <!-- Upload Zone -->
+                <div class="upload-area" style="margin-bottom: 30px;">
+                    <p
+                        style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 12px;">
+                        Upload New Report</p>
+                    <div class="upload-drop-zone" id="uploadDropZone"
+                        style="border: 2px dashed rgba(74, 144, 226, 0.3); border-radius: 18px; padding: 40px 20px; text-align: center; background: rgba(74, 144, 226, 0.03); transition: all 0.25s; cursor: pointer; position: relative;">
+                        <input type="file" id="reportFileInput" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+                            style="position: absolute; inset: 0; opacity: 0; cursor: pointer;">
+                        <span style="font-size: 2.5rem; color: var(--accent); margin-bottom: 10px; display: block;"><i
+                                class="fas fa-cloud-upload-alt"></i></span>
+                        <p style="margin: 8px 0 4px; font-weight: 600; color: var(--text);">Drop your medical report
+                            here</p>
+                        <p style="margin: 0; font-size: 0.82rem; color: var(--muted);">PDF, PNG, JPG, DOC, DOCX &middot;
+                            max 5 MB</p>
+                        <p id="uploadFileName"
+                            style="margin: 10px 0 0; font-weight: 700; color: var(--accent); display: none;"></p>
+                    </div>
+                    <div id="uploadProgress"
+                        style="display: none; height: 6px; border-radius: 10px; background: rgba(74, 144, 226, 0.15); margin-top: 15px; overflow: hidden;">
+                        <div id="uploadProgressBar"
+                            style="height: 100%; background: var(--accent); width: 0%; transition: width 0.3s;"></div>
+                    </div>
+                    <div style="margin-top: 15px; display: flex; justify-content: flex-end;">
+                        <button id="uploadReportBtn" class="primary-btn" disabled style="padding: 10px 24px;">
+                            <i class="fas fa-upload"></i> Upload Report
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Report Stats -->
+                <div
+                    style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                    <div
+                        style="background: white; padding: 15px; border-radius: 16px; border: 1px solid rgba(0,0,0,0.05); text-align: center;">
+                        <span
+                            style="font-size: 0.72rem; color: var(--muted); text-transform: uppercase; font-weight: 700;">Total
+                            Reports</span>
+                        <strong id="statTotalReports"
+                            style="display: block; font-size: 1.4rem; margin-top: 5px;">0</strong>
+                    </div>
+                    <div
+                        style="background: white; padding: 15px; border-radius: 16px; border: 1px solid rgba(0,0,0,0.05); text-align: center;">
+                        <span
+                            style="font-size: 0.72rem; color: var(--muted); text-transform: uppercase; font-weight: 700;">Analyzed</span>
+                        <strong id="statProcessed"
+                            style="display: block; font-size: 1.4rem; margin-top: 5px; color: #22c55e;">0</strong>
+                    </div>
+                    <div
+                        style="background: white; padding: 15px; border-radius: 16px; border: 1px solid rgba(0,0,0,0.05); text-align: center;">
+                        <span
+                            style="font-size: 0.72rem; color: var(--muted); text-transform: uppercase; font-weight: 700;">Pending/Failed</span>
+                        <strong id="statPending"
+                            style="display: block; font-size: 1.4rem; margin-top: 5px; color: #eab308;">0</strong>
+                    </div>
+                </div>
+
+                <!-- List -->
+                <div id="reportsList" class="recipient-list">
+                    <p style="color:var(--muted); text-align: center; padding: 20px;">No reports for this recipient.</p>
+                </div>
+            </div>
+        </section>
+
         <!-- Danger Zone -->
         <section class="panel danger-zone">
             <h3>Danger Zone</h3>
@@ -384,6 +492,32 @@
                     <div class="input-group">
                         <label>City / Location</label>
                         <input type="text" id="rCity" placeholder="e.g. Jammu, London, New York">
+                    </div>
+                    <div class="input-group">
+                        <label>Height (cm)</label>
+                        <input type="number" step="0.1" id="rHeight" placeholder="170.5">
+                    </div>
+                    <div class="input-group">
+                        <label>Weight (kg)</label>
+                        <input type="number" step="0.1" id="rWeight" placeholder="75.0">
+                    </div>
+                    <div class="input-group">
+                        <label>Blood Group</label>
+                        <select id="rBloodGroup">
+                            <option value="">Select blood group</option>
+                            <option value="A+">A+</option>
+                            <option value="A-">A-</option>
+                            <option value="B+">B+</option>
+                            <option value="B-">B-</option>
+                            <option value="AB+">AB+</option>
+                            <option value="AB-">AB-</option>
+                            <option value="O+">O+</option>
+                            <option value="O-">O-</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>Emergency Contact</label>
+                        <input type="tel" id="rEmergencyContact" placeholder="9876543211">
                     </div>
                     <div class="input-group">
                         <label style="display:flex; align-items:center; gap:10px;">
@@ -435,7 +569,13 @@
 
         function renderRecipients() {
             const list = document.getElementById('recipientList');
+            const select = document.getElementById('reportRecipientSelect');
+
             list.innerHTML = recipients.length ? '' : '<p style="color:var(--muted)">No recipients added yet.</p>';
+
+            // Re-populate select
+            const currentSelected = select.value;
+            select.innerHTML = '<option value="">-- Choose a recipient --</option>';
 
             recipients.forEach(r => {
                 const item = document.createElement('div');
@@ -446,12 +586,19 @@
                         <p>${r.age} yrs · ${r.gender || 'N/A'} · ${r.respiratory_condition_status ? 'Respiratory Care' : 'General Care'}</p>
                     </div>
                     <div class="action-btns">
-                        <button class="icon-btn edit-btn" onclick="openRecipientModal(${r.id})"><i class="fas fa-edit"></i></button>
-                        <button class="icon-btn delete-btn" onclick="deleteRecipient(${r.id})"><i class="fas fa-trash"></i></button>
+                        <button class="icon-btn edit-btn" onclick="openRecipientModal(${r.id})" title="Edit"><i class="fas fa-edit"></i></button>
+                        <button class="icon-btn delete-btn" onclick="deleteRecipient(${r.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 `;
                 list.appendChild(item);
+
+                const opt = document.createElement('option');
+                opt.value = r.id;
+                opt.textContent = r.full_name;
+                select.appendChild(opt);
             });
+
+            if (currentSelected) select.value = currentSelected;
         }
 
         // Caretaker Update
@@ -500,6 +647,10 @@
                     document.getElementById('rAge').value = r.age;
                     document.getElementById('rGender').value = r.gender || 'Male';
                     document.getElementById('rCity').value = r.city || '';
+                    document.getElementById('rHeight').value = r.height || '';
+                    document.getElementById('rWeight').value = r.weight || '';
+                    document.getElementById('rBloodGroup').value = r.blood_group || '';
+                    document.getElementById('rEmergencyContact').value = r.emergency_contact || '';
                     document.getElementById('rCondition').checked = r.respiratory_condition_status;
                 }
             }
@@ -517,12 +668,19 @@
         document.getElementById('recipientForm').onsubmit = async (e) => {
             e.preventDefault();
             const id = document.getElementById('editRecipientId').value;
+            const hVal = document.getElementById('rHeight').value;
+            const wVal = document.getElementById('rWeight').value;
+
             const payload = {
                 full_name: document.getElementById('rName').value,
                 email: document.getElementById('rEmail').value,
                 age: parseInt(document.getElementById('rAge').value),
                 gender: document.getElementById('rGender').value,
                 city: document.getElementById('rCity').value,
+                height: hVal ? parseFloat(hVal) : null,
+                weight: wVal ? parseFloat(wVal) : null,
+                blood_group: document.getElementById('rBloodGroup').value || null,
+                emergency_contact: document.getElementById('rEmergencyContact').value || null,
                 respiratory_condition_status: document.getElementById('rCondition').checked
             };
 
@@ -588,11 +746,189 @@
             }
         }
 
-        function showToast(msg, type) {
-            const t = document.getElementById('uploadToast');
-            t.textContent = msg;
-            t.className = `show toast-${type}`;
-            setTimeout(() => t.classList.remove('show'), 3000);
+        // ============================================
+        //  MEDICAL REPORTS LOGIC
+        // ============================================
+
+        let selectedReportRecipientId = null;
+
+        function onReportRecipientChange() {
+            const select = document.getElementById('reportRecipientSelect');
+            selectedReportRecipientId = select.value;
+            const content = document.getElementById('reportsContent');
+
+            if (selectedReportRecipientId) {
+                content.style.display = 'block';
+                loadReports();
+            } else {
+                content.style.display = 'none';
+            }
+        }
+
+        async function loadReports() {
+            if (!selectedReportRecipientId) return;
+            const list = document.getElementById('reportsList');
+            list.innerHTML = '<p class="muted" style="text-align:center; padding:20px;"><i class="fas fa-spinner fa-spin"></i> Loading reports...</p>';
+
+            try {
+                const res = await fetch(`${API_BASE}/recipients/${selectedReportRecipientId}/reports`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) throw new Error();
+                const data = await res.json();
+                const reports = data?.result?.reports || [];
+                renderReportsList(reports);
+                updateReportStats(reports);
+            } catch (err) {
+                list.innerHTML = '<p class="muted" style="text-align:center; padding:20px;">Failed to load reports.</p>';
+            }
+        }
+
+        function updateReportStats(reports) {
+            document.getElementById('statTotalReports').textContent = reports.length;
+            document.getElementById('statProcessed').textContent = reports.filter(r => r.processing_status === 'completed').length;
+            const pending = reports.filter(r => r.processing_status === 'pending' || r.processing_status === 'processing').length;
+            const failed = reports.filter(r => r.processing_status === 'failed').length;
+            document.getElementById('statPending').textContent = `${pending} / ${failed}`;
+        }
+
+        function renderReportsList(reports) {
+            const el = document.getElementById('reportsList');
+            if (!reports.length) {
+                el.innerHTML = '<p class="muted" style="text-align:center; padding:20px;">No reports uploaded yet.</p>';
+                return;
+            }
+            el.innerHTML = '';
+            reports.sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at)).forEach(r => {
+                const ext = (r.filename.split('.').pop() || '').toLowerCase();
+                const icon = ext === 'pdf' ? 'fa-file-pdf' : ['png', 'jpg', 'jpeg'].includes(ext) ? 'fa-file-image' : 'fa-file-alt';
+                const statusClass = r.processing_status || 'unknown';
+                const statusLabel = statusClass === 'completed' ? 'Analyzed' : statusClass;
+
+                const card = document.createElement('div');
+                card.className = 'recipient-item';
+                card.style.background = 'white';
+                card.style.border = '1px solid rgba(0,0,0,0.05)';
+                card.innerHTML = `
+                    <div class="recipient-info">
+                        <h4 style="display:flex; align-items:center; gap:8px;">
+                            <i class="fas ${icon}" style="color:var(--accent); font-size:1rem;"></i>
+                            ${r.filename}
+                            <span class="status-badge ${statusClass}" style="font-size: 0.65rem; padding: 2px 8px; border-radius: 10px; margin-left: 5px; font-weight: 700; text-transform: uppercase;">${statusLabel}</span>
+                        </h4>
+                        <p style="font-size: 0.75rem;">Uploaded: ${new Date(r.uploaded_at).toLocaleDateString()} ${r.report_date ? `| Report Date: ${r.report_date}` : ''}</p>
+                    </div>
+                    <div class="action-btns">
+                        <button class="icon-btn" style="color: var(--accent);" onclick="downloadReport(${r.id}, '${r.filename}')" title="Download"><i class="fas fa-download"></i></button>
+                        <button class="icon-btn delete-btn" onclick="deleteReport(${r.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                    </div>
+                `;
+                el.appendChild(card);
+            });
+        }
+
+        // Upload Logic
+        const fileInput = document.getElementById('reportFileInput');
+        const uploadBtn = document.getElementById('uploadReportBtn');
+        const fileNameEl = document.getElementById('uploadFileName');
+        const progressWrap = document.getElementById('uploadProgress');
+        const progressBar = document.getElementById('uploadProgressBar');
+
+        fileInput.addEventListener('change', () => {
+            const f = fileInput.files[0];
+            if (f) {
+                fileNameEl.textContent = f.name;
+                fileNameEl.style.display = 'block';
+                uploadBtn.disabled = false;
+            } else {
+                fileNameEl.style.display = 'none';
+                uploadBtn.disabled = true;
+            }
+        });
+
+        uploadBtn.onclick = async () => {
+            if (!selectedReportRecipientId || !fileInput.files[0]) return;
+            const file = fileInput.files[0];
+
+            uploadBtn.disabled = true;
+            uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
+            progressWrap.style.display = 'block';
+            progressBar.style.width = '30%';
+
+            const fd = new FormData();
+            fd.append('file', file);
+
+            try {
+                const res = await fetch(`${API_BASE}/recipients/${selectedReportRecipientId}/reports`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    body: fd
+                });
+                progressBar.style.width = '100%';
+                if (!res.ok) throw new Error('Upload failed');
+
+                showToast('Report uploaded!', 'success');
+                fileInput.value = '';
+                fileNameEl.style.display = 'none';
+                uploadBtn.innerHTML = '<i class="fas fa-upload"></i> Upload Report';
+                setTimeout(() => progressWrap.style.display = 'none', 1000);
+
+                loadReports();
+                pollReports(); // Start polling for processing
+            } catch (err) {
+                showToast(err.message, 'error');
+                uploadBtn.disabled = false;
+                uploadBtn.innerHTML = '<i class="fas fa-upload"></i> Upload Report';
+            }
+        };
+
+        async function deleteReport(id) {
+            if (!confirm('Delete this report?')) return;
+            try {
+                const res = await fetch(`${API_BASE}/recipients/${selectedReportRecipientId}/reports/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (res.ok) {
+                    showToast('Report deleted', 'success');
+                    loadReports();
+                }
+            } catch (err) {
+                showToast('Delete failed', 'error');
+            }
+        }
+
+        async function downloadReport(id, filename) {
+            try {
+                const res = await fetch(`${API_BASE}/recipients/${selectedReportRecipientId}/reports/${id}/download`, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+            } catch (err) {
+                showToast('Download failed', 'error');
+            }
+        }
+
+        let pollInterval = null;
+        function pollReports() {
+            if (pollInterval) clearInterval(pollInterval);
+            pollInterval = setInterval(async () => {
+                if (!selectedReportRecipientId) { clearInterval(pollInterval); return; }
+                const res = await fetch(`${API_BASE}/recipients/${selectedReportRecipientId}/reports`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    const reports = data?.result?.reports || [];
+                    renderReportsList(reports);
+                    updateReportStats(reports);
+                    if (!reports.some(r => r.processing_status === 'processing' || r.processing_status === 'pending')) {
+                        clearInterval(pollInterval);
+                    }
+                }
+            }, 3000);
         }
 
         init();

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, File, UploadFile, Header, HTTPException,
 from sqlalchemy.orm import Session
 from typing import Optional, Dict
 
-from models.users import ResponseSchema, RecipientUpdate, CareRecipientCreate
+from models.users import ResponseSchema, RecipientUpdate, CareRecipientCreate, ConditionInput, MedicationInput, AllergyInput
 from tables.users import CareRecipient, CareTaker
 from config import get_db
 from repository.users import UsersRepo
@@ -115,6 +115,12 @@ def _run_medical_history_pipeline(recipient_id: int, report_id: int, filename: s
         report.processing_status = ReportProcessingStatus.completed
         db.commit()
         print(f"[pipeline] ✅ Report {report_id} processing complete")
+        
+        # 9. Auto-update summary (Moved from sync API call)
+        try:
+            _recalculate_aggregate_summary(db, recipient_id)
+        except Exception as e:
+            print(f"[pipeline] _recalculate_aggregate_summary failed: {e}")
 
     except Exception as e:
         print(f"[pipeline] ❌ Error processing report {report_id}: {e}")
@@ -185,7 +191,7 @@ def _recalculate_aggregate_summary(db: Session, recipient_id: int):
 
 
 @router.post('/recipients/{recipient_id}/reports', response_model=ResponseSchema)
-async def upload_medical_report(recipient_id: int, file: UploadFile = File(...), authorization: Optional[str] = Header(None), db: Session = Depends(get_db), request: Request = None, background_tasks: BackgroundTasks = None):
+async def upload_medical_report(recipient_id: int, background_tasks: BackgroundTasks, file: UploadFile = File(...), authorization: Optional[str] = Header(None), db: Session = Depends(get_db), request: Request = None):
     # Auth
     # Debug: log some request header info
     try:
@@ -230,9 +236,6 @@ async def upload_medical_report(recipient_id: int, file: UploadFile = File(...),
 
         report = create_medical_report(db, recipient_id, file.filename, mime, content)
         print(f"[recipients] Uploaded report id={report.id} recipient_id={recipient_id} filename={file.filename}")
-
-        # Auto-update summary
-        _recalculate_aggregate_summary(db, recipient_id)
 
         # Launch async medical history pipeline (v3)
         report_id = report.id
@@ -495,6 +498,10 @@ def add_care_recipient(payload: CareRecipientCreate, authorization: Optional[str
         age=payload.age,
         gender=payload.gender,
         city=payload.city,
+        height=payload.height,
+        weight=payload.weight,
+        blood_group=payload.blood_group,
+        emergency_contact=payload.emergency_contact,
         respiratory_condition_status=payload.respiratory_condition_status
     )
     db.add(new_recipient)
@@ -528,6 +535,10 @@ def update_care_recipient(recipient_id: int, payload: RecipientUpdate, authoriza
     if payload.age is not None: recipient.age = payload.age
     if payload.gender is not None: recipient.gender = payload.gender
     if payload.city is not None: recipient.city = payload.city
+    if payload.height is not None: recipient.height = payload.height
+    if payload.weight is not None: recipient.weight = payload.weight
+    if payload.blood_group is not None: recipient.blood_group = payload.blood_group
+    if payload.emergency_contact is not None: recipient.emergency_contact = payload.emergency_contact
     if payload.respiratory_condition_status is not None: recipient.respiratory_condition_status = payload.respiratory_condition_status
 
     db.commit()
@@ -585,6 +596,305 @@ async def get_patient_insights(
     except Exception as e:
         print(f"[insights] Error generating insights: {e}")
         import traceback
-        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Insights generation failed: {str(e)}")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  CARE-RECIPIENT FULL PROFILE (v3)
+# ═══════════════════════════════════════════════════════════════════════
+
+@router.get("/care-recipients/{recipient_id}/profile")
+async def get_care_recipient_profile(
+    recipient_id: int,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Returns the complete longitudinal health record for a care recipient.
+    Powers the unified Care-Recipient Profile Dashboard.
+    """
+    username = _get_username_from_auth(authorization)
+    if not username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid token")
+
+    caretaker = UsersRepo.find_by_username(db, CareTaker, username)
+    if not caretaker:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    recipient = db.query(CareRecipient).filter(
+        CareRecipient.id == recipient_id,
+        CareRecipient.caretaker_id == caretaker.id
+    ).first()
+    if not recipient:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipient not found")
+
+    from tables.medical_conditions import PatientCondition, ConditionStatus, LabValue, MedicalAlert
+    from tables.medical_reports import MedicalReport
+    from tables.allergies import Allergy
+    from tables.medications import Medication, MedicationHistory
+    from tables.vital_signs import VitalSign
+    from tables.environment import EnvironmentSensor
+
+    # 1. General Info
+    general_info = {
+        "id": recipient.id,
+        "name": recipient.full_name,
+        "age": recipient.age,
+        "gender": recipient.gender.value if recipient.gender else None,
+        "height": recipient.height,
+        "weight": recipient.weight,
+        "blood_group": recipient.blood_group,
+        "phone_number": recipient.phone_number,
+        "email": recipient.email,
+        "city": recipient.city,
+        "emergency_contact": recipient.emergency_contact,
+        "respiratory_condition_status": recipient.respiratory_condition_status,
+        "registration_date": str(recipient.registration_date) if recipient.registration_date else None,
+        "risk_score": recipient.risk_score,
+        "risk_factors": recipient.risk_factors_breakdown.get("factors", []) if isinstance(recipient.risk_factors_breakdown, dict) else []
+    }
+
+    # 2. Active Conditions
+    active_conditions_raw = db.query(PatientCondition).filter(
+        PatientCondition.care_recipient_id == recipient_id,
+        PatientCondition.status != ConditionStatus.resolved
+    ).all()
+    active_conditions = [
+        {
+            "id": c.id,
+            "disease_name": c.disease_name,
+            "status": c.status.value,
+            "severity": c.severity.value if c.severity else None,
+            "start_date": str(c.first_detected) if c.first_detected else None
+        } for c in active_conditions_raw
+    ]
+
+    # 3. Medical History (Resolved)
+    medical_history_raw = db.query(PatientCondition).filter(
+        PatientCondition.care_recipient_id == recipient_id,
+        PatientCondition.status == ConditionStatus.resolved
+    ).all()
+    medical_history = [
+        {
+            "id": c.id,
+            "disease_name": c.disease_name,
+            "resolved_date": str(c.resolved_date) if c.resolved_date else None,
+            "start_date": str(c.first_detected) if c.first_detected else None
+        } for c in medical_history_raw
+    ]
+
+    # 4. Allergies
+    allergies_raw = db.query(Allergy).filter(Allergy.care_recipient_id == recipient_id).all()
+    allergies = [
+        {
+            "id": a.allergy_id,
+            "allergen": a.allergen,
+            "type": a.allergy_type.value if a.allergy_type else None,
+            "reaction": a.reaction,
+            "severity": a.severity,
+            "status": a.status.value if a.status else None
+        } for a in allergies_raw
+    ]
+
+    # 5. Medications
+    meds_raw = db.query(Medication).filter(Medication.care_recipient_id == recipient_id).all()
+    active_medications = [
+        {
+            "id": m.medication_id,
+            "medicine_name": m.medicine_name,
+            "dosage": m.dosage,
+            "frequency": m.frequency,
+            "schedule_time": m.schedule_time,
+            "status": m.status.value if m.status else None
+        } for m in meds_raw
+    ]
+
+    # 6. Medication History
+    med_history_raw = db.query(MedicationHistory).filter(MedicationHistory.care_recipient_id == recipient_id).all()
+    medication_history = [
+        {
+            "id": h.history_id,
+            "medicine_name": h.medicine_name,
+            "dosage": h.dosage,
+            "end_date": str(h.end_date) if h.end_date else None,
+            "termination_reason": h.termination_reason
+        } for h in med_history_raw
+    ]
+
+    # 7. Medical Reports
+    reports_raw = db.query(MedicalReport).filter(MedicalReport.care_recipient_id == recipient_id).all()
+    medical_reports = [
+        {
+            "id": r.id,
+            "filename": r.filename,
+            "uploaded_at": str(r.uploaded_at) if r.uploaded_at else None,
+            "report_date": str(r.report_date) if r.report_date else None,
+            "status": r.processing_status.value if r.processing_status else None
+        } for r in reports_raw
+    ]
+
+    # 8. Test Trends (Lab Results)
+    labs_raw = db.query(LabValue).filter(LabValue.care_recipient_id == recipient_id).order_by(LabValue.recorded_date).all()
+    test_trends = [
+        {
+            "id": l.id,
+            "test_name": l.metric_name,
+            "test_value": l.normalized_value,
+            "test_unit": l.normalized_unit,
+            "test_date": str(l.recorded_date) if l.recorded_date else None,
+            "is_abnormal": l.is_abnormal
+        } for l in labs_raw
+    ]
+
+    # 9. Vitals (Recent 30)
+    vitals_raw = db.query(VitalSign).filter(VitalSign.care_recipient_id == recipient_id).order_by(VitalSign.recorded_at.desc()).limit(30).all()
+    vitals = [
+        {
+            "recorded_at": str(v.recorded_at) if v.recorded_at else None,
+            "heart_rate": v.heart_rate,
+            "systolic_bp": v.systolic_bp,
+            "diastolic_bp": v.diastolic_bp,
+            "oxygen_saturation": v.oxygen_saturation,
+            "temperature": v.temperature,
+            "sleep_score": v.sleep_score,
+            "bmi": v.bmi
+        } for v in vitals_raw
+    ]
+    vitals.reverse() # Chronological
+
+    # 10. Environment (Recent 24 hours or latest 20)
+    env_raw = db.query(EnvironmentSensor).filter(EnvironmentSensor.care_recipient_id == recipient_id).order_by(EnvironmentSensor.timestamp.desc()).limit(20).all()
+    environment = [
+        {
+            "timestamp": str(e.timestamp) if e.timestamp else None,
+            "temperature_c": e.temperature_c,
+            "humidity_percent": e.humidity_percent,
+            "aqi": e.aqi
+        } for e in env_raw
+    ]
+    environment.reverse()
+
+    # 11. Alerts (Unread & Recent)
+    alerts_raw = db.query(MedicalAlert).filter(MedicalAlert.care_recipient_id == recipient_id).order_by(MedicalAlert.created_at.desc()).limit(15).all()
+    alerts = [
+        {
+            "id": a.id,
+            "severity": a.severity.value if a.severity else None,
+            "message": a.message,
+            "is_read": a.is_read,
+            "created_at": str(a.created_at) if a.created_at else None
+        } for a in alerts_raw
+    ]
+
+    return {
+        "status": "success",
+        "general_info": general_info,
+        "conditions": active_conditions,
+        "medical_history": medical_history,
+        "allergies": allergies,
+        "medications": active_medications,
+        "medication_history": medication_history,
+        "medical_reports": medical_reports,
+        "lab_values": test_trends,
+        "vitals": vitals,
+        "environment": environment,
+        "alerts": alerts
+    }
+
+
+# --- Medical Record Management ---
+
+# Conditions
+@router.post("/care-recipients/{recipient_id}/conditions", response_model=ResponseSchema)
+async def add_condition(recipient_id: int, data: ConditionInput, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    # Simple check for recipient
+    from tables.medical_conditions import PatientCondition, ConditionStatus, ConditionSeverity
+    import datetime
+    
+    cond = PatientCondition(
+        care_recipient_id=recipient_id,
+        disease_code=data.disease_code or "CUSTOM",
+        disease_name=data.disease_name,
+        status=ConditionStatus(data.status),
+        severity=ConditionSeverity(data.severity) if data.severity else None,
+        first_detected=datetime.date.fromisoformat(data.first_detected) if data.first_detected else datetime.date.today(),
+        last_updated=datetime.date.today()
+    )
+    db.add(cond)
+    db.commit()
+    return {"code": 200, "status": "success", "message": "Condition added", "result": {"id": cond.id}}
+
+@router.patch("/care-recipients/{recipient_id}/conditions/{condition_id}", response_model=ResponseSchema)
+async def update_condition(recipient_id: int, condition_id: int, data: ConditionInput, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    from tables.medical_conditions import PatientCondition, ConditionStatus, ConditionSeverity
+    cond = db.query(PatientCondition).filter(PatientCondition.id == condition_id, PatientCondition.care_recipient_id == recipient_id).first()
+    if not cond: raise HTTPException(404, "Condition not found")
+    
+    cond.disease_name = data.disease_name
+    cond.status = ConditionStatus(data.status)
+    if data.severity: cond.severity = ConditionSeverity(data.severity)
+    db.commit()
+    return {"code": 200, "status": "success", "message": "Condition updated"}
+
+
+# Medications
+@router.post("/care-recipients/{recipient_id}/medications", response_model=ResponseSchema)
+async def add_medication(recipient_id: int, data: MedicationInput, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    from tables.medications import Medication, MedicationStatus
+    med = Medication(
+        care_recipient_id=recipient_id,
+        medicine_name=data.medicine_name,
+        dosage=data.dosage,
+        frequency=data.frequency,
+        schedule_time=data.schedule_time,
+        status=MedicationStatus(data.status)
+    )
+    db.add(med)
+    db.commit()
+    return {"code": 200, "status": "success", "message": "Medication added", "result": {"id": med.medication_id}}
+
+@router.patch("/care-recipients/{recipient_id}/medications/{med_id}", response_model=ResponseSchema)
+async def update_medication(recipient_id: int, med_id: int, data: MedicationInput, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    from tables.medications import Medication, MedicationStatus
+    med = db.query(Medication).filter(Medication.medication_id == med_id, Medication.care_recipient_id == recipient_id).first()
+    if not med: raise HTTPException(404, "Medication not found")
+    
+    med.medicine_name = data.medicine_name
+    med.dosage = data.dosage
+    med.frequency = data.frequency
+    med.schedule_time = data.schedule_time
+    med.status = MedicationStatus(data.status)
+    db.commit()
+    return {"code": 200, "status": "success", "message": "Medication updated"}
+
+
+# Allergies
+@router.post("/care-recipients/{recipient_id}/allergies", response_model=ResponseSchema)
+async def add_allergy(recipient_id: int, data: AllergyInput, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    from tables.allergies import Allergy, AllergyType, AllergyStatus
+    allg = Allergy(
+        care_recipient_id=recipient_id,
+        allergen=data.allergen,
+        allergy_type=AllergyType(data.allergy_type),
+        reaction=data.reaction,
+        severity=data.severity,
+        status=AllergyStatus(data.status)
+    )
+    db.add(allg)
+    db.commit()
+    return {"code": 200, "status": "success", "message": "Allergy added", "result": {"id": allg.allergy_id}}
+
+@router.patch("/care-recipients/{recipient_id}/allergies/{all_id}", response_model=ResponseSchema)
+async def update_allergy(recipient_id: int, all_id: int, data: AllergyInput, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    from tables.allergies import Allergy, AllergyType, AllergyStatus
+    allg = db.query(Allergy).filter(Allergy.allergy_id == all_id, Allergy.care_recipient_id == recipient_id).first()
+    if not allg: raise HTTPException(404, "Allergy not found")
+    
+    allg.allergen = data.allergen
+    allg.allergy_type = AllergyType(data.allergy_type)
+    allg.reaction = data.reaction
+    allg.severity = data.severity
+    allg.status = AllergyStatus(data.status)
+    db.commit()
+    return {"code": 200, "status": "success", "message": "Allergy updated"}
 

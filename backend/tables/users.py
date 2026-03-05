@@ -47,6 +47,14 @@ class CareRecipient(Base):
     gender = Column(Enum(GenderEnum), nullable=True)
     city = Column(String, nullable=True)
     respiratory_condition_status = Column(Boolean, default=False)
+    
+    # New Profile Fields
+    height = Column(Float, nullable=True)
+    weight = Column(Float, nullable=True)
+    blood_group = Column(String, nullable=True)
+    emergency_contact = Column(String, nullable=True)
+    registration_date = Column(DateTime, default=datetime.datetime.utcnow)
+    
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     # aggregated summary of uploaded medical reports for this recipient
@@ -78,3 +86,11 @@ class CareRecipient(Base):
     # Voice Bot relations
     conversation_messages = relationship('ConversationMessage', back_populates='care_recipient', cascade='all, delete-orphan')
     proactive_reminders = relationship('ProactiveReminder', back_populates='care_recipient', cascade='all, delete-orphan')
+
+    # Environment relations
+    environment_readings = relationship('EnvironmentSensor', back_populates='care_recipient', cascade='all, delete-orphan')
+
+    # New Profile relations
+    active_medications = relationship('Medication', back_populates='care_recipient', cascade='all, delete-orphan')
+    medication_history = relationship('MedicationHistory', back_populates='care_recipient', cascade='all, delete-orphan')
+    allergies = relationship('Allergy', back_populates='care_recipient', cascade='all, delete-orphan')

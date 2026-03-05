@@ -17,6 +17,7 @@
     let currentReports = [];
     let trendChart = null;
     let timelineChart = null;
+    let severityChart = null;
 
     // Status badge colors/icons
     const STATUS_COLORS = {
@@ -99,7 +100,8 @@
         $('headerRecipientName').textContent = name || 'All';
         $('btnRunAnalysis').disabled = !id;
         $('btnRefresh').disabled = !id;
-        $('uploadPanel').style.display = id ? 'block' : 'none';
+        const uploadPanel = $('uploadPanel');
+        if (uploadPanel) uploadPanel.style.display = id ? 'block' : 'none';
         highlightActive();
         loadReports();
         loadClinicalData();
@@ -216,11 +218,14 @@
 
     // ── Report List ──
     async function loadReports() {
+        const list = $('reportsList');
+        if (!list) return;
+
         if (!selectedRecipientId) {
-            $('reportsList').innerHTML = '<p class="muted" style="text-align:center; padding:40px;">Select a care recipient to view reports.</p>';
+            list.innerHTML = '<p class="muted" style="text-align:center; padding:40px;">Select a care recipient to view reports.</p>';
             return;
         }
-        $('reportsList').innerHTML = '<p class="muted" style="text-align:center; padding:20px;"><i class="fas fa-spinner fa-spin"></i> Loading...</p>';
+        list.innerHTML = '<p class="muted" style="text-align:center; padding:20px;"><i class="fas fa-spinner fa-spin"></i> Loading...</p>';
         try {
             const res = await fetch(`${API}/recipients/${selectedRecipientId}/reports`, { headers: { 'Authorization': 'Bearer ' + token } });
             if (!res.ok) throw new Error('Failed');
@@ -230,16 +235,16 @@
             updateReportStats(currentReports);
         } catch (e) {
             console.error('Load reports error:', e);
-            $('reportsList').innerHTML = '<p class="muted">Unable to load reports.</p>';
+            list.innerHTML = '<p class="muted">Unable to load reports.</p>';
         }
     }
 
     function updateReportStats(reports) {
-        $('statTotalReports').textContent = reports.length;
-        $('statProcessed').textContent = reports.filter(r => r.processing_status === 'completed').length;
+        if ($('statTotalReports')) $('statTotalReports').textContent = reports.length;
+        if ($('statProcessed')) $('statProcessed').textContent = reports.filter(r => r.processing_status === 'completed').length;
         const pending = reports.filter(r => r.processing_status === 'pending' || r.processing_status === 'processing').length;
         const failed = reports.filter(r => r.processing_status === 'failed').length;
-        $('statPending').textContent = `${pending} / ${failed}`;
+        if ($('statPending')) $('statPending').textContent = `${pending} / ${failed}`;
     }
 
     function sortAndRenderReports() {
@@ -344,6 +349,7 @@
                 renderAlerts(alerts);
                 renderTrendChart(trends);
                 renderTimeline(state.active_conditions, state.past_conditions);
+                setupSeverityTracker(state.active_conditions, state.past_conditions);
             } else {
                 $('clinicalDashboard').style.display = 'none';
                 $('clinicalEmpty').style.display = 'block';
@@ -551,6 +557,103 @@
                 scales: {
                     x: { title: { display: true, text: 'Months', font: { size: 11 } }, grid: { color: 'rgba(0,0,0,0.04)' } },
                     y: { grid: { display: false }, ticks: { font: { size: 11 } } },
+                }
+            }
+        });
+    }
+
+    // ── Condition Severity Tracker ──
+    function setupSeverityTracker(active, past) {
+        const select = $('conditionSelect');
+        if (!select) return;
+
+        const all = [...(active || []), ...(past || [])];
+        select.innerHTML = all.map(c => `<option value="${c.id}">${c.disease_name}</option>`).join('');
+
+        if (all.length) {
+            select.onchange = () => loadAndDrawSeverity(select.value);
+            loadAndDrawSeverity(select.value);
+        }
+    }
+
+    async function loadAndDrawSeverity(conditionId) {
+        if (!conditionId || !selectedRecipientId) return;
+
+        try {
+            const res = await fetch(`${API}/recipients/${selectedRecipientId}/conditions/${conditionId}/timeline`, {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            if (!res.ok) throw new Error('Failed to load condition timeline');
+            const data = await res.json();
+            drawSeverityChart(data.condition, data.timeline);
+        } catch (e) {
+            console.error('Severity fetch error:', e);
+        }
+    }
+
+    function drawSeverityChart(condition, timeline) {
+        if (severityChart) severityChart.destroy();
+
+        const el = $('severityChart');
+        if (!el || !timeline || !timeline.length) return;
+
+        // Severity mapping
+        const sevMap = { 'mild': 1, 'moderate': 2, 'severe': 3, 'critical': 4 };
+        const sevLabels = ['', 'Mild', 'Moderate', 'Severe', 'Critical'];
+
+        // Sort timeline
+        const sorted = [...timeline].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+
+        const labels = sorted.map(t => new Date(t.recorded_at).toLocaleDateString());
+        const data = sorted.map(t => sevMap[t.new_severity] || 0);
+
+        // Status tracking for point colors
+        const pointColors = sorted.map(t => STATUS_COLORS[t.new_status] || '#6b7280');
+
+        severityChart = new Chart(el, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Severity Level',
+                    data,
+                    borderColor: '#f97316',
+                    backgroundColor: 'rgba(249,115,22,0.1)',
+                    fill: true,
+                    stepped: true,
+                    pointBackgroundColor: pointColors,
+                    pointRadius: 6,
+                    pointHoverRadius: 8
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => {
+                                const t = sorted[ctx.dataIndex];
+                                return [
+                                    `Severity: ${t.new_severity}`,
+                                    `Status: ${t.new_status}`,
+                                    t.clinical_interpretation ? `Note: ${t.clinical_interpretation}` : ''
+                                ].filter(Boolean);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+                    y: {
+                        min: 0, max: 4,
+                        grid: { color: 'rgba(0,0,0,0.04)' },
+                        ticks: {
+                            stepSize: 1,
+                            callback: val => sevLabels[val] || '',
+                            font: { size: 10 }
+                        }
+                    },
                 }
             }
         });

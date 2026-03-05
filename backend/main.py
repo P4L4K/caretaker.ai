@@ -34,6 +34,9 @@ import tables.audio_events as audio_events_tables
 import tables.medical_conditions as medical_conditions_tables
 import tables.disease_dictionary as disease_dictionary_tables
 import tables.conversation_history as conversation_history_tables
+import tables.environment as environment_tables
+import tables.medications as medications_tables
+import tables.allergies as allergies_tables
 
 # Import routes
 import routes.users as user_routes
@@ -52,6 +55,9 @@ audio_events_tables.Base.metadata.create_all(bind=engine)
 medical_conditions_tables.Base.metadata.create_all(bind=engine)
 disease_dictionary_tables.Base.metadata.create_all(bind=engine)
 conversation_history_tables.Base.metadata.create_all(bind=engine)
+environment_tables.Base.metadata.create_all(bind=engine)
+medications_tables.Base.metadata.create_all(bind=engine)
+allergies_tables.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="CareTaker AI Backend")
 
@@ -138,6 +144,9 @@ from routes import vitals as vitals_routes
 app.include_router(vitals_routes.router, prefix="/api")
 from routes import medical_history as medical_history_routes
 app.include_router(medical_history_routes.router)
+
+from routes import environment as environment_routes
+app.include_router(environment_routes.router, prefix="/api")
 
 # Debug: Print all registered routes
 print("\n=== Registered Routes ===")

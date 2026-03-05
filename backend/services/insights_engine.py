@@ -124,8 +124,8 @@ def aggregate_patient_data(recipient_id: int, db: Session) -> dict:
 
     abnormal_labs = [l for l in recent_labs if l.is_abnormal]
 
-    # 6. Environmental Data (from weather API — fetched separately, passed as param or fetched live)
-    env_data = _fetch_environment_data(recipient)
+    # 6. Environmental Data (from local room sensors)
+    env_data = _fetch_environment_data(recipient, db)
 
     return {
         "recipient": {
@@ -162,33 +162,62 @@ def aggregate_patient_data(recipient_id: int, db: Session) -> dict:
             "active_conditions": [{"name": c.disease_name, "status": c.status.value, "severity": c.severity} for c in active_conditions],
             "condition_count": len(active_conditions),
             "abnormal_lab_count": len(abnormal_labs),
-            "abnormal_labs": [{"metric": l.metric_name, "value": l.value, "unit": l.unit} for l in abnormal_labs[:5]],
+            "abnormal_labs": [{"metric": l.metric_name, "value": l.normalized_value, "unit": l.normalized_unit} for l in abnormal_labs[:5]],
         },
         "environment": env_data,
         "timestamp": datetime.datetime.utcnow().isoformat(),
     }
 
 
-def _fetch_environment_data(recipient) -> dict:
-    """Fetch current environmental data for the recipient's location."""
+def _fetch_environment_data(recipient, db: Session) -> dict:
+    """Fetch current environmental data — tries local sensors first, then Weather API (same as profile.html)."""
+    # Try local environment sensors first
     try:
-        from weather import WeatherPredictionModel
-        api_key = os.environ.get("WEATHER_API_KEY", "628d4985109c4f6baa3182527250312")
-        city = getattr(recipient, 'city', None) or "Delhi"
-        model = WeatherPredictionModel(api_key, city)
-        data = model.fetch_data(city=city)
-        if data and 'current' in data:
-            current = data['current']
-            aqi = current.get('air_quality', {})
+        from tables.environment import EnvironmentSensor
+        latest_sensor = db.query(EnvironmentSensor).filter(
+            EnvironmentSensor.care_recipient_id == recipient.id
+        ).order_by(desc(EnvironmentSensor.timestamp)).first()
+        
+        if latest_sensor:
             return {
-                "room_temp_c": current.get('temp_c'),
-                "humidity": current.get('humidity'),
-                "aqi_epa": aqi.get('us-epa-index'),
-                "pm25": aqi.get('pm2_5'),
-                "location": data.get('location', {}).get('name', city),
+                "room_temp_c": latest_sensor.temperature_c,
+                "humidity": latest_sensor.humidity_percent,
+                "aqi_epa": latest_sensor.aqi,
+                "pm25": None,
+                "location": f"{getattr(recipient, 'full_name', 'Patient')}'s Room",
             }
     except Exception as e:
-        print(f"[insights_engine] Environment fetch failed: {e}")
+        print(f"[insights_engine] Environment DB fetch failed: {e}")
+    
+    # Fallback: use Weather API directly (same logic as /api/weather/current endpoint in main.py)
+    try:
+        from weather import WeatherPredictionModel
+        # Use the same default API key and city as main.py
+        api_key = os.environ.get("WEATHER_API_KEY", "628d4985109c4f6baa3182527250312")
+        default_city = os.environ.get("DEFAULT_CITY", "Jammu")
+        
+        if api_key:
+            # Use recipient's city (same as profile.html weather widget), fallback to default
+            target_city = getattr(recipient, 'city', None) or default_city
+            weather = WeatherPredictionModel(api_key, default_city)
+            data = weather.fetch_data(city=target_city)
+            
+            if data and data.get("current"):
+                current = data["current"]
+                location_name = data.get("location", {}).get("name", target_city)
+                aqi_index = current.get("air_quality", {}).get("us-epa-index")
+                env_result = {
+                    "room_temp_c": current.get("temp_c"),
+                    "humidity": current.get("humidity"),
+                    "aqi_epa": aqi_index,
+                    "pm25": current.get("air_quality", {}).get("pm2_5"),
+                    "location": location_name,
+                }
+                print(f"[insights_engine] Weather data: {location_name} — {env_result['room_temp_c']}°C, {env_result['humidity']}% humidity, AQI {aqi_index}")
+                return env_result
+    except Exception as e:
+        print(f"[insights_engine] Weather API fetch failed: {e}")
+        
     return {"room_temp_c": None, "humidity": None, "aqi_epa": None, "pm25": None, "location": None}
 
 
@@ -479,81 +508,130 @@ def generate_individual_insights(data: dict) -> list:
 def gemini_fused_analysis(data: dict, fusion_insights: list) -> dict:
     """
     Send ALL aggregated patient data + rule-based insights to Gemini
-    for deep clinical interpretation, actionable summary, and care plan.
+    for concise, alert-style clinical insights for the caregiver dashboard.
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         print("[insights_engine] GEMINI_API_KEY not set - returning rule-based insights only")
         return _fallback_summary(data, fusion_insights)
 
-    # Build a comprehensive prompt
-    prompt = f"""You are a senior clinical AI analyst for an elderly care monitoring system called Caretaker.ai.
-You have access to REAL-TIME data from multiple sensors monitoring an elderly patient.
+    # Build the Clinical Correlation Engine prompt
+    recipient = data.get("recipient", {})
+    conditions = [c["name"] for c in data.get("medical", {}).get("active_conditions", [])]
 
-PATIENT DATA (all sensors, real-time):
+    prompt = f"""You are the Caretaker.ai Clinical Correlation Engine.
+
+Your job is to analyze multimodal patient data and generate short actionable insights for the caregiver dashboard.
+
+PATIENT PROFILE:
+- Name: {recipient.get('name', 'Unknown')}
+- Age: {recipient.get('age', 'Unknown')}
+- Known Conditions: {', '.join(conditions) if conditions else 'None recorded'}
+- Risk Score: {recipient.get('risk_score', 'N/A')}/100
+
+CURRENT MULTIMODAL DATA:
 {json.dumps(data, indent=2, default=str)}
 
-RULE-BASED INSIGHTS (already generated by our deterministic engine):
+RULE-BASED ALERTS (already generated by deterministic engine):
 {json.dumps(fusion_insights, indent=2, default=str)}
 
-YOUR TASK — Generate a comprehensive clinical analysis. Return a JSON object with EXACTLY these keys:
+YOUR RESPONSIBILITY:
+Identify CORRELATIONS between data sources and convert them into clear caregiver insights.
 
+Do NOT report raw sensor data.
+Instead, analyze the RELATIONSHIPS between signals:
+- Environment + Disease → respiratory risk
+- Immobility + time duration → bed sore risk
+- Heart rate + medical history → cardiac alert
+- Cough + poor air quality → breathing risk
+- Missed medication + disease → treatment risk
+
+Combine: current signals + historical conditions + environmental context + medication adherence
+to detect meaningful health correlations.
+
+INSIGHT TYPES:
+1. Critical Alert — Immediate health risk (e.g., "Fall detected", "Severe coughing detected")
+2. Risk Warning — Condition that may worsen (e.g., "Poor air quality — asthma risk", "Prolonged immobility — bed sore risk")
+3. Care Suggestion — Recommended action (e.g., "Encourage movement", "Check breathing")
+
+OUTPUT RULES (STRICT):
+- Maximum 10-15 words per insight
+- Prefer short phrases
+- Avoid long explanations
+- Avoid repeating similar insights
+- Prioritize clinically relevant correlations
+- Every insight must answer: "What should the caregiver know right now?"
+
+GOOD EXAMPLES:
+"Fall detected"
+"Immobile 3 hours"
+"Poor air quality — asthma risk"
+"Elevated heart rate"
+"Missed BP medication"
+"Encourage movement"
+"Cough frequency increasing — check breathing"
+"High humidity affecting respiratory condition"
+
+BAD EXAMPLES (DO NOT DO THIS):
+"The patient's heart rate is elevated at 102 bpm which could indicate..." (TOO LONG)
+"Based on the data, we recommend..." (TOO VERBOSE)
+"Heart rate: 64 bpm" (RAW DATA, NO CORRELATION)
+
+OUTPUT FORMAT:
+Return a JSON object with EXACTLY these keys:
 {{
-  "overall_status": "1-2 sentence overall patient status (use medical terminology)",
+  "insights": [
+    {{"text": "Short correlation insight.", "category": "Critical Alert", "priority": "critical"}},
+    {{"text": "Risk warning here.", "category": "Risk Warning", "priority": "high"}},
+    {{"text": "Care suggestion here.", "category": "Care Suggestion", "priority": "moderate"}}
+  ],
   "risk_level": "low/moderate/high/critical",
-  "key_concerns": [
-    {{"concern": "Brief title", "explanation": "Why this matters", "action": "What to do"}}
-  ],
-  "sensor_correlations": [
-    {{"combination": "Sensor A + Sensor B", "finding": "What the combination tells us", "clinical_significance": "Why it matters"}}
-  ],
-  "immediate_actions": ["Action 1 to take now", "Action 2"],
-  "care_plan": {{
-    "daily": ["Daily monitoring tasks"],
-    "weekly": ["Weekly checkups"],
-    "medical": ["Medical appointments to schedule"]
-  }},
-  "vitals_interpretation": {{
-    "heart_rate": "Normal/Elevated/Low — clinical meaning",
-    "blood_pressure": "Status and risk",
-    "oxygen": "Status and risk",
-    "temperature": "Status and risk"
-  }},
-  "environment_assessment": "Are living conditions safe? What to improve?",
-  "activity_assessment": "Is the patient active enough? Risks from inactivity?",
-  "prognosis": "Short-term outlook (next 1-2 weeks) based on all data"
+  "overall_status": "One sentence max — patient status summary.",
+  "immediate_actions": ["Short action 1", "Short action 2"],
+  "monitoring_plan": "One sentence monitoring recommendation."
 }}
 
-Rules:
-- Be specific with numbers from the data
-- If a sensor has no data (null), say "No data available — recommend connecting [sensor]"
-- Consider the patient's age ({data.get('recipient', {}).get('age', 'unknown')}) and existing conditions
-- Focus on actionable insights, not generic advice
-- Use clinical language appropriate for a healthcare professional
-"""
+Return ONLY valid JSON. No markdown, no code fences, no extra text."""
 
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
         resp = requests.post(url, json={
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"maxOutputTokens": 3000, "temperature": 0.3}
+            "generationConfig": {
+                "maxOutputTokens": 8192,
+                "temperature": 0.2,
+                "thinkingConfig": {"thinkingBudget": 1024}
+            }
         }, headers={"Content-Type": "application/json"}, timeout=90)
 
         if resp.status_code == 200:
             result_data = resp.json()
             if "candidates" in result_data and result_data["candidates"]:
-                raw = result_data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                print(f"[insights_engine] Gemini response length: {len(raw)} chars")
+                parts = result_data["candidates"][0]["content"]["parts"]
+                # Gemini 2.5 Flash with thinking: the actual text is in the LAST non-thought part
+                raw = ""
+                for part in parts:
+                    if "text" in part and not part.get("thought"):
+                        raw = part["text"].strip()
+                # Fallback: just use the last part's text if no non-thought part found
+                if not raw:
+                    raw = parts[-1].get("text", "").strip()
+                
+                print(f"[insights_engine] Gemini response: {len(raw)} chars")
                 import re
                 cleaned = re.sub(r"```(?:json)?\s*", "", raw, flags=re.DOTALL)
                 cleaned = re.sub(r"\s*```", "", cleaned, flags=re.DOTALL).strip()
+
                 try:
-                    return json.loads(cleaned)
-                except json.JSONDecodeError:
+                    parsed = json.loads(cleaned)
+                    return _normalize_gemini_response(parsed)
+                except json.JSONDecodeError as e:
+                    print(f"[insights_engine] JSON parse error: {e}")
                     match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
                     if match:
                         try:
-                            return json.loads(match.group(0))
+                            parsed = json.loads(match.group(0))
+                            return _normalize_gemini_response(parsed)
                         except json.JSONDecodeError:
                             pass
                     print(f"[insights_engine] Failed to parse Gemini response")
@@ -565,14 +643,43 @@ Rules:
     return _fallback_summary(data, fusion_insights)
 
 
+def _normalize_gemini_response(parsed: dict) -> dict:
+    """Normalize Gemini's response to ensure all expected keys exist for the frontend."""
+    insights = parsed.get("insights", [])
+
+    # Build key_concerns from concise insights for backward compatibility with frontend
+    key_concerns = []
+    for item in insights:
+        text = item if isinstance(item, str) else item.get("text", "")
+        category = item.get("category", "General") if isinstance(item, dict) else "General"
+        priority = item.get("priority", "moderate") if isinstance(item, dict) else "moderate"
+        key_concerns.append({
+            "concern": text,
+            "explanation": text,
+            "action": f"Actively tracking — {category}",
+            "category": category,
+            "priority": priority,
+        })
+
+    return {
+        "overall_status": parsed.get("overall_status", "Analysis complete."),
+        "risk_level": parsed.get("risk_level", "moderate"),
+        "key_concerns": key_concerns,
+        "insights": insights,
+        "immediate_actions": parsed.get("immediate_actions", ["Continue routine monitoring"]),
+        "monitoring_plan": parsed.get("monitoring_plan", "Continue current monitoring frequency."),
+        "prognosis": parsed.get("prognosis", ""),
+    }
+
+
 def _fallback_summary(data: dict, insights: list) -> dict:
-    """Deterministic fallback when Gemini is unavailable."""
+    """Deterministic fallback when Gemini is unavailable — produces concise alert-style output."""
     critical = [i for i in insights if i["severity"] == SEVERITY_CRITICAL]
     high = [i for i in insights if i["severity"] == SEVERITY_HIGH]
 
     if critical:
         level = "critical"
-        status = f"CRITICAL: {len(critical)} critical issue(s) detected requiring immediate attention."
+        status = f"CRITICAL: {len(critical)} critical issue(s) requiring immediate attention."
     elif high:
         level = "high"
         status = f"HIGH RISK: {len(high)} significant concern(s) identified."
@@ -583,11 +690,33 @@ def _fallback_summary(data: dict, insights: list) -> dict:
         level = "low"
         status = "All monitored parameters within acceptable ranges."
 
+    # Build concise key_concerns from rule-based insights
+    key_concerns = []
+    for i in insights[:8]:
+        key_concerns.append({
+            "concern": i["title"],
+            "explanation": i["detail"],
+            "action": i.get("recommendation", "Monitor closely."),
+            "category": i.get("category", "General"),
+            "priority": i["severity"],
+        })
+
+    # Build concise insights list (alert-style)
+    concise_insights = []
+    for i in insights[:8]:
+        concise_insights.append({
+            "text": i["title"] + ".",
+            "category": i.get("category", "General"),
+            "priority": i["severity"],
+        })
+
     return {
         "overall_status": status,
         "risk_level": level,
-        "key_concerns": [{"concern": i["title"], "explanation": i["detail"], "action": i.get("recommendation", "Monitor closely")} for i in insights[:5]],
+        "key_concerns": key_concerns,
+        "insights": concise_insights,
         "immediate_actions": [i.get("recommendation", i["detail"]) for i in critical[:3]] if critical else ["Continue routine monitoring"],
+        "monitoring_plan": "Rule-based analysis active. AI service unavailable.",
         "prognosis": "Unable to generate detailed prognosis (AI service unavailable). Rule-based analysis active.",
     }
 
@@ -616,16 +745,29 @@ def generate_full_insights(recipient_id: int, db: Session) -> dict:
     ai_analysis = gemini_fused_analysis(data, fusion_insights)
 
     # Step 4: Combine everything
+    # Count AI-generated insights too
+    ai_insights = ai_analysis.get("insights", [])
+    ai_critical = len([i for i in ai_insights if isinstance(i, dict) and i.get("priority") == "critical"])
+    ai_high = len([i for i in ai_insights if isinstance(i, dict) and i.get("priority") == "high"])
+    
+    rule_critical = len([i for i in fusion_insights + individual_insights if i["severity"] == SEVERITY_CRITICAL])
+    rule_high = len([i for i in fusion_insights + individual_insights if i["severity"] == SEVERITY_HIGH])
+
+    total_insights = len(fusion_insights) + len(individual_insights) + len(ai_insights)
+    total_critical = rule_critical + ai_critical
+    total_high = rule_high + ai_high
+
     result = {
         "patient_data": data,
         "fusion_insights": fusion_insights,
         "individual_insights": individual_insights,
         "ai_analysis": ai_analysis,
-        "total_insights": len(fusion_insights) + len(individual_insights),
-        "critical_count": len([i for i in fusion_insights + individual_insights if i["severity"] == SEVERITY_CRITICAL]),
-        "high_count": len([i for i in fusion_insights + individual_insights if i["severity"] == SEVERITY_HIGH]),
+        "total_insights": total_insights,
+        "critical_count": total_critical,
+        "high_count": total_high,
         "generated_at": datetime.datetime.utcnow().isoformat(),
     }
 
-    print(f"[insights_engine] Generated {result['total_insights']} insights ({result['critical_count']} critical, {result['high_count']} high)")
+    print(f"[insights_engine] Generated {total_insights} insights ({total_critical} critical, {total_high} high) — {len(ai_insights)} from AI, {len(fusion_insights) + len(individual_insights)} from rules")
     return result
+

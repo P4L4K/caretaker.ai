@@ -89,7 +89,11 @@ async def profile(authorization: Optional[str] = Header(None), db: Session = Dep
                 'gender': r.gender.value if r.gender else None,
                 'respiratory_condition_status': bool(r.respiratory_condition_status),
                 'report_summary': r.report_summary,
-                'vitals': vitals_data
+                'vitals': vitals_data,
+                'height': r.height,
+                'weight': r.weight,
+                'blood_group': r.blood_group,
+                'emergency_contact': r.emergency_contact
             })
 
         return {
@@ -190,7 +194,11 @@ async def signup(request: Register, db: Session = Depends(get_db)):
                 phone_number=recipient.phone_number,
                 age=recipient.age,
                 gender=recipient.gender,
-                respiratory_condition_status=recipient.respiratory_condition_status
+                respiratory_condition_status=recipient.respiratory_condition_status,
+                height=recipient.height,
+                weight=recipient.weight,
+                blood_group=recipient.blood_group,
+                emergency_contact=recipient.emergency_contact
             )
             db.add(new_recipient)
             created_recipients.append(new_recipient)

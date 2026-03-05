@@ -26,6 +26,12 @@ class CareRecipientCreate(BaseModel):
     gender: GenderEnum = Field(..., example="Female")
     city: Optional[str] = Field(None, example="Jammu")
     respiratory_condition_status: bool = Field(default=False)
+    
+    # New Profile Fields
+    height: Optional[float] = Field(None, example=170.5)
+    weight: Optional[float] = Field(None, example=75.0)
+    blood_group: Optional[str] = Field(None, example="O+")
+    emergency_contact: Optional[str] = Field(None, example="9876543211")
 
     @validator('gender', pre=True)
     def normalize_gender(cls, v):
@@ -73,6 +79,10 @@ class RecipientUpdate(BaseModel):
     age: Optional[int] = None
     gender: Optional[str] = None
     city: Optional[str] = None
+    height: Optional[float] = None
+    weight: Optional[float] = None
+    blood_group: Optional[str] = None
+    emergency_contact: Optional[str] = None
     respiratory_condition_status: Optional[bool] = None
 
 class CaretakerUpdate(BaseModel):
@@ -80,3 +90,26 @@ class CaretakerUpdate(BaseModel):
     email: Optional[str] = None
     phone_number: Optional[str] = None
     password: Optional[str] = None
+
+# --- Medical Record Input Models ---
+
+class ConditionInput(BaseModel):
+    disease_name: str
+    disease_code: Optional[str] = "CUSTOM"
+    status: Optional[str] = "active"
+    severity: Optional[str] = "moderate"
+    first_detected: Optional[str] = None # ISO format date
+
+class MedicationInput(BaseModel):
+    medicine_name: str
+    dosage: Optional[str] = None
+    frequency: Optional[str] = None
+    schedule_time: Optional[str] = None
+    status: Optional[str] = "active"
+
+class AllergyInput(BaseModel):
+    allergen: str
+    allergy_type: Optional[str] = "other"
+    reaction: Optional[str] = None
+    severity: Optional[str] = "moderate"
+    status: Optional[str] = "active"

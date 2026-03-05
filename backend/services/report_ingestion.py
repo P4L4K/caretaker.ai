@@ -31,6 +31,7 @@ def extract_structured_report(text: str, report_date_hint: str = None) -> dict:
     empty_result = {
         "report_date": report_date_hint or str(date.today()),
         "diagnoses": [],
+        "resolved_diagnoses": [],
         "lab_values": {},
         "medications": [],
         "doctor_notes": "",
@@ -52,6 +53,7 @@ Return a VALID JSON object with EXACTLY this structure (no markdown, no code fen
 {
   "report_date": "YYYY-MM-DD",
   "diagnoses": ["Disease Name 1", "Disease Name 2"],
+  "resolved_diagnoses": ["Cured Disease 1"],
   "lab_values": {
     "MetricName": {"value": 8.2, "unit": "%"},
     "Systolic BP": {"value": 160, "unit": "mmHg"},
@@ -103,6 +105,7 @@ Medical Report:
                     # Validate structure
                     result.setdefault("report_date", report_date_hint or str(date.today()))
                     result.setdefault("diagnoses", [])
+                    result.setdefault("resolved_diagnoses", [])
                     result.setdefault("lab_values", {})
                     result.setdefault("medications", [])
                     result.setdefault("doctor_notes", "")
@@ -117,6 +120,7 @@ Medical Report:
                             result = json.loads(match.group(0))
                             result.setdefault("report_date", report_date_hint or str(date.today()))
                             result.setdefault("diagnoses", [])
+                            result.setdefault("resolved_diagnoses", [])
                             result.setdefault("lab_values", {})
                             result.setdefault("medications", [])
                             result.setdefault("doctor_notes", "")

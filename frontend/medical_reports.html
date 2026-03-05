@@ -672,11 +672,14 @@
             <div class="page-header">
                 <div>
                     <p class="eyebrow">Clinical Intelligence</p>
-                    <h1>Medical Report Management</h1>
-                    <p class="subtitle">Upload reports, track conditions, and get AI-powered health analysis for <strong
+                    <h1>Patient Health Insights</h1>
+                    <p class="subtitle">View AI-powered medical history analysis and clinical intelligence for <strong
                             id="headerRecipientName">—</strong></p>
                 </div>
                 <div class="action-bar">
+                    <a href="settings.html#reportsSection" class="ghost-btn" style="text-decoration:none;">
+                        <i class="fas fa-cog"></i> Manage Reports
+                    </a>
                     <button id="btnRunAnalysis" class="primary-btn" disabled>
                         <i class="fas fa-brain"></i> Run Full Analysis
                     </button>
@@ -688,10 +691,7 @@
 
             <!-- Tabs -->
             <div class="tab-bar">
-                <button class="tab-btn active" data-tab="tab-reports">
-                    <i class="fas fa-file-medical"></i> Reports & Upload
-                </button>
-                <button class="tab-btn" data-tab="tab-clinical">
+                <button class="tab-btn active" data-tab="tab-clinical">
                     <i class="fas fa-heartbeat"></i> Clinical Intelligence
                 </button>
                 <button class="tab-btn" data-tab="tab-summary">
@@ -699,62 +699,16 @@
                 </button>
             </div>
 
-            <!-- ═══ TAB 1: Reports & Upload ═══ -->
-            <div id="tab-reports" class="tab-content active">
-                <!-- Upload Zone -->
-                <div class="panel" id="uploadPanel" style="display:none;">
-                    <p class="eyebrow" style="margin-bottom:10px;">Upload New Report</p>
-                    <div class="upload-drop-zone" id="uploadDropZone">
-                        <input type="file" id="reportFileInput" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx">
-                        <span class="upload-icon"><i class="fas fa-cloud-upload-alt"></i></span>
-                        <p style="margin:8px 0 4px; font-weight:600; color:var(--text);">Drop your medical report here
-                        </p>
-                        <p style="margin:0; font-size:0.82rem; color:var(--muted);">PDF, PNG, JPG, DOC, DOCX &middot;
-                            max 5 MB</p>
-                        <p id="uploadFileName"
-                            style="margin:10px 0 0; font-weight:700; color:var(--accent); display:none;"></p>
-                    </div>
-                    <div class="upload-progress" id="uploadProgress">
-                        <div class="upload-progress-bar" id="uploadProgressBar"></div>
-                    </div>
-                    <div style="margin-top:12px; display:flex; gap:10px; justify-content:flex-end;">
-                        <button id="uploadReportBtn" class="primary-btn" disabled style="padding:10px 20px;">
-                            <i class="fas fa-upload"></i> Upload Report
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Report Stats -->
-                <div class="grid-3" style="margin-bottom:20px;" id="reportStatsRow">
-                    <div class="stat-pill">
-                        <span>Total Reports</span>
-                        <strong id="statTotalReports">0</strong>
-                    </div>
-                    <div class="stat-pill">
-                        <span>Processed</span>
-                        <strong id="statProcessed" style="color:var(--success);">0</strong>
-                    </div>
-                    <div class="stat-pill">
-                        <span>Pending / Failed</span>
-                        <strong id="statPending" style="color:var(--warning);">0</strong>
-                    </div>
-                </div>
-
-                <!-- Report List -->
-                <div class="panel">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-                        <p class="eyebrow" style="color:var(--accent); margin:0;">Uploaded Reports</p>
-                        <select id="reportSortOrder"
-                            style="padding:6px 14px; border-radius:12px; font-size:0.8rem; border:1px solid rgba(74,144,226,0.2); background:rgba(255,255,255,0.7); outline:none;">
-                            <option value="date_desc">Newest First</option>
-                            <option value="date_asc">Oldest First</option>
-                            <option value="name_asc">Name (A-Z)</option>
-                        </select>
-                    </div>
-                    <div id="reportsList" class="report-list">
-                        <p class="muted" style="text-align:center; padding:40px;">Select a care recipient to view
-                            reports.</p>
-                    </div>
+            <!-- TAB 1: Reports (Removed - Moved to Settings) -->
+            <div id="tab-reports" class="tab-content">
+                <div class="panel" style="text-align:center; padding: 40px;">
+                    <i class="fas fa-file-medical"
+                        style="font-size: 2.5rem; color: var(--accent); opacity: 0.3; margin-bottom: 15px; display: block;"></i>
+                    <h3>Report Management Moved</h3>
+                    <p class="muted" style="margin-bottom: 20px;">Uploading and deleting medical reports is now managed
+                        under Account Settings.</p>
+                    <a href="settings.html#reportsSection" class="primary-btn" style="text-decoration:none;">Go to
+                        Settings</a>
                 </div>
             </div>
 
@@ -820,47 +774,65 @@
                             </div>
                             <div id="trendBadges" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">
                             </div>
-                            <div style="position:relative; height:280px;">
-                                <canvas id="trendChart"></canvas>
-                            </div>
-                        </div>
-                        <div class="info-card">
-                            <p class="eyebrow" style="color:var(--accent); margin-bottom:12px;">Disease Timeline</p>
-                            <div style="position:relative; height:280px;">
-                                <canvas id="timelineChart"></canvas>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
-            <!-- ═══ TAB 3: Doctor's Summary ═══ -->
-            <div id="tab-summary" class="tab-content">
-                <div id="summaryEmpty" class="panel" style="text-align:center; padding:60px 20px;">
-                    <i class="fas fa-stethoscope"
-                        style="font-size:3rem; color:var(--accent); opacity:0.3; margin-bottom:16px; display:block;"></i>
-                    <p style="font-size:1.05rem; font-weight:600;">No summary available</p>
-                    <p class="muted">Upload reports and run analysis to generate a doctor's summary.</p>
-                </div>
-                <div id="summaryDashboard" style="display:none;">
-                    <!-- Quick Stats Row -->
-                    <div class="grid-3" style="margin-bottom:20px;">
-                        <div class="stat-pill" style="border-left:4px solid var(--accent);">
-                            <span>Risk Level</span>
-                            <strong id="sumRiskLevel">—</strong>
-                        </div>
-                        <div class="stat-pill" style="border-left:4px solid var(--success);">
-                            <span>Active Conditions</span>
-                            <strong id="sumConditionCount">0</strong>
-                        </div>
-                        <div class="stat-pill" style="border-left:4px solid var(--warning);">
-                            <span>Unread Alerts</span>
-                            <strong id="sumAlertCount">0</strong>
+                            <!-- Disease Timeline -->
+                            <div class="panel">
+                                <h4
+                                    style="margin:0 0 16px; color:var(--text); font-size:0.95rem; display:flex; justify-content:space-between; align-items:center;">
+                                    <span><i class="fas fa-history" style="color:var(--accent); margin-right:6px;"></i>
+                                        Disease Timeline</span>
+                                </h4>
+                                <div style="height:220px; width:100%; position:relative;">
+                                    <canvas id="timelineChart"></canvas>
+                                </div>
+                            </div>
+
+                            <!-- Condition Severity Graph -->
+                            <div class="panel">
+                                <h4
+                                    style="margin:0 0 16px; color:var(--text); font-size:0.95rem; display:flex; justify-content:space-between; align-items:center;">
+                                    <span><i class="fas fa-chart-line"
+                                            style="color:var(--warning); margin-right:6px;"></i> Condition Severity
+                                        Tracker</span>
+                                    <select id="conditionSelect" class="form-input"
+                                        style="width:160px; padding:4px 8px; font-size:0.8rem;"></select>
+                                </h4>
+                                <div style="height:220px; width:100%; position:relative;">
+                                    <canvas id="severityChart"></canvas>
+                                </div>
+                            </div>
+
                         </div>
                     </div>
-                    <div class="summary-one-pager" id="summaryBlocks"></div>
                 </div>
-            </div>
+
+                <!-- ═══ TAB 3: Doctor's Summary ═══ -->
+                <div id="tab-summary" class="tab-content">
+                    <div id="summaryEmpty" class="panel" style="text-align:center; padding:60px 20px;">
+                        <i class="fas fa-stethoscope"
+                            style="font-size:3rem; color:var(--accent); opacity:0.3; margin-bottom:16px; display:block;"></i>
+                        <p style="font-size:1.05rem; font-weight:600;">No summary available</p>
+                        <p class="muted">Upload reports and run analysis to generate a doctor's summary.</p>
+                    </div>
+                    <div id="summaryDashboard" style="display:none;">
+                        <!-- Quick Stats Row -->
+                        <div class="grid-3" style="margin-bottom:20px;">
+                            <div class="stat-pill" style="border-left:4px solid var(--accent);">
+                                <span>Risk Level</span>
+                                <strong id="sumRiskLevel">—</strong>
+                            </div>
+                            <div class="stat-pill" style="border-left:4px solid var(--success);">
+                                <span>Active Conditions</span>
+                                <strong id="sumConditionCount">0</strong>
+                            </div>
+                            <div class="stat-pill" style="border-left:4px solid var(--warning);">
+                                <span>Unread Alerts</span>
+                                <strong id="sumAlertCount">0</strong>
+                            </div>
+                        </div>
+                        <div class="summary-one-pager" id="summaryBlocks"></div>
+                    </div>
+                </div>
         </main>
     </div>
 

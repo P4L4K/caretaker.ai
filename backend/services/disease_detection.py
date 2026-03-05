@@ -300,6 +300,34 @@ def detect_diseases_from_report(
                 "triggering_value": None,
             })
 
+    # 1.5. Resolve explicitly resolved diagnoses
+    for diag_name in extracted_data.get("resolved_diagnoses", []):
+        code, _ = _match_disease_code(diag_name)
+        if code:
+            for condition in existing_conditions:
+                if condition.disease_code == code and condition.status != ConditionStatus.resolved:
+                    prev_status = condition.status
+                    condition.status = ConditionStatus.resolved
+                    condition.resolved_date = report_dt
+                    condition.status_version += 1
+                    condition.last_updated = report_dt
+                    
+                    from tables.medical_conditions import ConditionHistory, ConditionSeverity, ConditionStatus
+                    history = ConditionHistory(
+                        condition_id=condition.id,
+                        report_id=report_id,
+                        previous_status=prev_status.value if prev_status else None,
+                        new_status=ConditionStatus.resolved.value,
+                        previous_severity=condition.severity.value if condition.severity else None,
+                        new_severity=ConditionSeverity.mild.value, # Assuming resolved implies mild/no severity
+                        status_version=condition.status_version,
+                        clinical_interpretation=f"Condition marked as explicitly resolved/cured in medical report.",
+                        change_reason=f"Doctor noted resolution on {report_dt}",
+                        recorded_at=datetime.datetime.utcnow()
+                    )
+                    db.add(history)
+                    print(f"[disease_detection] Explicitly resolved condition {condition.id} ({diag_name})")
+
     # 2. Lab-value inferred diseases
     lab_values = extracted_data.get("lab_values", {})
     lab_detected = detect_diseases_from_lab_values(lab_values)

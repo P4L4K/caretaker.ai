@@ -765,7 +765,7 @@
         <div id="loadingState" style="display:none;" class="loading">
             <div class="spinner"></div>
             <p>Aggregating sensor data and running AI analysis...</p>
-            <p style="font-size:0.78rem; margin-top:8px;">This may take 10-30 seconds for Gemini interpretation.</p>
+            <p style="font-size:0.78rem; margin-top:8px;">This may take 10-30 seconds for AI interpretation.</p>
         </div>
 
         <!-- Results Container -->
@@ -891,7 +891,7 @@
 
             function renderStatusBanner(data) {
                 const ai = data.ai_analysis || {};
-                const level = ai.risk_level || 'low';
+                const level = (ai.risk_level || 'low').toLowerCase();
                 const banner = $('statusBanner');
                 const icons = { critical: 'fa-skull-crossbones', high: 'fa-exclamation-triangle', moderate: 'fa-info-circle', low: 'fa-check-circle' };
                 const colors = { critical: '#fca5a5', high: '#fdba74', moderate: '#fde047', low: '#86efac' };
@@ -971,18 +971,20 @@
 
             function renderAIPanel(ai) {
                 const panel = $('aiPanel');
-                if (!ai || (!ai.overall_status && !ai.key_concerns)) {
-                    panel.innerHTML = '<p style="color:var(--text-muted); text-align:center;">AI analysis unavailable. Check Gemini API key.</p>';
+                if (!ai || (!ai.key_concerns?.length && !ai.insights?.length && !ai.overall_status)) {
+                    panel.innerHTML = '<p style="color:var(--text-muted); text-align:center;">AI analysis unavailable.</p>';
                     return;
                 }
 
-                let html = `<h3><i class="fas fa-robot"></i> Gemini AI Clinical Interpretation</h3>`;
+                let html = `<h3><i class="fas fa-robot"></i> AI Clinical Interpretation</h3>`;
 
-                // Key Concerns
+                // Key Concerns (concise alert-style insights)
                 if (ai.key_concerns?.length) {
                     html += `<div class="ai-section"><h5>Key Concerns</h5><ul>`;
                     ai.key_concerns.forEach(c => {
-                        html += `<li><strong>${c.concern}:</strong> ${c.explanation} <em style="color:var(--accent);">Action: ${c.action}</em></li>`;
+                        const text = typeof c === 'string' ? c : (c.concern || c.text || '');
+                        const action = typeof c === 'object' ? (c.action || '') : '';
+                        html += `<li><strong>${text}</strong>${action ? ` <em style="color:var(--text-muted); font-size:0.85rem;"> ${action}</em>` : ''}</li>`;
                     });
                     html += `</ul></div>`;
                 }
@@ -990,68 +992,27 @@
                 // Immediate Actions
                 if (ai.immediate_actions?.length) {
                     html += `<div class="ai-section"><h5>Immediate Actions Required</h5><ul>`;
-                    ai.immediate_actions.forEach(a => { html += `<li>${a}</li>`; });
+                    ai.immediate_actions.forEach(a => {
+                        html += `<li><i class="fas fa-check-circle" style="color:var(--accent); margin-right:4px;"></i>${a}</li>`;
+                    });
                     html += `</ul></div>`;
                 }
 
-                // Environment & Activity Assessment
-                if (ai.environment_assessment) {
-                    html += `<div class="ai-section"><h5>Environment Assessment</h5><p>${ai.environment_assessment}</p></div>`;
-                }
-                if (ai.activity_assessment) {
-                    html += `<div class="ai-section"><h5>Activity Assessment</h5><p>${ai.activity_assessment}</p></div>`;
+                // Monitoring Plan
+                if (ai.monitoring_plan) {
+                    html += `<div class="ai-section"><h5>Monitoring Recommendation</h5><p>${ai.monitoring_plan}</p></div>`;
                 }
 
                 panel.innerHTML = html;
 
-                // Sensor Correlations
-                if (ai.sensor_correlations?.length) {
-                    $('correlationsTitle').style.display = 'flex';
-                    $('correlationsGrid').innerHTML = ai.sensor_correlations.map(c => `
-                    <div class="correlation-card">
-                        <div class="combo"><i class="fas fa-link"></i> ${c.combination}</div>
-                        <div class="finding">${c.finding}</div>
-                        <div class="significance">${c.clinical_significance}</div>
-                    </div>
-                `).join('');
-                }
-
-                // Vitals Interpretation
-                if (ai.vitals_interpretation) {
-                    $('vitalsTitle').style.display = 'flex';
-                    const vi = ai.vitals_interpretation;
-                    $('vitalsGrid').innerHTML = ['heart_rate', 'blood_pressure', 'oxygen', 'temperature'].map(k => `
-                    <div class="vital-card">
-                        <div class="label">${k.replace('_', ' ')}</div>
-                        <div class="interp">${vi[k] || 'No data'}</div>
-                    </div>
-                `).join('');
-                }
-
-                // Care Plan
-                if (ai.care_plan) {
-                    $('carePlanTitle').style.display = 'flex';
-                    const cp = ai.care_plan;
-                    $('carePlanGrid').innerHTML = [
-                        { title: 'Daily Tasks', icon: 'fa-calendar-day', items: cp.daily || [] },
-                        { title: 'Weekly Checkups', icon: 'fa-calendar-week', items: cp.weekly || [] },
-                        { title: 'Medical Appointments', icon: 'fa-hospital', items: cp.medical || [] },
-                    ].map(g => `
-                    <div class="care-plan-card">
-                        <h5><i class="fas ${g.icon}"></i> ${g.title}</h5>
-                        <ul>${g.items.map(i => `<li>${i}</li>`).join('') || '<li>No tasks</li>'}</ul>
-                    </div>
-                `).join('');
-                }
-
-                // Prognosis
-                if (ai.prognosis) {
-                    $('prognosisPanel').style.display = 'block';
-                    $('prognosisPanel').innerHTML = `
-                    <h3><i class="fas fa-chart-line"></i> Short-Term Prognosis</h3>
-                    <p style="font-size:0.92rem; line-height:1.7;">${ai.prognosis}</p>
-                `;
-                }
+                // Hide unused sections
+                if ($('correlationsTitle')) $('correlationsTitle').style.display = 'none';
+                if ($('correlationsGrid')) $('correlationsGrid').innerHTML = '';
+                if ($('vitalsTitle')) $('vitalsTitle').style.display = 'none';
+                if ($('vitalsGrid')) $('vitalsGrid').innerHTML = '';
+                if ($('carePlanTitle')) $('carePlanTitle').style.display = 'none';
+                if ($('carePlanGrid')) $('carePlanGrid').innerHTML = '';
+                if ($('prognosisPanel')) $('prognosisPanel').style.display = 'none';
             }
 
             // ── Init ──

@@ -7,12 +7,6 @@ __pycache__/
 # Node
 node_modules/
 
-# Models
-*.pt
-*.pth
-*.onnx
-*.h5
-
 # Dataset
 dataset/
 data/
@@ -22,10 +16,6 @@ data/
 
 # Logs
 *.log
-
-# Database
-*.db
-*.sqlite3
 
 # Env
 .env
@@ -46,5 +36,7 @@ backend/fall_video/
 frontend/model/
 *.bin
 
-# Processing files
-processing_status.json
+*.h5
+*.pt
+models/
+weights/

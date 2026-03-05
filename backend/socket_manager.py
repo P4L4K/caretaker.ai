@@ -97,13 +97,13 @@ async def audio_chunk(sid, data):
     """
     try:
         data_len = len(data) if data else 0
-        logger.info(f"  [CHUNK] Received {data_len} bytes from {sid}")
+        # logger.info(f"  [CHUNK] Received {data_len} bytes from {sid}")
         # process_audio_chunk returns a list of results (one per window)
         results = audio_service.process_audio_chunk(data)
 
         for result in results:
-            # Always emit classification so the frontend updates
-            await sio_server.emit("classification", result, room=sid)
+            # Always emit classification so all frontends update (dashboard and monitor)
+            await sio_server.emit("classification", result)
 
             predicted  = result.get("predicted")
             confidence = result.get("confidence", 0)
@@ -114,10 +114,10 @@ async def audio_chunk(sid, data):
                     "type":       predicted,
                     "confidence": round(confidence, 2),
                     "timestamp":  result.get("timestamp"),
-                }, room=sid)
+                })
 
-                # DB logging at 70%+ to avoid spam
-                if confidence >= 70.0:
+                # DB logging at 60%+ to match the frontend alert threshold
+                if confidence >= 60.0:
                     await _log_event_to_db(sid, predicted, confidence)
 
     except Exception as e:
@@ -157,6 +157,8 @@ async def _log_event_to_db(sid, event_type_str, confidence):
             db.add(event)
             db.commit()
             logger.info(f"  [DB] Logged {event_type_str} ({confidence:.1f}%) for {username}")
+        else:
+            logger.warning(f"  [DB] CareTaker '{username}' not found. Aborting log.")
     except Exception as e:
         logger.error(f"DB logging failed: {e}")
     finally:

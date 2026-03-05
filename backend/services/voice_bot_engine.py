@@ -8,6 +8,7 @@ from tables.conversation_history import ConversationMessage, ProactiveReminder, 
 from tables.users import CareRecipient
 from tables.vital_signs import VitalSign
 from tables.medical_conditions import PatientCondition, LabValue, MedicalAlert
+from tables.medications import Medication
 from tables.audio_events import AudioEvent
 
 def build_conversation_context(recipient_id: int, db: Session):
@@ -37,12 +38,12 @@ def build_conversation_context(recipient_id: int, db: Session):
 
     # 4. Current Vitals
     latest_vitals = db.query(VitalSign).filter(VitalSign.care_recipient_id == recipient_id)\
-        .order_by(desc(VitalSign.timestamp)).first()
+        .order_by(desc(VitalSign.recorded_at)).first()
 
     # 5. Active Medical Conditions
     conditions = db.query(PatientCondition).filter(
         PatientCondition.care_recipient_id == recipient_id,
-        PatientCondition.is_active == True
+        PatientCondition.status == "active"
     ).all()
 
     # 6. Recent Lab Values (Abnormal)
@@ -50,19 +51,19 @@ def build_conversation_context(recipient_id: int, db: Session):
     abnormal_labs = db.query(LabValue).filter(
         LabValue.care_recipient_id == recipient_id,
         LabValue.is_abnormal == True,
-        LabValue.date_recorded >= thirty_days_ago
+        LabValue.recorded_date >= thirty_days_ago
     ).all()
 
     # 7. Recent Audio Events
     audio_events = db.query(AudioEvent).filter(
         AudioEvent.care_recipient_id == recipient_id,
-        AudioEvent.timestamp >= seven_days_ago
+        AudioEvent.detected_at >= seven_days_ago
     ).all()
 
     # 8. Active Medical Alerts
     active_alerts = db.query(MedicalAlert).filter(
         MedicalAlert.care_recipient_id == recipient_id,
-        MedicalAlert.is_active == True
+        MedicalAlert.is_read == False
     ).all()
 
     # 9. Pending Reminders
@@ -71,6 +72,12 @@ def build_conversation_context(recipient_id: int, db: Session):
     pending_reminders = db.query(ProactiveReminder).filter(
         ProactiveReminder.care_recipient_id == recipient_id,
         ProactiveReminder.is_active == True
+    ).all()
+
+    # 10. Active Medications (for detailed prescription context)
+    active_meds = db.query(Medication).filter(
+        Medication.care_recipient_id == recipient_id,
+        Medication.status == "active"
     ).all()
 
     return {
@@ -82,25 +89,31 @@ def build_conversation_context(recipient_id: int, db: Session):
         },
         "history": [{"sender": m.sender.value, "text": m.message_text} for m in history],
         "mood_counts": mood_counts,
-        "vitals": latest_vitals.vital_data if latest_vitals else None,
-        "conditions": [{"name": c.condition_name, "severity": c.severity} for c in conditions],
-        "abnormal_labs": [{"name": l.test_name, "value": l.value, "unit": l.unit} for l in abnormal_labs],
+        "vitals": {
+            "heartRate": latest_vitals.heart_rate,
+            "bloodPressure": f"{latest_vitals.systolic_bp}/{latest_vitals.diastolic_bp}",
+            "temperature": latest_vitals.temperature,
+            "oxygen": latest_vitals.oxygen_saturation,
+            "sleepScore": latest_vitals.sleep_score,
+            "bmi": latest_vitals.bmi
+        } if latest_vitals else None,
+        "conditions": [{"name": c.disease_name, "severity": c.severity.value if hasattr(c.severity, "value") else str(c.severity)} for c in conditions],
+        "abnormal_labs": [{"name": l.metric_name, "value": l.metric_value, "unit": l.unit} for l in abnormal_labs],
         "audio_events_count": len(audio_events),
-        "active_alerts": [{"type": a.alert_type, "message": a.message, "severity": a.severity} for a in active_alerts],
-        "reminders": [{"type": r.reminder_type.value, "text": r.reminder_text, "time": r.scheduled_time} for r in pending_reminders]
+        "active_alerts": [{"type": a.alert_type.value if hasattr(a.alert_type, 'value') else str(a.alert_type), "message": a.message, "severity": a.severity.value if hasattr(a.severity, 'value') else str(a.severity)} for a in active_alerts],
+        "reminders": [{"type": r.reminder_type.value, "text": r.reminder_text, "time": r.scheduled_time} for r in pending_reminders],
+        "medications": [{"name": m.medicine_name, "details": m.dosage, "frequency": m.frequency} for m in active_meds]
     }
 
-def generate_system_prompt(context: dict):
+def generate_system_prompt(name: str, context: dict) -> str:
+    prompt = f"You are a highly intelligent, proactive, and empathetic AI Medical Companion for an elderly patient named {name}. "
+    prompt += "You possess deep knowledge of their medical history, live sensor data, and medication schedule. You act like a specialized medical AI (like a personalized medical ChatGPT) dedicated to their care.\n\n"
+    
     recip = context.get("recipient", {})
-    name = recip.get("name", "User")
-    
-    prompt = f"You are a gentle, proactive, and highly observant AI companion for an elderly person named {name}. "
-    prompt += "You initiate conversations, check on their well-being, and provide emotional support.\n\n"
-    
     prompt += "### Context about the user:\n"
     prompt += f"- Age: {recip.get('age', 'Unknown')}\n"
     if recip.get('report_summary'):
-        prompt += f"- Health Summary: {recip.get('report_summary')}\n"
+        prompt += f"- Comprehensive Health Summary: {recip.get('report_summary')}\n"
     
     conds = context.get("conditions", [])
     if conds:
@@ -108,36 +121,38 @@ def generate_system_prompt(context: dict):
         
     vitals = context.get("vitals")
     if vitals:
-        # Assuming vitals is a dict or string
-        prompt += f"- Latest Vitals: {vitals}\n"
+        prompt += f"- Latest Sensor Vitals: {vitals}\n"
         
     alerts = context.get("active_alerts", [])
     if alerts:
-        prompt += "- Active Alerts: " + ", ".join([f"{a['type']}: {a['message']}" for a in alerts]) + "\n"
-        prompt += "  *IMPORTANT:* Gently bring up these alerts if relevant to the conversation.\n"
+        prompt += "- Active Medical Alerts: " + ", ".join([f"{a['type']}: {a['message']}" for a in alerts]) + "\n"
+        prompt += "  *IMPORTANT:* Address these alerts proactively if they relate to the user's current symptoms or questions.\n"
+        
+    meds = context.get("medications", [])
+    if meds:
+        prompt += "- Prescribed Medications: " + ", ".join([f"{m['name']} ({m['details']}, {m['frequency']})" for m in meds]) + "\n"
+        prompt += "  *CRITICAL:* Always check this list when giving medication advice or schedule reminders. Be precise about dosage and timing.\n"
         
     reminders = context.get("reminders", [])
     if reminders:
         prompt += "- Daily Reminders: " + ", ".join([f"{r['text']} at {r['time']}" for r in reminders]) + "\n"
-        prompt += "  *IMPORTANT:* Naturally weave relevant reminders into the conversation if the time is appropriate.\n"
         
     moods = context.get("mood_counts", {})
     sad_anxious_count = moods.get("sad", 0) + moods.get("anxious", 0) + moods.get("distressed", 0)
     if sad_anxious_count >= 3:
-        prompt += "\n**CRITICAL OBSERVATION:** The user has exhibited signs of sadness or distress recently. Be exceptionally gentle, empathetic, and encouraging. Ask how they are feeling emotionally.\n"
+        prompt += "\n**CRITICAL OBSERVATION:** The user has exhibited signs of sadness or distress recently. Provide deep emotional support.\n"
 
     prompt += "\n### Conversation History:\n"
     history = context.get("history", [])
-    # Only keep last 5 for prompt context so we don't blow up context window unnecessarily
-    for msg in history[-5:]:
+    for msg in history[-8:]:
         prompt += f"{msg['sender'].capitalize()}: {msg['text']}\n"
         
     prompt += "\n### Rules:\n"
-    prompt += "1. Keep responses concise (2-4 sentences) as they will be read aloud.\n"
-    prompt += "2. Be empathetic, encouraging, and patient.\n"
-    prompt += "3. If they mention severe pain or emergency, strongly advise them to use the emergency button.\n"
-    prompt += "4. Use emojis sparingly but warmly.\n"
-    prompt += "5. Do not play doctor, but do gently remind them of their care plan (reminders, conditions).\n"
+    prompt += "1. Give comprehensive, detailed, and intelligent answers. Do NOT give small, incomplete stories.\n"
+    prompt += "2. Reference their specific medical history, sensor data, and medication list intelligently to explain HOW it applies to their situation.\n"
+    prompt += "3. If they ask for advice on an ailment or medicine, provide detailed medical context and recommend actions based on their known conditions.\n"
+    prompt += "4. If there's an emergency, advise them to trigger the emergency SOS immediately.\n"
+    prompt += "5. Be empathetic, encouraging, and highly articulate.\n"
     
     return prompt
 

@@ -1135,6 +1135,8 @@
             }
         }
     </style>
+    <!-- Socket.IO config for live alerts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
 </head>
 
 <body>
@@ -1437,7 +1439,7 @@
                 </div>
 
                 <!-- Charts Grid -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                <div style="display: grid; grid-template-columns: 1fr; gap: 20px; margin-bottom: 20px;">
                     <!-- Trend Chart -->
                     <div class="chart-card">
                         <div class="chart-header">
@@ -1449,20 +1451,11 @@
                         </div>
                     </div>
 
-                    <!-- Hourly Distribution -->
-                    <div class="chart-card">
-                        <div class="chart-header">
-                            <h3>Hourly Distribution</h3>
-                            <p class="muted">Peak detection times</p>
-                        </div>
-                        <div style="position: relative; height: 250px;">
-                            <canvas id="audioHourlyChart"></canvas>
-                        </div>
-                    </div>
+                    <!-- Removed Hourly Distribution as per user request to simplify dash -->
                 </div>
 
                 <!-- Event Type Breakdown -->
-                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px;">
+                <div style="display: grid; grid-template-columns: 1fr; gap: 20px;">
                     <!-- Recent Events List -->
                     <div class="chart-card">
                         <div class="chart-header">
@@ -1477,17 +1470,7 @@
                             </div>
                         </div>
                     </div>
-
-                    <!-- Event Type Pie Chart -->
-                    <div class="chart-card">
-                        <div class="chart-header">
-                            <h3>Event Distribution</h3>
-                            <p class="muted">By type</p>
-                        </div>
-                        <div style="position: relative; height: 250px;">
-                            <canvas id="audioTypeChart"></canvas>
-                        </div>
-                    </div>
+                    <!-- Removed Event Distribution Pie Chart as per user request -->
                 </div>
 
             </section>
@@ -3534,8 +3517,6 @@
         // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
         let audioTrendChart = null;
-        let audioHourlyChart = null;
-        let audioTypeChart = null;
 
         async function fetchAudioAnalytics() {
             const days = document.getElementById('audioTimeRange').value || 7;
@@ -3626,71 +3607,7 @@
                 }
             });
 
-            // Hourly Distribution
-            const hourlyData = Array(24).fill(0);
-            events.forEach(event => {
-                const hour = new Date(event.detected_at).getHours();
-                hourlyData[hour]++;
-            });
-
-            const hourlyCtx = document.getElementById('audioHourlyChart');
-            if (audioHourlyChart) audioHourlyChart.destroy();
-            audioHourlyChart = new Chart(hourlyCtx, {
-                type: 'bar',
-                data: {
-                    labels: Array.from({ length: 24 }, (_, i) => `${i}:00`),
-                    datasets: [{
-                        label: 'Events',
-                        data: hourlyData,
-                        backgroundColor: 'rgba(74, 144, 226, 0.6)',
-                        borderColor: '#4A90E2',
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false }
-                    },
-                    scales: {
-                        y: { beginAtZero: true, ticks: { stepSize: 1 } }
-                    }
-                }
-            });
-
-            // Event Type Pie Chart
-            const typeCtx = document.getElementById('audioTypeChart');
-            if (audioTypeChart) audioTypeChart.destroy();
-            audioTypeChart = new Chart(typeCtx, {
-                type: 'doughnut',
-                data: {
-                    labels: ['Coughs', 'Sneezes', 'Talking', 'Noise'],
-                    datasets: [{
-                        data: [
-                            stats.cough_count || 0,
-                            stats.sneeze_count || 0,
-                            stats.talking_count || 0,
-                            stats.noise_count || 0
-                        ],
-                        backgroundColor: [
-                            'rgba(251, 113, 133, 0.8)',
-                            'rgba(246, 194, 62, 0.8)',
-                            'rgba(74, 144, 226, 0.8)',
-                            'rgba(148, 163, 184, 0.8)'
-                        ],
-                        borderWidth: 2,
-                        borderColor: '#fff'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'bottom' }
-                    }
-                }
-            });
+            // Removed Hourly and Event Type charts as per user request
         }
 
         function renderRecentEvents(events) {
@@ -3741,6 +3658,27 @@
         fetchProfile();
         fetchAndRenderRecordings();
         fetchAudioAnalytics(); // Load audio analytics on page load
+
+        // Connect to Socket.IO for real-time audio updates
+        const socketUrl = (typeof API_BASE !== 'undefined') ? API_BASE.replace('/api', '') : 'http://127.0.0.1:8000';
+        const audioSocket = io(socketUrl, {
+            transports: ['websocket'],
+            upgrade: false
+        });
+
+        audioSocket.on('connect', () => {
+            if (typeof token !== 'undefined' && token) {
+                audioSocket.emit('authenticate', {
+                    token: token,
+                    care_recipient_id: typeof selectedRecipientId !== 'undefined' && selectedRecipientId ? parseInt(selectedRecipientId) : null
+                });
+            }
+        });
+
+        audioSocket.on('alert', (data) => {
+            // Re-fetch analytics immediately to update dashboard in real-time
+            fetchAudioAnalytics();
+        });
     </script>
     <!-- Chart.js for Audio Analytics -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>

@@ -126,66 +126,7 @@
         <!-- Left Column: Vitals & Tools -->
         <div class="lg:col-span-1 space-y-4">
 
-            <!-- Vitals Card -->
-            <div class="bg-white rounded-2xl shadow-sm p-6 border border-slate-100">
-                <h2 class="text-slate-500 text-sm font-semibold uppercase tracking-wider mb-4">Sensor Status</h2>
-                <div class="space-y-4">
-                    <!-- Heart Rate -->
-                    <div class="flex justify-between items-center p-2 hover:bg-slate-50 rounded-lg transition-colors">
-                        <div class="flex items-center space-x-3">
-                            <i data-lucide="heart" class="h-5 w-5 text-rose-500"></i>
-                            <span class="text-sm text-slate-600">Heart Rate</span>
-                        </div>
-                        <span class="font-bold text-slate-800"><span id="val-hr">--</span> <span
-                                class="text-xs text-slate-400">bpm</span></span>
-                    </div>
-                    <!-- BP -->
-                    <div class="flex justify-between items-center p-2 hover:bg-slate-50 rounded-lg transition-colors">
-                        <div class="flex items-center space-x-3">
-                            <i data-lucide="activity" class="h-5 w-5 text-blue-500"></i>
-                            <span class="text-sm text-slate-600">BP</span>
-                        </div>
-                        <span class="font-bold text-slate-800" id="val-bp">--/--</span>
-                    </div>
-                    <!-- Oxygen -->
-                    <div class="flex justify-between items-center p-2 hover:bg-slate-50 rounded-lg transition-colors">
-                        <div class="flex items-center space-x-3">
-                            <i data-lucide="droplet" class="h-5 w-5 text-cyan-500"></i>
-                            <span class="text-sm text-slate-600">SpO2 (Oxygen)</span>
-                        </div>
-                        <span class="font-bold text-slate-800"><span id="val-o2">--</span>%</span>
-                    </div>
-                    <!-- Sleep Score -->
-                    <div class="flex justify-between items-center p-2 hover:bg-slate-50 rounded-lg transition-colors">
-                        <div class="flex items-center space-x-3">
-                            <i data-lucide="moon" class="h-5 w-5 text-indigo-500"></i>
-                            <span class="text-sm text-slate-600">Sleep Score</span>
-                        </div>
-                        <span class="font-bold text-slate-800"><span id="val-sleep">--</span>/100</span>
-                    </div>
-                    <!-- Temp -->
-                    <div class="flex justify-between items-center p-2 hover:bg-slate-50 rounded-lg transition-colors">
-                        <div class="flex items-center space-x-3">
-                            <i data-lucide="thermometer" class="h-5 w-5 text-amber-500"></i>
-                            <span class="text-sm text-slate-600">Temp</span>
-                        </div>
-                        <span class="font-bold text-slate-800"><span id="val-temp">--</span>°F</span>
-                    </div>
-                    <!-- BMI -->
-                    <div class="flex justify-between items-center p-2 hover:bg-slate-50 rounded-lg transition-colors">
-                        <div class="flex items-center space-x-3">
-                            <i data-lucide="calculator" class="h-5 w-5 text-purple-500"></i>
-                            <span class="text-sm text-slate-600">BMI</span>
-                        </div>
-                        <div class="text-right">
-                            <span class="font-bold text-slate-800 block" id="val-bmi">--</span>
-                            <span class="text-[10px] text-slate-400" id="val-hw">H:-- W:--</span>
-                        </div>
-                    </div>
-                    <p class="text-xs text-slate-400 text-right pt-2 border-t border-slate-50">Updated: <span
-                            id="last-updated">--</span></p>
-                </div>
-            </div>
+            <!-- (Vitals Card removed as per user request to free up space and rely on voice AI) -->
 
             <!-- Music Player Widget (Hidden by default) -->
             <div id="music-widget" class="hidden bg-white rounded-2xl shadow-sm p-4 border border-slate-100">
@@ -516,9 +457,19 @@
 
             // Local Music Controls Before Gemini (For fast response)
             const t = text.toLowerCase();
-            if (t.includes('play my fav') || t.includes('play my favourite')) { playSong(0); addUIMessage('bot', "Playing your favourite song. Enjoy! \u2764\ufe0f"); return; }
-            if (t.includes('play a song') || t.includes('play music')) { playSong(1); addUIMessage('bot', "Playing some calming music. \ud83c\udfb5"); return; }
             if (t.includes('stop') && (t.includes('music') || t.includes('song'))) { controlMusic('stop'); addUIMessage('bot', "Music stopped."); return; }
+            if (t.includes('play')) {
+                for (let i = 0; i < playlist.length; i++) {
+                    if (t.includes(playlist[i].title.toLowerCase())) {
+                        playSong(i);
+                        addUIMessage('bot', `Playing ${playlist[i].title}. 🎵`);
+                        speak(`Playing ${playlist[i].title}`);
+                        return;
+                    }
+                }
+                if (t.includes('my fav') || t.includes('my favourite')) { playSong(0); addUIMessage('bot', "Playing your favourite song. Enjoy! ❤️"); speak("Playing your favourite song."); return; }
+                if (t.includes('a song') || t.includes('music')) { playSong(1); addUIMessage('bot', "Playing some calming music. 🎵"); speak("Playing some calming music."); return; }
+            }
 
             // Local Calling Emergency Before Gemini
             if (t.includes('emergency') || t.includes('911')) {
@@ -601,14 +552,7 @@
 
         // ========== VITALS & REMINDERS RENDER ==========
         function renderVitals() {
-            document.getElementById('val-hr').innerText = state.vitals.heartRate;
-            document.getElementById('val-bp').innerText = state.vitals.bloodPressure;
-            document.getElementById('val-temp').innerText = state.vitals.temperature;
-            document.getElementById('val-bmi').innerText = state.vitals.bmi;
-            document.getElementById('val-o2').innerText = state.vitals.oxygen;
-            document.getElementById('val-sleep').innerText = state.vitals.sleepScore;
-            document.getElementById('val-hw').innerText = `H:${state.vitals.height} W:${state.vitals.weight}`;
-            document.getElementById('last-updated').innerText = state.vitals.lastUpdated;
+            // Vitals UI removed
         }
 
         function renderReminders() {

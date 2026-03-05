@@ -72,7 +72,7 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
 
     # 3. Build Context & System Prompt
     context = build_conversation_context(payload.recipient_id, db)
-    system_prompt = generate_system_prompt(context)
+    system_prompt = generate_system_prompt(recipient.full_name, context)
     
     # Check depression risk to maybe add an alert in response text
     is_at_risk = check_depression_risk(payload.recipient_id, db)
@@ -88,7 +88,7 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
 
     gemini_payload = {
         "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser says: {user_text}"}]}],
-        "generationConfig": {"maxOutputTokens": 300, "temperature": 0.7}
+        "generationConfig": {"maxOutputTokens": 1000, "temperature": 0.7}
     }
     
     try:

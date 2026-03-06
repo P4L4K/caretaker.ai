@@ -1,0 +1,129 @@
+"""Email Notification Service for CareTaker.
+
+Sends:
+- Medicine reminder emails at scheduled times
+- Report upload reminders (no report for 30+ days)
+- Medication completion notifications
+"""
+
+import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
+
+def _get_smtp_config():
+    """Get SMTP configuration from environment."""
+    return {
+        "server": os.getenv("MAIL_SERVER", "smtp.gmail.com"),
+        "port": int(os.getenv("MAIL_PORT", 587)),
+        "username": os.getenv("MAIL_USERNAME"),
+        "password": os.getenv("MAIL_PASSWORD"),
+        "from_email": os.getenv("MAIL_FROM"),
+        "starttls": os.getenv("MAIL_STARTTLS", "True").lower() == "true",
+    }
+
+
+def send_email(to_email: str, subject: str, html_body: str) -> bool:
+    """Send an email via SMTP. Returns True on success."""
+    config = _get_smtp_config()
+    if not config["username"] or not config["password"]:
+        print("[email] SMTP credentials not configured, skipping email")
+        return False
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["From"] = config["from_email"]
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(html_body, "html"))
+
+        with smtplib.SMTP(config["server"], config["port"], timeout=30) as server:
+            if config["starttls"]:
+                server.starttls()
+            server.login(config["username"], config["password"])
+            server.sendmail(config["from_email"], to_email, msg.as_string())
+
+        print(f"[email] ✅ Sent to {to_email}: {subject}")
+        return True
+    except Exception as e:
+        print(f"[email] ❌ Failed to send to {to_email}: {e}")
+        return False
+
+
+def send_medicine_reminder(to_email: str, recipient_name: str, medicine_name: str, dosage: str, schedule_time: str):
+    """Send a medication reminder email."""
+    subject = f"💊 Medicine Reminder: {medicine_name} for {recipient_name}"
+    html = f"""
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0;">
+        <div style="text-align: center; margin-bottom: 20px;">
+            <span style="font-size: 48px;">💊</span>
+            <h2 style="color: #2d3748; margin: 8px 0;">Medicine Reminder</h2>
+        </div>
+        <div style="background: linear-gradient(135deg, #ebf8ff, #e6fffa); padding: 20px; border-radius: 8px; margin-bottom: 16px;">
+            <p style="margin: 4px 0; color: #4a5568;"><strong>Patient:</strong> {recipient_name}</p>
+            <p style="margin: 4px 0; color: #4a5568;"><strong>Medicine:</strong> {medicine_name}</p>
+            <p style="margin: 4px 0; color: #4a5568;"><strong>Dosage:</strong> {dosage or 'As prescribed'}</p>
+            <p style="margin: 4px 0; color: #4a5568;"><strong>Scheduled Time:</strong> {schedule_time}</p>
+        </div>
+        <p style="color: #718096; font-size: 13px; text-align: center;">
+            This is an automated reminder from CareTaker AI.
+        </p>
+    </div>
+    """
+    return send_email(to_email, subject, html)
+
+
+def send_medication_completed(to_email: str, recipient_name: str, medicine_name: str, duration_days: int):
+    """Send a notification that a medication course is complete."""
+    subject = f"✅ Medication Completed: {medicine_name} for {recipient_name}"
+    html = f"""
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0;">
+        <div style="text-align: center; margin-bottom: 20px;">
+            <span style="font-size: 48px;">✅</span>
+            <h2 style="color: #2d3748; margin: 8px 0;">Medication Course Completed</h2>
+        </div>
+        <div style="background: linear-gradient(135deg, #f0fff4, #e6fffa); padding: 20px; border-radius: 8px; margin-bottom: 16px;">
+            <p style="margin: 4px 0; color: #4a5568;"><strong>Patient:</strong> {recipient_name}</p>
+            <p style="margin: 4px 0; color: #4a5568;"><strong>Medicine:</strong> {medicine_name}</p>
+            <p style="margin: 4px 0; color: #4a5568;"><strong>Duration:</strong> {duration_days} days</p>
+            <p style="margin: 8px 0; color: #38a169; font-weight: 600;">
+                This medication has been automatically marked as completed.
+            </p>
+        </div>
+        <p style="color: #718096; font-size: 13px; text-align: center;">
+            Consult your doctor before making any changes to the medication plan.
+        </p>
+    </div>
+    """
+    return send_email(to_email, subject, html)
+
+
+def send_report_upload_reminder(to_email: str, recipient_name: str, days_since_last: int):
+    """Send a reminder that no medical report has been uploaded recently."""
+    subject = f"📋 Report Reminder: No new reports for {recipient_name} in {days_since_last} days"
+    html = f"""
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0;">
+        <div style="text-align: center; margin-bottom: 20px;">
+            <span style="font-size: 48px;">📋</span>
+            <h2 style="color: #2d3748; margin: 8px 0;">Medical Report Reminder</h2>
+        </div>
+        <div style="background: linear-gradient(135deg, #fffaf0, #fefcbf); padding: 20px; border-radius: 8px; margin-bottom: 16px;">
+            <p style="margin: 4px 0; color: #4a5568;"><strong>Patient:</strong> {recipient_name}</p>
+            <p style="margin: 8px 0; color: #c05621; font-weight: 600;">
+                ⚠️ It has been {days_since_last} days since the last medical report was uploaded.
+            </p>
+            <p style="margin: 4px 0; color: #4a5568;">
+                Regular medical reports help track health trends and detect issues early.
+                Please upload a recent report to keep the health profile up to date.
+            </p>
+        </div>
+        <p style="color: #718096; font-size: 13px; text-align: center;">
+            This is an automated reminder from CareTaker AI.
+        </p>
+    </div>
+    """
+    return send_email(to_email, subject, html)

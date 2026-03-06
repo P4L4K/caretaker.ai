@@ -105,7 +105,10 @@ class MedicationInput(BaseModel):
     dosage: Optional[str] = None
     frequency: Optional[str] = None
     schedule_time: Optional[str] = None
+    duration_days: Optional[int] = None
+    start_date: Optional[str] = None  # ISO date YYYY-MM-DD, defaults to today
     status: Optional[str] = "active"
+
 
 class AllergyInput(BaseModel):
     allergen: str

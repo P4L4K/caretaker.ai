@@ -1059,51 +1059,20 @@
         "has_falls": true,
         "completed_at": "2026-03-05T22:29:26.117572"
     },
-    "ce757499-4af2-42d6-99b5-bd5062e97872": {
-        "status": "error",
-        "progress": 0,
-        "user_email": "first@gmail.com",
-        "username": "first",
-        "caretaker_id": 1,
-        "recipient_id": 1,
-        "input_file": "temp_uploads\\2758708e-aa96-4820-9553-544ce6dfff19.avi",
-        "output_file": "processed_videos\\analyzed_2758708e-aa96-4820-9553-544ce6dfff19.avi",
-        "output_filename": "analyzed_2758708e-aa96-4820-9553-544ce6dfff19.avi",
-        "start_time": 1772742684.804011,
-        "error": "ultralytics is not installed. Please `pip install ultralytics`.",
-        "falls_detected": [],
-        "has_falls": false
-    },
-    "fc114525-40e1-494c-afb1-1ec4e1a9b273": {
+    "9390a15f-1e9b-4b08-b738-1e0f72b947f3": {
         "status": "completed",
         "progress": 100,
-        "user_email": "first@gmail.com",
-        "username": "first",
-        "caretaker_id": 1,
-        "recipient_id": 1,
-        "input_file": "temp_uploads\\500107e4-827d-4960-8252-86e88dd580ea.avi",
-        "output_file": "processed_videos\\analyzed_500107e4-827d-4960-8252-86e88dd580ea.avi",
-        "output_filename": "analyzed_500107e4-827d-4960-8252-86e88dd580ea.avi",
-        "start_time": 1772743777.467331,
+        "user_email": "2022a6r031@mietjammu.in",
+        "username": "TEST",
+        "caretaker_id": 45,
+        "recipient_id": 45,
+        "input_file": "temp_uploads\\c98509f3-4c54-4fbb-9af7-bf4a49a8da80.mp4",
+        "output_file": "processed_videos\\analyzed_c98509f3-4c54-4fbb-9af7-bf4a49a8da80.mp4",
+        "output_filename": "analyzed_c98509f3-4c54-4fbb-9af7-bf4a49a8da80.mp4",
+        "start_time": 1772746794.7203226,
         "error": null,
         "falls_detected": [],
         "has_falls": false,
-        "completed_at": "2026-03-06T02:20:27.706236"
-    },
-    "5ef7f96a-dcb8-474f-91c7-269144b1ebe5": {
-        "status": "completed",
-        "progress": 100,
-        "user_email": "first@gmail.com",
-        "username": "first",
-        "caretaker_id": 1,
-        "recipient_id": 1,
-        "input_file": "temp_uploads\\9bd1a7e4-895f-41d5-9e6d-d5d046d83d5c.avi",
-        "output_file": "processed_videos\\analyzed_9bd1a7e4-895f-41d5-9e6d-d5d046d83d5c.avi",
-        "output_filename": "analyzed_9bd1a7e4-895f-41d5-9e6d-d5d046d83d5c.avi",
-        "start_time": 1772743859.7784197,
-        "error": null,
-        "falls_detected": [],
-        "has_falls": false,
-        "completed_at": "2026-03-06T02:22:43.463532"
+        "completed_at": "2026-03-06T03:10:35.976567"
     }
 }

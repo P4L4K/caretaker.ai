@@ -705,6 +705,9 @@ async def get_care_recipient_profile(
             "dosage": m.dosage,
             "frequency": m.frequency,
             "schedule_time": m.schedule_time,
+            "start_date": str(m.start_date) if m.start_date else None,
+            "end_date": str(m.end_date) if m.end_date else None,
+            "duration_days": (m.end_date - m.start_date).days if m.end_date and m.start_date else None,
             "status": m.status.value if m.status else None
         } for m in meds_raw
     ]
@@ -863,7 +866,6 @@ async def add_medication(recipient_id: int, data: MedicationInput, authorization
         dosage=data.dosage,
         frequency=data.frequency,
         schedule_time=data.schedule_time,
-        duration_days=data.duration_days,
         start_date=start,
         end_date=end,
         status=MedicationStatus(data.status)
@@ -884,7 +886,6 @@ async def update_medication(recipient_id: int, med_id: int, data: MedicationInpu
     med.dosage = data.dosage
     med.frequency = data.frequency
     med.schedule_time = data.schedule_time
-    med.duration_days = data.duration_days
     med.status = MedicationStatus(data.status)
 
     # Update start_date if provided

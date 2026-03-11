@@ -593,7 +593,21 @@
             else { indicator.classList.add('hidden'); btn.classList.add('bg-[#4A90E2]', 'hover:bg-[#357abd]', 'shadow-blue-200'); btn.classList.remove('bg-red-500', 'hover:bg-red-600', 'shadow-red-200', 'scale-110'); btn.innerHTML = '<i data-lucide="mic" class="h-6 w-6"></i>'; }
             lucide.createIcons();
         }
-        function toggleListening() { if (!recognition) { alert("Speech recognition not supported."); return; } if (state.isListening) { recognition.stop(); } else { recognition.start(); setListening(true); } }
+        function toggleListening() {
+            if (!recognition) { alert("Speech recognition not supported."); return; }
+
+            // Interrupt ongoing speech if user clicks to speak
+            if (synth.speaking) {
+                synth.cancel();
+            }
+
+            if (state.isListening) {
+                recognition.stop();
+            } else {
+                recognition.start();
+                setListening(true);
+            }
+        }
 
         // ========== INIT ==========
         function init() {

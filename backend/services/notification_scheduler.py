@@ -131,7 +131,7 @@ def check_medication_expiry():
                     to_email=caretaker.email,
                     recipient_name=recipient.full_name,
                     medicine_name=med.medicine_name,
-                    duration_days=med.duration_days or 0
+                    duration_days=(med.end_date - med.start_date).days if med.end_date and med.start_date else 0
                 )
             print(f"[scheduler] ✅ Medication '{med.medicine_name}' auto-completed (expired {med.end_date})")
 

@@ -680,7 +680,7 @@
         }
 
         .summary-ul li::before {
-            content: "â€¢";
+            content: "•";
             color: var(--accent);
             font-weight: bold;
             position: absolute;
@@ -1137,6 +1137,7 @@
     </style>
     <!-- Socket.IO config for live alerts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 
 <body>
@@ -1144,7 +1145,7 @@
         <aside class="sidebar">
             <div class="brand">Care<span>Taker</span></div>
             <div class="caretaker-chip">
-                <div class="avatar">CT</div>
+                <div><i class="fa-solid fa-user"></i></div>
                 <div>
                     <h4 id="sidebarCaretakerName">&mdash;</h4>
                     <span id="sidebarCaretakerEmail">Loading&hellip;</span>
@@ -1168,11 +1169,12 @@
                     <span>Medical Reports &amp; History</span>
                     &#x279C;
                 </a>
+                <!--
                 <a href="insights.html" class="nav-chip"
                     style="text-decoration:none; background: linear-gradient(135deg, rgba(74,144,226,0.12), rgba(139,92,246,0.08)); border-color: rgba(74,144,226,0.2);">
                     <span>Patient Intelligence</span>
                     &#x279C;
-                </a>
+                </a> -->
 
                 <button class="nav-chip" id="voiceBotBtn">
                     <span>Voice Bot</span>
@@ -1188,10 +1190,10 @@
             </div>
 
             <div>
-                <div class="section-title">Care Recipients</div>
+                <div class="section-title">Seniors</div>
                 <input id="recipientSearch" type="search" class="recipient-search" placeholder="Search recipients">
                 <div id="recipientsList" class="recipient-list">
-                    <p class="muted">Loading recipients&hellip;</p>
+                    <p class="muted">Seniors&hellip;</p>
                 </div>
             </div>
         </aside>
@@ -1202,7 +1204,7 @@
                     <div>
                         <p class="eyebrow">Profile Hub</p>
                         <h1>Welcome back, <span id="caretakerName">â€”</span></h1>
-                        <p class="muted">Stay close to every care recipient from a single, modern workspace.</p>
+                        <p class="muted">Stay close to every seniors from a single, modern workspace.</p>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <a href="settings.html" class="ghost-btn"
@@ -1210,9 +1212,7 @@
                             <i class="fas fa-cog"></i>
                             <span>Settings</span>
                         </a>
-                        <div class="status-pill">
-                            Logged in
-                        </div>
+
                         <button id="logoutBtn" class="ghost-btn"
                             style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border-color: #ef4444; padding: 6px 12px; border-radius: 20px; font-weight: 500; font-size: 0.85rem; display: flex; align-items: center; gap: 6px;">
                             <i class="fas fa-sign-out-alt" style="font-size: 0.9em;"></i>
@@ -1240,7 +1240,7 @@
                             </a>
                         </p>
                         <h2 id="recipientCardTitle">All recipients</h2>
-                        <div class="info-row" id="recipientCardMeta">Select a care recipient from the left panel to see
+                        <div class="info-row" id="recipientCardMeta">Select a seniors from the left panel to see
                             details.</div>
                         <div class="tag-row" id="recipientBadges"></div>
                     </article>
@@ -1471,7 +1471,7 @@
                         </div>
                     </div>
                     <!-- Removed Event Distribution Pie Chart as per user request -->
-                </div>
+                </div>-->
 
             </section>
 
@@ -3019,9 +3019,9 @@
             });
 
             const sections = [
-                { type: 'cough', title: 'ðŸ¤§ Coughs', predictions: groupedPredictions.cough },
-                { type: 'snore', title: 'ðŸ˜´ Snores', predictions: groupedPredictions.snore },
-                { type: 'other', title: 'ðŸ”Š Other Sounds', predictions: groupedPredictions.other }
+                { type: 'cough', title: '😷 Coughs', predictions: groupedPredictions.cough },
+                { type: 'snore', title: '😴 Snores', predictions: groupedPredictions.snore },
+                { type: 'other', title: '🔊 Other Sounds', predictions: groupedPredictions.other }
             ];
 
             sections.forEach(section => {
@@ -3100,7 +3100,7 @@
                     div.className = 'history-card';
                     div.innerHTML = `
                     <h4>${rec.filename}</h4>
-                    <div class="meta">${new Date(rec.created_at).toLocaleString()}${rec.care_recipient_id ? ' â€¢ Recipient: ' + rec.care_recipient_id : ''}</div>
+                    <div class="meta">${new Date(rec.created_at).toLocaleString()}${rec.care_recipient_id ? ' • Recipient: ' + rec.care_recipient_id : ''}</div>
                 `;
                     const controls = document.createElement('div');
                     controls.style.marginTop = '12px';
@@ -3173,7 +3173,7 @@
             div.className = 'history-card';
             div.innerHTML = `
             <h4>${filename}</h4>
-            <div class="meta">Local session â€¢ ${selectedRecipientName}</div>
+            <div class="meta">Local session • ${selectedRecipientName}</div>
             <audio controls style="width:100%;margin-top:12px;">
                 <source src="${url}" type="${mimeType}">
             </audio>
@@ -3283,7 +3283,7 @@
                 } else {
                     fallDetectionOutput.innerHTML = `
                     <div class="mt-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded">
-                        <p>âœ… No falls detected in the video.</p>
+                        <p>✅ No falls detected in the video.</p>
                     </div>
                 `;
                 }
@@ -3330,7 +3330,7 @@
                     return;
                 }
 
-                emotionStatusEl.textContent = 'Status: Requesting cameraâ€¦';
+                emotionStatusEl.textContent = 'Status: Requesting camera...';
                 emotionStatusEl.style.color = '#38bdf8';
 
                 emotionStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
@@ -3390,8 +3390,8 @@
                 const data = await res.json();
 
                 if (!data || data.user_id === null || data.dominant_emotion === null) {
-                    emotionCurrentEl.textContent = 'â€”';
-                    emotionConfidenceEl.textContent = 'â€”';
+                    emotionCurrentEl.textContent = '—';
+                    emotionConfidenceEl.textContent = '—';
                     return;
                 }
 
@@ -3628,7 +3628,7 @@
                 const timeStr = date.toLocaleTimeString();
                 const dateStr = date.toLocaleDateString();
                 const type = event.event_type.toLowerCase();
-                const icon = type === 'cough' ? 'ðŸ¤§' : type === 'sneeze' ? 'ðŸ¤§' : 'ðŸ”Š';
+                const icon = type === 'cough' ? '😷' : type === 'sneeze' ? '🤧' : '🔊';
 
                 return `
                     <div class="audio-event-item ${type}">

@@ -106,32 +106,43 @@ def build_conversation_context(recipient_id: int, db: Session):
     }
 
 def generate_system_prompt(name: str, context: dict) -> str:
+    # Check history to see if we've already given the full overview
+    history = context.get("history", [])
+    has_introduced = any("bot" in msg["sender"].lower() for msg in history)
+
     prompt = f"You are a highly intelligent, proactive, and empathetic AI Medical Companion for an elderly patient named {name}. "
-    prompt += "You possess deep knowledge of their medical history, live sensor data, and medication schedule. You act like a specialized medical AI (like a personalized medical ChatGPT) dedicated to their care.\n\n"
+    prompt += "You act like a specialized medical AI (like a personalized medical ChatGPT) dedicated to their care.\n\n"
     
     recip = context.get("recipient", {})
-    prompt += "### Context about the user:\n"
-    prompt += f"- Age: {recip.get('age', 'Unknown')}\n"
-    if recip.get('report_summary'):
-        prompt += f"- Comprehensive Health Summary: {recip.get('report_summary')}\n"
     
-    conds = context.get("conditions", [])
-    if conds:
-        prompt += "- Active Conditions: " + ", ".join([f"{c['name']} ({c['severity']})" for c in conds]) + "\n"
+    # ONLY provide the full detailed profile if it's the very first interaction in this window
+    if not has_introduced:
+        prompt += "### INITIAL DETAILED OVERVIEW (Provide this ONLY for the first greeting):\n"
+        prompt += f"- Age: {recip.get('age', 'Unknown')}\n"
+        if recip.get('report_summary'):
+            prompt += f"- Comprehensive Health Summary: {recip.get('report_summary')}\n"
         
-    vitals = context.get("vitals")
-    if vitals:
-        prompt += f"- Latest Sensor Vitals: {vitals}\n"
-        
+        conds = context.get("conditions", [])
+        if conds:
+            prompt += "- Active Conditions: " + ", ".join([f"{c['name']} ({c['severity']})" for c in conds]) + "\n"
+            
+        vitals = context.get("vitals")
+        if vitals:
+            prompt += f"- Latest Sensor Vitals: {vitals}\n"
+            
+        meds = context.get("medications", [])
+        if meds:
+            prompt += "- Prescribed Medications: " + ", ".join([f"{m['name']} ({m['details']}, {m['frequency']})" for m in meds]) + "\n"
+    else:
+        # Subsequent turns: Be brief and don't repeat the records unless asked
+        prompt += "### ONGOING CONVERSATION MODE:\n"
+        prompt += "The user already has their medical context. Be extremely concise (under 2-3 sentences mostly). "
+        prompt += "Do NOT repeat the list of medications, conditions, or vitals unless the user specifically asks 'What are my meds?' or 'How are my vitals?'.\n"
+
     alerts = context.get("active_alerts", [])
     if alerts:
         prompt += "- Active Medical Alerts: " + ", ".join([f"{a['type']}: {a['message']}" for a in alerts]) + "\n"
         prompt += "  *IMPORTANT:* Address these alerts proactively if they relate to the user's current symptoms or questions.\n"
-        
-    meds = context.get("medications", [])
-    if meds:
-        prompt += "- Prescribed Medications: " + ", ".join([f"{m['name']} ({m['details']}, {m['frequency']})" for m in meds]) + "\n"
-        prompt += "  *CRITICAL:* Always check this list when giving medication advice or schedule reminders. Be precise about dosage and timing.\n"
         
     reminders = context.get("reminders", [])
     if reminders:
@@ -143,16 +154,14 @@ def generate_system_prompt(name: str, context: dict) -> str:
         prompt += "\n**CRITICAL OBSERVATION:** The user has exhibited signs of sadness or distress recently. Provide deep emotional support.\n"
 
     prompt += "\n### Conversation History:\n"
-    history = context.get("history", [])
     for msg in history[-8:]:
         prompt += f"{msg['sender'].capitalize()}: {msg['text']}\n"
         
     prompt += "\n### Rules:\n"
-    prompt += "1. Give comprehensive, detailed, and intelligent answers. Do NOT give small, incomplete stories.\n"
-    prompt += "2. Reference their specific medical history, sensor data, and medication list intelligently to explain HOW it applies to their situation.\n"
-    prompt += "3. If they ask for advice on an ailment or medicine, provide detailed medical context and recommend actions based on their known conditions.\n"
-    prompt += "4. If there's an emergency, advise them to trigger the emergency SOS immediately.\n"
-    prompt += "5. Be empathetic, encouraging, and highly articulate.\n"
+    prompt += "1. Give comprehensive answers only when asked for details. Otherwise, keep it short and natural.\n"
+    prompt += "2. Do NOT repeat the patient's record values in every message. Only mention them once at the start or when asked.\n"
+    prompt += "3. Reference data intelligently to explain HOW it applies only when relevant.\n"
+    prompt += "4. Be empathetic and highly articulate.\n"
     
     return prompt
 

@@ -430,6 +430,10 @@
                     <button class="btn btn-sm btn-outline" onclick="showHistory('medications')"><i
                             class="fas fa-history"></i></button>
                     <button class="btn btn-sm" onclick="showAddModal('medication')"><i class="fas fa-plus"></i></button>
+                    <button class="btn btn-sm btn-outline"
+                        onclick="window.location.href='order_medicines.html?recipient_id=' + recipientId"
+                        style="background:#10B981; color:white; border:none;" title="Order ongoing medicines online"><i
+                            class="fas fa-shopping-cart"></i> Order</button>
                 </div>
             </div>
             <div id="medicationsList" style="max-height: 400px; overflow-y: auto;"></div>
@@ -571,6 +575,16 @@
                                 onchange="if(this.checked){document.getElementById('medDuration').value='';document.getElementById('medDuration').disabled=true;}else{document.getElementById('medDuration').disabled=false;}">
                             Lifetime / Ongoing
                         </label>
+                    </div>
+                </div>
+                <div class="form-group" style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                    <div>
+                        <label>Current Stock (units)</label>
+                        <input type="number" id="medStock" min="0" placeholder="e.g. 30">
+                    </div>
+                    <div>
+                        <label>Doses per Day</label>
+                        <input type="number" id="medDosesPerDay" min="1" placeholder="e.g. 2">
                     </div>
                 </div>
                 <div class="form-group">
@@ -822,6 +836,20 @@
                     ? `📅 ${startLabel} → <strong>${endLabel}</strong>`
                     : `📅 Started: ${startLabel}`;
 
+                // Stock Prediction info
+                let stockWarning = '';
+                if (m.current_stock !== undefined && m.doses_per_day) {
+                    const totalDays = Math.floor(m.current_stock / m.doses_per_day);
+                    const finishDate = new Date();
+                    finishDate.setDate(finishDate.getDate() + totalDays);
+
+                    const lowStock = totalDays <= 3;
+                    stockWarning = `<div style="margin-top:5px; font-size:11px; color:${lowStock ? '#ef4444' : '#64748b'}; font-weight:${lowStock ? '700' : '400'};">
+                        📦 Stock: ${m.current_stock} units (${totalDays} days left) 
+                        ${lowStock ? ' — <a href="order_medicines.html?recipient_id=' + recipientId + '" style="color:#4A90E2;text-decoration:underline;">Order Now</a>' : ''}
+                    </div>`;
+                }
+
                 return `
                 <div class="list-item" style="display:flex;justify-content:space-between;align-items:center;">
                     <div style="flex:1;">
@@ -836,6 +864,7 @@
                         <div class="list-item-meta" style="margin-top:3px;font-size:12px;color:#64748b;">
                             ${dateInfo}
                         </div>
+                        ${stockWarning}
                     </div>
                     <button class="btn btn-sm btn-outline" onclick="showEditModal('medication', ${m.id})"><i class="fas fa-edit"></i></button>
                 </div>
@@ -877,6 +906,8 @@
                 document.getElementById('medicationModalTitle').innerText = 'Add Medication';
                 document.getElementById('medicationForm').reset();
                 document.getElementById('medicationId').value = '';
+                document.getElementById('medStock').value = 0;
+                document.getElementById('medDosesPerDay').value = 1;
                 // Default start date to today
                 document.getElementById('medStartDate').value = new Date().toISOString().split('T')[0];
                 document.getElementById('medLifetime').checked = false;
@@ -914,6 +945,8 @@
                 document.getElementById('medLifetime').checked = isLifetime;
                 document.getElementById('medDuration').value = item.duration_days || '';
                 document.getElementById('medDuration').disabled = isLifetime;
+                document.getElementById('medStock').value = item.current_stock || 0;
+                document.getElementById('medDosesPerDay').value = item.doses_per_day || 1;
                 document.getElementById('medStatus').value = item.status || 'active';
                 document.getElementById('medicationModal').style.display = 'flex';
             } else if (type === 'allergy') {
@@ -962,7 +995,9 @@
                 schedule_time: document.getElementById('medSchedule').value,
                 duration_days: isLifetime ? null : (durationVal ? parseInt(durationVal) : null),
                 start_date: startVal || null,
-                status: document.getElementById('medStatus').value
+                status: document.getElementById('medStatus').value,
+                current_stock: parseInt(document.getElementById('medStock').value || 0),
+                doses_per_day: parseInt(document.getElementById('medDosesPerDay').value || 1)
             };
             const method = id ? 'PATCH' : 'POST';
             const url = id

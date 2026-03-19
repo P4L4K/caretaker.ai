@@ -22,6 +22,10 @@ class Medication(Base):
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
     status = Column(Enum(MedicationStatus), default=MedicationStatus.active, nullable=False)
+    
+    # Stock Management & Auto-Ordering
+    current_stock = Column(Integer, default=0, nullable=True)
+    doses_per_day = Column(Integer, default=1, nullable=True)
 
     care_recipient = relationship("CareRecipient", back_populates="active_medications")
 

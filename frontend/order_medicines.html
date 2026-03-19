@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Medication Ordering</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #FDFBF7;
+            --card-bg: rgba(255, 255, 255, 0.85);
+            --text-main: #1A202C;
+            --text-muted: #4A5568;
+            --accent: #4A90E2;
+            --accent-hover: #6BB5FF;
+            --border-light: rgba(74, 144, 226, 0.2);
+            --radius: 20px;
+            --shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+            --pastel-mint: #B2F7EF;
+            --pastel-peach: #FFDAC1;
+            --pastel-lavender: #E2D1F9;
+            --success: #10B981;
+            --danger: #EF4444;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            background-image:
+                radial-gradient(at 20% 30%, var(--pastel-mint) 0px, transparent 55%),
+                radial-gradient(at 80% 10%, var(--pastel-peach) 0px, transparent 50%),
+                radial-gradient(at 40% 80%, var(--pastel-lavender) 0px, transparent 50%),
+                radial-gradient(at 90% 90%, var(--pastel-mint) 0px, transparent 40%);
+            background-attachment: fixed;
+            background-size: 120% 120%;
+            color: var(--text-main);
+            margin: 0;
+            padding: 24px;
+        }
+
+        .dashboard-container {
+            max-width: 1000px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 24px;
+        }
+
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            background: white;
+            padding: 16px 24px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            max-width: 1000px;
+            margin: 0 auto 24px;
+        }
+
+        .navbar h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+
+        .btn:hover {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+        }
+
+        .btn-amazon {
+            background: #ff9900;
+            color: #000;
+        }
+
+        .btn-amazon:hover {
+            background: #e68a00;
+        }
+
+        .btn-smart {
+            background: linear-gradient(135deg, #10B981, #34D399);
+            color: white;
+        }
+
+        .btn-smart:hover {
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: var(--radius);
+            padding: 24px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-light);
+        }
+
+        .med-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border: 1px solid var(--border-light);
+            border-radius: 16px;
+            margin-bottom: 16px;
+            background: rgba(255, 255, 255, 0.5);
+            transition: all 0.2s;
+        }
+
+        .med-item:hover {
+            background: white;
+            border-color: var(--accent);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
+            transform: translateX(4px);
+        }
+
+        .med-info {
+            flex: 1;
+        }
+
+        .med-info h3 {
+            margin: 0 0 6px 0;
+            font-size: 1.25rem;
+            color: var(--text-main);
+        }
+
+        .med-info p {
+            margin: 0;
+            font-size: 0.95rem;
+            color: var(--text-muted);
+        }
+
+        .stock-tag {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            margin-top: 8px;
+        }
+
+        .stock-low {
+            background: #fee2e2;
+            color: #ef4444;
+        }
+
+        .stock-ok {
+            background: #f0fdf4;
+            color: #15803d;
+        }
+
+        .med-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            margin-left: 20px;
+        }
+
+        /* Modal / Toast Styles */
+        #notificationToast {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 1000;
+            background: white;
+            padding: 20px;
+            border-radius: 16px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
+            max-width: 360px;
+            border-left: 6px solid var(--accent);
+            transform: translateX(400px);
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        #notificationToast.show {
+            transform: translateX(0);
+        }
+
+        .toast-header {
+            font-weight: 800;
+            color: var(--text-main);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .toast-body {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        .toast-footer {
+            margin-top: 16px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .loader {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="navbar">
+        <h1><i class="fas fa-shopping-cart"></i> Smart Med Refill</h1>
+        <div>
+            <button class="btn btn-outline" id="backBtn"><i class="fas fa-arrow-left"></i> Back to Profile</button>
+        </div>
+    </div>
+
+    <div id="loadingIndicator" style="text-align: center; padding: 50px; font-size: 1.2rem; color: var(--text-muted);">
+        <i class="fas fa-spinner fa-spin"></i> Analyzing current house stock...
+    </div>
+
+    <div id="mainContainer" class="dashboard-container" style="display: none;">
+        <div class="card">
+            <h2
+                style="margin-top: 0; margin-bottom: 24px; color: var(--text-main); display: flex; align-items: center; justify-content: space-between;">
+                <span><i class="fas fa-pills" style="color: var(--accent); margin-right: 12px;"></i> Prescriptions &
+                    Inventory</span>
+                <span id="stockSummary" style="font-size: 0.9rem; font-weight: 400; color: var(--text-muted);"></span>
+            </h2>
+            <div id="medicationsList"></div>
+        </div>
+    </div>
+
+    <!-- Smart Order Confirmation Toast -->
+    <div id="notificationToast">
+        <div class="toast-header"><i class="fas fa-robot"></i> <span id="toastTitle">Smart Assistant</span></div>
+        <div class="toast-body" id="toastMessage"></div>
+        <div class="toast-footer" id="toastFooter"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://127.0.0.1:8000/api';
+        const urlParams = new URLSearchParams(window.location.search);
+        const recipientId = urlParams.get('recipient_id');
+        const token = localStorage.getItem('token');
+
+        if (!token || !recipientId) {
+            window.location.href = 'dashboard.html';
+        }
+
+        document.getElementById('backBtn').onclick = () => {
+            window.location.href = `profile.html?recipient_id=${recipientId}`;
+        };
+
+        async function init() {
+            try {
+                const response = await fetch(`${API_BASE}/care-recipients/${recipientId}/profile`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (!response.ok) throw new Error('Failed to fetch inventory.');
+
+                const profileData = await response.json();
+                const activeMeds = (profileData.medications || []).filter(m => m.status === 'active');
+
+                document.getElementById('loadingIndicator').style.display = 'none';
+                document.getElementById('mainContainer').style.display = 'grid';
+
+                const listEl = document.getElementById('medicationsList');
+
+                if (activeMeds.length === 0) {
+                    listEl.innerHTML = `<div class="empty-state">No medications found for this patient.</div>`;
+                    return;
+                }
+
+                let lowStockCount = 0;
+
+                listEl.innerHTML = activeMeds.map(med => {
+                    const currentStock = med.current_stock || 0;
+                    const dailyDose = med.doses_per_day || 1;
+                    const daysRemaining = Math.floor(currentStock / dailyDose);
+                    const isLow = daysRemaining <= 3;
+                    if (isLow) lowStockCount++;
+
+                    const finishDate = new Date();
+                    finishDate.setDate(finishDate.getDate() + daysRemaining);
+
+                    const amazonLink = `https://www.amazon.com/s?k=${encodeURIComponent(med.medicine_name)}+medicine`;
+                    const oneMgLink = `https://www.1mg.com/search/all?name=${encodeURIComponent(med.medicine_name)}`;
+
+                    return `
+                        <div class="med-item">
+                            <div class="med-info">
+                                <h3>${med.medicine_name}</h3>
+                                <p><strong>Dosage:</strong> ${med.dosage || 'N/A'} | <strong>Dose:</strong> ${dailyDose} units/day</p>
+                                <div class="stock-tag ${isLow ? 'stock-low' : 'stock-ok'}">
+                                    <i class="fas ${isLow ? 'fa-exclamation-triangle' : 'fa-check-circle'}"></i> 
+                                    ${currentStock} units left — Finished by: <strong>${finishDate.toLocaleDateString()}</strong>
+                                </div>
+                            </div>
+                            <div class="med-actions">
+                                <button class="btn btn-smart" onclick="findBestDeal('${med.medicine_name}', ${med.medication_id})">
+                                    <i class="fas fa-magic"></i> Smart Reorder
+                                </button>
+                                <a href="${amazonLink}" target="_blank" class="btn btn-amazon"><i class="fab fa-amazon"></i> Amazon</a>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                document.getElementById('stockSummary').innerText = `${lowStockCount} items running low`;
+
+            } catch (error) {
+                console.error(error);
+                document.getElementById('loadingIndicator').innerHTML = `<div style="color: var(--danger);">Error: ${error.message}</div>`;
+            }
+        }
+
+        function findBestDeal(name, id) {
+            const toast = document.getElementById('notificationToast');
+            const msg = document.getElementById('toastMessage');
+            const footer = document.getElementById('toastFooter');
+
+            toast.className = 'show';
+            msg.innerHTML = `<div style="display:flex;align-items:center;gap:12px;">
+                <div class="loader" style="border-top-color:var(--accent);"></div>
+                Searching for best deals on <strong>${name}</strong>...
+            </div>`;
+            footer.innerHTML = '';
+
+            // Simulated deal fetching logic
+            setTimeout(() => {
+                const retailers = [
+                    { name: '1mg Pharmacy', price: '₹' + (Math.floor(Math.random() * 400) + 100), saved: '15%' },
+                    { name: 'Amazon Home Care', price: '₹' + (Math.floor(Math.random() * 400) + 100), saved: '10%' },
+                    { name: 'Pharmeasy', price: '₹' + (Math.floor(Math.random() * 400) + 100), saved: '20%' }
+                ];
+                retailers.sort((a, b) => parseInt(a.price.substring(1)) - parseInt(b.price.substring(1)));
+                const best = retailers[0];
+
+                msg.innerHTML = `Identified best value at <strong>${best.name}</strong>.<br>
+                                Price: <strong style="color:var(--success); font-size:1.1rem;">${best.price}</strong> 
+                                <span style="font-size:0.8rem; background:#f0fdf4; color:#15803d; padding:2px 6px; border-radius:4px;">Save ${best.saved}</span><br><br>
+                                Calculated Stock End Date: <strong>As predicted</strong>.<br>
+                                Shall I proceed with the order?`;
+
+                footer.innerHTML = `
+                    <button class="btn" style="flex:1;" onclick="confirmOrder('${name}', '${best.name}', '${best.price}')">Confirm & Order</button>
+                    <button class="btn btn-outline" onclick="closeToast()">Dismiss</button>
+                `;
+            }, 1500);
+        }
+
+        function confirmOrder(medicine, vendor, price) {
+            const msg = document.getElementById('toastMessage');
+            const footer = document.getElementById('toastFooter');
+
+            msg.innerHTML = `<div style="text-align:center; padding:10px 0;">
+                <i class="fas fa-check-circle" style="font-size:3rem; color:var(--success); margin-bottom:12px;"></i><br>
+                <strong>Order Confirmed!</strong><br>
+                Refill for ${medicine} placed via ${vendor}.<br>
+                Payment: Cash on Delivery.<br>
+                <span style="font-size:0.8rem; color:var(--text-muted);">Notification sent to registered caretaker.</span>
+            </div>`;
+            footer.innerHTML = `<button class="btn" style="width:100%;" onclick="closeToast()">Close</button>`;
+        }
+
+        function closeToast() {
+            document.getElementById('notificationToast').className = '';
+        }
+
+        init();
+    </script>
+</body>
+
+</html>

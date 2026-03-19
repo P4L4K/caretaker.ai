@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, File, UploadFile, Header, HTTPException, status, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Optional, Dict
+import datetime
 
 from models.users import ResponseSchema, RecipientUpdate, CareRecipientCreate, ConditionInput, MedicationInput, AllergyInput
 from tables.users import CareRecipient, CareTaker
@@ -708,7 +709,10 @@ async def get_care_recipient_profile(
             "start_date": str(m.start_date) if m.start_date else None,
             "end_date": str(m.end_date) if m.end_date else None,
             "duration_days": (m.end_date - m.start_date).days if m.end_date and m.start_date else None,
-            "status": m.status.value if m.status else None
+            "status": m.status.value if m.status else None,
+            "current_stock": m.current_stock or 0,
+            "doses_per_day": m.doses_per_day or 1,
+            "predicted_finish_date": str(datetime.date.today() + datetime.timedelta(days=(m.current_stock or 0) // (m.doses_per_day or 1))) if m.current_stock and m.doses_per_day and m.doses_per_day > 0 else None
         } for m in meds_raw
     ]
 
@@ -868,7 +872,9 @@ async def add_medication(recipient_id: int, data: MedicationInput, authorization
         schedule_time=data.schedule_time,
         start_date=start,
         end_date=end,
-        status=MedicationStatus(data.status)
+        status=MedicationStatus(data.status),
+        current_stock=data.current_stock or 0,
+        doses_per_day=data.doses_per_day or 1
     )
     db.add(med)
     db.commit()
@@ -887,6 +893,8 @@ async def update_medication(recipient_id: int, med_id: int, data: MedicationInpu
     med.frequency = data.frequency
     med.schedule_time = data.schedule_time
     med.status = MedicationStatus(data.status)
+    med.current_stock = data.current_stock or 0
+    med.doses_per_day = data.doses_per_day or 1
 
     # Update start_date if provided
     if data.start_date:

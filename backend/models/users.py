@@ -108,6 +108,8 @@ class MedicationInput(BaseModel):
     duration_days: Optional[int] = None
     start_date: Optional[str] = None  # ISO date YYYY-MM-DD, defaults to today
     status: Optional[str] = "active"
+    current_stock: Optional[int] = 0
+    doses_per_day: Optional[int] = 1
 
 
 class AllergyInput(BaseModel):

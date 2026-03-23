@@ -712,7 +712,9 @@ async def get_care_recipient_profile(
             "status": m.status.value if m.status else None,
             "current_stock": m.current_stock or 0,
             "doses_per_day": m.doses_per_day or 1,
-            "predicted_finish_date": str(datetime.date.today() + datetime.timedelta(days=(m.current_stock or 0) // (m.doses_per_day or 1))) if m.current_stock and m.doses_per_day and m.doses_per_day > 0 else None
+            "predicted_finish_date": str(datetime.date.today() + datetime.timedelta(days=(m.current_stock or 0) // (m.doses_per_day or 1))) if m.current_stock and m.doses_per_day and m.doses_per_day > 0 else None,
+            "auto_order_enabled": getattr(m, 'auto_order_enabled', True),
+            "last_auto_order_date": str(m.last_auto_order_date) if getattr(m, 'last_auto_order_date', None) else None
         } for m in meds_raw
     ]
 
@@ -874,7 +876,8 @@ async def add_medication(recipient_id: int, data: MedicationInput, authorization
         end_date=end,
         status=MedicationStatus(data.status),
         current_stock=data.current_stock or 0,
-        doses_per_day=data.doses_per_day or 1
+        doses_per_day=data.doses_per_day or 1,
+        auto_order_enabled=data.auto_order_enabled if data.auto_order_enabled is not None else True
     )
     db.add(med)
     db.commit()
@@ -895,6 +898,8 @@ async def update_medication(recipient_id: int, med_id: int, data: MedicationInpu
     med.status = MedicationStatus(data.status)
     med.current_stock = data.current_stock or 0
     med.doses_per_day = data.doses_per_day or 1
+    if data.auto_order_enabled is not None:
+        med.auto_order_enabled = data.auto_order_enabled
 
     # Update start_date if provided
     if data.start_date:
@@ -913,6 +918,26 @@ async def update_medication(recipient_id: int, med_id: int, data: MedicationInpu
 
     db.commit()
     return {"code": 200, "status": "success", "message": "Medication updated"}
+
+
+@router.patch("/care-recipients/{recipient_id}/medications/{med_id}/auto-order", response_model=ResponseSchema)
+async def toggle_auto_order(recipient_id: int, med_id: int, payload: dict, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    """Toggle auto-reorder via Tata 1mg for a specific medication."""
+    from tables.medications import Medication
+    med = db.query(Medication).filter(
+        Medication.medication_id == med_id,
+        Medication.care_recipient_id == recipient_id
+    ).first()
+    if not med:
+        raise HTTPException(404, "Medication not found")
+    
+    enabled = payload.get("auto_order_enabled")
+    if enabled is None:
+        raise HTTPException(400, "Missing auto_order_enabled in payload")
+    
+    med.auto_order_enabled = bool(enabled)
+    db.commit()
+    return {"code": 200, "status": "success", "message": f"Auto-order {'enabled' if enabled else 'disabled'} for {med.medicine_name}"}
 
 
 

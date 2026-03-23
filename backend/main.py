@@ -149,6 +149,12 @@ app.include_router(medical_history_routes.router)
 from routes import environment as environment_routes
 app.include_router(environment_routes.router, prefix="/api")
 
+from routes import doctor as doctor_routes
+app.include_router(doctor_routes.router, prefix="/api")
+
+from routes import spotify as spotify_routes
+app.include_router(spotify_routes.router, prefix="/api")
+
 # Debug: Print all registered routes
 print("\n=== Registered Routes ===")
 for route in app.routes:
@@ -465,6 +471,14 @@ async def startup_event():
         print("✅ Disease dictionary seeded")
     except Exception as e:
         print(f"❌ Disease dictionary seeding failed: {e}")
+
+    # Start background notification scheduler (medicine reminders, stock decrement, auto-reorder)
+    try:
+        from services.notification_scheduler import start_scheduler
+        start_scheduler()
+        print("✅ Notification scheduler started")
+    except Exception as e:
+        print(f"❌ Notification scheduler failed to start: {e}")
 
 # Make sure this is at the end of the file
 # ... (existing imports)

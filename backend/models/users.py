@@ -110,6 +110,7 @@ class MedicationInput(BaseModel):
     status: Optional[str] = "active"
     current_stock: Optional[int] = 0
     doses_per_day: Optional[int] = 1
+    auto_order_enabled: Optional[bool] = True
 
 
 class AllergyInput(BaseModel):

@@ -4,8 +4,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Medication Ordering</title>
+    <title>Smart Medication Ordering — Tata 1mg</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-color: #FDFBF7;
@@ -22,6 +23,9 @@
             --pastel-lavender: #E2D1F9;
             --success: #10B981;
             --danger: #EF4444;
+            --warning: #F59E0B;
+            --onemg-primary: #FF6B35;
+            --onemg-dark: #E55A2B;
         }
 
         body {
@@ -63,10 +67,20 @@
         .navbar h1 {
             margin: 0;
             font-size: 1.5rem;
-            color: var(--accent);
+            color: var(--onemg-primary);
             display: flex;
             align-items: center;
             gap: 12px;
+        }
+
+        .navbar h1 .onemg-badge {
+            font-size: 0.65rem;
+            background: linear-gradient(135deg, var(--onemg-primary), var(--onemg-dark));
+            color: white;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
         }
 
         .btn {
@@ -96,22 +110,15 @@
             color: var(--accent);
         }
 
-        .btn-amazon {
-            background: #ff9900;
-            color: #000;
-        }
-
-        .btn-amazon:hover {
-            background: #e68a00;
-        }
-
-        .btn-smart {
-            background: linear-gradient(135deg, #10B981, #34D399);
+        .btn-1mg {
+            background: linear-gradient(135deg, var(--onemg-primary), var(--onemg-dark));
             color: white;
+            font-weight: 700;
         }
 
-        .btn-smart:hover {
-            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        .btn-1mg:hover {
+            box-shadow: 0 6px 16px rgba(255, 107, 53, 0.35);
+            transform: translateY(-2px);
         }
 
         .card {
@@ -124,6 +131,7 @@
             border: 1px solid var(--border-light);
         }
 
+        /* ─── Medication Item ─── */
         .med-item {
             display: flex;
             justify-content: space-between;
@@ -159,6 +167,59 @@
             color: var(--text-muted);
         }
 
+        /* ─── Stock Progress Bar ─── */
+        .stock-bar-container {
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .stock-bar-track {
+            flex: 1;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .stock-bar-fill {
+            height: 100%;
+            border-radius: 999px;
+            transition: width 0.6s ease, background 0.4s;
+        }
+
+        .stock-bar-label {
+            font-size: 0.8rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .stock-ok .stock-bar-fill {
+            background: linear-gradient(90deg, #10B981, #34D399);
+        }
+
+        .stock-ok .stock-bar-label {
+            color: #15803d;
+        }
+
+        .stock-warn .stock-bar-fill {
+            background: linear-gradient(90deg, #F59E0B, #FBBF24);
+        }
+
+        .stock-warn .stock-bar-label {
+            color: #b45309;
+        }
+
+        .stock-low .stock-bar-fill {
+            background: linear-gradient(90deg, #EF4444, #F87171);
+        }
+
+        .stock-low .stock-bar-label {
+            color: #dc2626;
+        }
+
+        /* ─── Stock Tag ─── */
         .stock-tag {
             display: inline-block;
             padding: 4px 12px;
@@ -168,25 +229,89 @@
             margin-top: 8px;
         }
 
-        .stock-low {
+        .tag-low {
             background: #fee2e2;
             color: #ef4444;
         }
 
-        .stock-ok {
+        .tag-ok {
             background: #f0fdf4;
             color: #15803d;
         }
 
-        .med-actions {
+        /* ─── Auto-Reorder Toggle ─── */
+        .auto-reorder-row {
             display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-            margin-left: 20px;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
         }
 
-        /* Modal / Toast Styles */
+        .toggle-switch {
+            position: relative;
+            width: 40px;
+            height: 22px;
+            cursor: pointer;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #cbd5e0;
+            border-radius: 999px;
+            transition: 0.3s;
+        }
+
+        .toggle-slider::before {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            left: 3px;
+            top: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+
+        .toggle-switch input:checked+.toggle-slider {
+            background: linear-gradient(135deg, var(--onemg-primary), var(--onemg-dark));
+        }
+
+        .toggle-switch input:checked+.toggle-slider::before {
+            transform: translateX(18px);
+        }
+
+        .auto-label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        .auto-label.active {
+            color: var(--onemg-primary);
+        }
+
+        /* ─── Actions ─── */
+        .med-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: flex-end;
+            margin-left: 20px;
+            min-width: 180px;
+        }
+
+        /* ─── Toast ─── */
         #notificationToast {
             position: fixed;
             top: 24px;
@@ -197,7 +322,7 @@
             border-radius: 16px;
             box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
             max-width: 360px;
-            border-left: 6px solid var(--accent);
+            border-left: 6px solid var(--onemg-primary);
             transform: translateX(400px);
             transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
@@ -227,6 +352,37 @@
             gap: 10px;
         }
 
+        /* ─── Refresh indicator ─── */
+        .refresh-bar {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .refresh-bar .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.3;
+            }
+        }
+
         .loader {
             display: inline-block;
             width: 20px;
@@ -242,13 +398,31 @@
                 transform: rotate(360deg);
             }
         }
+
+        /* ─── Responsive ─── */
+        @media (max-width: 700px) {
+            .med-item {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .med-actions {
+                margin-left: 0;
+                margin-top: 12px;
+                flex-direction: row;
+                width: 100%;
+            }
+        }
     </style>
 </head>
 
 <body>
 
     <div class="navbar">
-        <h1><i class="fas fa-shopping-cart"></i> Smart Med Refill</h1>
+        <h1>
+            <i class="fas fa-pills"></i> Smart Med Refill
+            <span class="onemg-badge">POWERED BY TATA 1mg</span>
+        </h1>
         <div>
             <button class="btn btn-outline" id="backBtn"><i class="fas fa-arrow-left"></i> Back to Profile</button>
         </div>
@@ -261,18 +435,22 @@
     <div id="mainContainer" class="dashboard-container" style="display: none;">
         <div class="card">
             <h2
-                style="margin-top: 0; margin-bottom: 24px; color: var(--text-main); display: flex; align-items: center; justify-content: space-between;">
-                <span><i class="fas fa-pills" style="color: var(--accent); margin-right: 12px;"></i> Prescriptions &
-                    Inventory</span>
+                style="margin-top: 0; margin-bottom: 8px; color: var(--text-main); display: flex; align-items: center; justify-content: space-between;">
+                <span><i class="fas fa-pills" style="color: var(--onemg-primary); margin-right: 12px;"></i>Prescriptions
+                    & Inventory</span>
                 <span id="stockSummary" style="font-size: 0.9rem; font-weight: 400; color: var(--text-muted);"></span>
             </h2>
+            <div class="refresh-bar">
+                <span class="dot"></span>
+                <span>Live stock tracking · Updates every 30s</span>
+            </div>
             <div id="medicationsList"></div>
         </div>
     </div>
 
-    <!-- Smart Order Confirmation Toast -->
+    <!-- Toast -->
     <div id="notificationToast">
-        <div class="toast-header"><i class="fas fa-robot"></i> <span id="toastTitle">Smart Assistant</span></div>
+        <div class="toast-header"><i class="fas fa-robot"></i> <span id="toastTitle">Tata 1mg Assistant</span></div>
         <div class="toast-body" id="toastMessage"></div>
         <div class="toast-footer" id="toastFooter"></div>
     </div>
@@ -291,7 +469,89 @@
             window.location.href = `profile.html?recipient_id=${recipientId}`;
         };
 
-        async function init() {
+        // ─── Render medications ───
+        function renderMedications(activeMeds) {
+            const listEl = document.getElementById('medicationsList');
+
+            if (activeMeds.length === 0) {
+                listEl.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted);">
+                    <i class="fas fa-box-open" style="font-size:2rem;margin-bottom:12px;display:block;"></i>
+                    No active medications found for this patient.
+                </div>`;
+                return;
+            }
+
+            let lowStockCount = 0;
+
+            listEl.innerHTML = activeMeds.map(med => {
+                const currentStock = med.current_stock || 0;
+                const dailyDose = med.doses_per_day || 1;
+                const daysRemaining = Math.floor(currentStock / dailyDose);
+                const isLow = daysRemaining <= 7;
+                const isWarn = daysRemaining <= 14 && daysRemaining > 7;
+                if (isLow) lowStockCount++;
+
+                const finishDate = new Date();
+                finishDate.setDate(finishDate.getDate() + daysRemaining);
+
+                // Stock bar percentage (max = 30 days for visual scale)
+                const barPercent = Math.min(100, Math.round((daysRemaining / 30) * 100));
+                const stockClass = isLow ? 'stock-low' : (isWarn ? 'stock-warn' : 'stock-ok');
+
+                const oneMgLink = `https://www.1mg.com/search/all?name=${encodeURIComponent(med.medicine_name)}`;
+                const autoEnabled = med.auto_order_enabled !== false;
+                const medId = med.id || med.medication_id;
+
+                return `
+                    <div class="med-item" id="med-${medId}">
+                        <div class="med-info">
+                            <h3>${med.medicine_name}</h3>
+                            <p>
+                                <strong>Dosage:</strong> ${med.dosage || 'N/A'} &nbsp;|&nbsp;
+                                <strong>Frequency:</strong> ${dailyDose} dose${dailyDose > 1 ? 's' : ''}/day
+                            </p>
+                            <div class="stock-bar-container ${stockClass}">
+                                <div class="stock-bar-track">
+                                    <div class="stock-bar-fill" style="width: ${barPercent}%;"></div>
+                                </div>
+                                <span class="stock-bar-label">
+                                    ${currentStock} units · ${daysRemaining}d left
+                                </span>
+                            </div>
+                            <span class="stock-tag ${isLow ? 'tag-low' : 'tag-ok'}">
+                                <i class="fas ${isLow ? 'fa-exclamation-triangle' : 'fa-check-circle'}"></i>
+                                ${isLow ? '⚠️ Low Stock' : '✅ In Stock'} — Runs out by: <strong>${finishDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>
+                            </span>
+                            <div class="auto-reorder-row">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" ${autoEnabled ? 'checked' : ''}
+                                           onchange="toggleAutoOrder(${medId}, this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <span class="auto-label ${autoEnabled ? 'active' : ''}">
+                                    ${autoEnabled ? '🟢 Auto-Reorder via Tata 1mg: ON' : '⚪ Auto-Reorder: OFF'}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="med-actions">
+                            <a href="${oneMgLink}" target="_blank" class="btn btn-1mg">
+                                <i class="fas fa-shopping-cart"></i> Order on Tata 1mg
+                            </a>
+                            ${isLow ? `
+                            <button class="btn" style="background:var(--danger);" onclick="smartReorder('${med.medicine_name.replace(/'/g, "\\'")}', ${medId})">
+                                <i class="fas fa-bolt"></i> Urgent Reorder
+                            </button>` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('stockSummary').innerText =
+                lowStockCount > 0 ? `⚠️ ${lowStockCount} item${lowStockCount > 1 ? 's' : ''} running low` : '✅ All stocked';
+        }
+
+        // ─── Fetch & render ───
+        async function fetchAndRender() {
             try {
                 const response = await fetch(`${API_BASE}/care-recipients/${recipientId}/profile`, {
                     headers: { 'Authorization': `Bearer ${token}` }
@@ -305,110 +565,89 @@
                 document.getElementById('loadingIndicator').style.display = 'none';
                 document.getElementById('mainContainer').style.display = 'grid';
 
-                const listEl = document.getElementById('medicationsList');
-
-                if (activeMeds.length === 0) {
-                    listEl.innerHTML = `<div class="empty-state">No medications found for this patient.</div>`;
-                    return;
-                }
-
-                let lowStockCount = 0;
-
-                listEl.innerHTML = activeMeds.map(med => {
-                    const currentStock = med.current_stock || 0;
-                    const dailyDose = med.doses_per_day || 1;
-                    const daysRemaining = Math.floor(currentStock / dailyDose);
-                    const isLow = daysRemaining <= 3;
-                    if (isLow) lowStockCount++;
-
-                    const finishDate = new Date();
-                    finishDate.setDate(finishDate.getDate() + daysRemaining);
-
-                    const amazonLink = `https://www.amazon.com/s?k=${encodeURIComponent(med.medicine_name)}+medicine`;
-                    const oneMgLink = `https://www.1mg.com/search/all?name=${encodeURIComponent(med.medicine_name)}`;
-
-                    return `
-                        <div class="med-item">
-                            <div class="med-info">
-                                <h3>${med.medicine_name}</h3>
-                                <p><strong>Dosage:</strong> ${med.dosage || 'N/A'} | <strong>Dose:</strong> ${dailyDose} units/day</p>
-                                <div class="stock-tag ${isLow ? 'stock-low' : 'stock-ok'}">
-                                    <i class="fas ${isLow ? 'fa-exclamation-triangle' : 'fa-check-circle'}"></i> 
-                                    ${currentStock} units left — Finished by: <strong>${finishDate.toLocaleDateString()}</strong>
-                                </div>
-                            </div>
-                            <div class="med-actions">
-                                <button class="btn btn-smart" onclick="findBestDeal('${med.medicine_name}', ${med.medication_id})">
-                                    <i class="fas fa-magic"></i> Smart Reorder
-                                </button>
-                                <a href="${amazonLink}" target="_blank" class="btn btn-amazon"><i class="fab fa-amazon"></i> Amazon</a>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-
-                document.getElementById('stockSummary').innerText = `${lowStockCount} items running low`;
-
+                renderMedications(activeMeds);
             } catch (error) {
                 console.error(error);
-                document.getElementById('loadingIndicator').innerHTML = `<div style="color: var(--danger);">Error: ${error.message}</div>`;
+                document.getElementById('loadingIndicator').innerHTML =
+                    `<div style="color: var(--danger);"><i class="fas fa-exclamation-circle"></i> Error: ${error.message}</div>`;
             }
         }
 
-        function findBestDeal(name, id) {
-            const toast = document.getElementById('notificationToast');
-            const msg = document.getElementById('toastMessage');
-            const footer = document.getElementById('toastFooter');
+        // ─── Toggle auto-order ───
+        async function toggleAutoOrder(medId, enabled) {
+            try {
+                const res = await fetch(`${API_BASE}/care-recipients/${recipientId}/medications/${medId}/auto-order`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ auto_order_enabled: enabled })
+                });
 
-            toast.className = 'show';
-            msg.innerHTML = `<div style="display:flex;align-items:center;gap:12px;">
-                <div class="loader" style="border-top-color:var(--accent);"></div>
-                Searching for best deals on <strong>${name}</strong>...
-            </div>`;
-            footer.innerHTML = '';
+                if (!res.ok) throw new Error('Failed to update auto-order setting');
 
-            // Simulated deal fetching logic
-            setTimeout(() => {
-                const retailers = [
-                    { name: '1mg Pharmacy', price: '₹' + (Math.floor(Math.random() * 400) + 100), saved: '15%' },
-                    { name: 'Amazon Home Care', price: '₹' + (Math.floor(Math.random() * 400) + 100), saved: '10%' },
-                    { name: 'Pharmeasy', price: '₹' + (Math.floor(Math.random() * 400) + 100), saved: '20%' }
-                ];
-                retailers.sort((a, b) => parseInt(a.price.substring(1)) - parseInt(b.price.substring(1)));
-                const best = retailers[0];
+                showToast(
+                    enabled ? '🟢 Auto-Reorder Enabled' : '⚪ Auto-Reorder Disabled',
+                    enabled
+                        ? 'When stock runs low (≤ 7 days), an order will be <strong>automatically placed via Tata 1mg</strong> and you\'ll be notified by email.'
+                        : 'Auto-reorder has been turned off for this medication. You can still order manually.',
+                    false
+                );
 
-                msg.innerHTML = `Identified best value at <strong>${best.name}</strong>.<br>
-                                Price: <strong style="color:var(--success); font-size:1.1rem;">${best.price}</strong> 
-                                <span style="font-size:0.8rem; background:#f0fdf4; color:#15803d; padding:2px 6px; border-radius:4px;">Save ${best.saved}</span><br><br>
-                                Calculated Stock End Date: <strong>As predicted</strong>.<br>
-                                Shall I proceed with the order?`;
-
-                footer.innerHTML = `
-                    <button class="btn" style="flex:1;" onclick="confirmOrder('${name}', '${best.name}', '${best.price}')">Confirm & Order</button>
-                    <button class="btn btn-outline" onclick="closeToast()">Dismiss</button>
-                `;
-            }, 1500);
+                // Refresh the label
+                const label = document.querySelector(`#med-${medId} .auto-label`);
+                if (label) {
+                    label.className = `auto-label ${enabled ? 'active' : ''}`;
+                    label.innerHTML = enabled ? '🟢 Auto-Reorder via Tata 1mg: ON' : '⚪ Auto-Reorder: OFF';
+                }
+            } catch (e) {
+                console.error(e);
+                showToast('❌ Error', 'Could not update auto-order setting. Please try again.', false);
+            }
         }
 
-        function confirmOrder(medicine, vendor, price) {
-            const msg = document.getElementById('toastMessage');
-            const footer = document.getElementById('toastFooter');
+        // ─── Smart Reorder (via Tata 1mg) ───
+        function smartReorder(name, medId) {
+            const oneMgLink = `https://www.1mg.com/search/all?name=${encodeURIComponent(name)}`;
 
-            msg.innerHTML = `<div style="text-align:center; padding:10px 0;">
-                <i class="fas fa-check-circle" style="font-size:3rem; color:var(--success); margin-bottom:12px;"></i><br>
-                <strong>Order Confirmed!</strong><br>
-                Refill for ${medicine} placed via ${vendor}.<br>
-                Payment: Cash on Delivery.<br>
-                <span style="font-size:0.8rem; color:var(--text-muted);">Notification sent to registered caretaker.</span>
-            </div>`;
-            footer.innerHTML = `<button class="btn" style="width:100%;" onclick="closeToast()">Close</button>`;
+            showToast(
+                '🛒 Urgent Reorder',
+                `<div style="margin-bottom:12px;">
+                    Stock for <strong>${name}</strong> is critically low.<br>
+                    Opening <strong>Tata 1mg</strong> to place your order.
+                </div>
+                <a href="${oneMgLink}" target="_blank" class="btn btn-1mg" style="display:inline-flex;text-decoration:none;">
+                    <i class="fas fa-external-link-alt"></i> Open Tata 1mg
+                </a>`,
+                true
+            );
+
+            // Also open the link
+            window.open(oneMgLink, '_blank');
+        }
+
+        // ─── Toast helper ───
+        function showToast(title, message, persistent) {
+            const toast = document.getElementById('notificationToast');
+            document.getElementById('toastTitle').textContent = title;
+            document.getElementById('toastMessage').innerHTML = message;
+            const footer = document.getElementById('toastFooter');
+            footer.innerHTML = `<button class="btn btn-outline" style="flex:1;" onclick="closeToast()">Dismiss</button>`;
+            toast.className = 'show';
+
+            if (!persistent) {
+                setTimeout(() => closeToast(), 4000);
+            }
         }
 
         function closeToast() {
             document.getElementById('notificationToast').className = '';
         }
 
-        init();
+        // ─── Init + auto-refresh every 30s ───
+        fetchAndRender();
+        setInterval(fetchAndRender, 30000);
     </script>
 </body>
 

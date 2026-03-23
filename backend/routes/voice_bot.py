@@ -44,10 +44,11 @@ def verify_and_get_caretaker(authorization: str, db: Session):
     return caretaker
 
 class ChatRequest(BaseModel):
-    recipient_id: int
+    recipient_id: Optional[int] = 1
     text: str
     session_id: str = "default_session"
     trigger_type: str = "user_initiated" # or proactive_checkin, reminder, etc.
+    language: str = "en"  # 'en' or 'hi' for Hindi
 
 @router.post('/voice-bot/chat', response_model=ResponseSchema)
 async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
@@ -72,7 +73,7 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
 
     # 3. Build Context & System Prompt
     context = build_conversation_context(payload.recipient_id, db)
-    system_prompt = generate_system_prompt(recipient.full_name, context)
+    system_prompt = generate_system_prompt(recipient.full_name, context, payload.language)
     
     # Check depression risk to maybe add an alert in response text
     is_at_risk = check_depression_risk(payload.recipient_id, db)

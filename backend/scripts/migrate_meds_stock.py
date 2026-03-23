@@ -18,6 +18,20 @@ def migrate():
         except Exception as e:
             print(f"  Error adding doses_per_day: {e}")
         
+        # Add auto_order_enabled
+        try:
+            conn.execute(text("ALTER TABLE medications ADD COLUMN IF NOT EXISTS auto_order_enabled BOOLEAN DEFAULT TRUE"))
+            print("  OK: auto_order_enabled added")
+        except Exception as e:
+            print(f"  Error adding auto_order_enabled: {e}")
+
+        # Add last_auto_order_date
+        try:
+            conn.execute(text("ALTER TABLE medications ADD COLUMN IF NOT EXISTS last_auto_order_date DATE"))
+            print("  OK: last_auto_order_date added")
+        except Exception as e:
+            print(f"  Error adding last_auto_order_date: {e}")
+
         conn.commit()
     print("Migration complete!")
 

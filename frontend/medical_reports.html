@@ -691,7 +691,10 @@
 
             <!-- Tabs -->
             <div class="tab-bar">
-                <button class="tab-btn active" data-tab="tab-clinical">
+                <button class="tab-btn active" data-tab="tab-reports">
+                    <i class="fas fa-file-medical"></i> Reports & Upload
+                </button>
+                <button class="tab-btn" data-tab="tab-clinical">
                     <i class="fas fa-heartbeat"></i> Clinical Intelligence
                 </button>
                 <button class="tab-btn" data-tab="tab-summary">
@@ -699,16 +702,49 @@
                 </button>
             </div>
 
-            <!-- TAB 1: Reports (Removed - Moved to Settings) -->
-            <div id="tab-reports" class="tab-content">
-                <div class="panel" style="text-align:center; padding: 40px;">
-                    <i class="fas fa-file-medical"
-                        style="font-size: 2.5rem; color: var(--accent); opacity: 0.3; margin-bottom: 15px; display: block;"></i>
-                    <h3>Report Management Moved</h3>
-                    <p class="muted" style="margin-bottom: 20px;">Uploading and deleting medical reports is now managed
-                        under Account Settings.</p>
-                    <a href="settings.html#reportsSection" class="primary-btn" style="text-decoration:none;">Go to
-                        Settings</a>
+            <!-- TAB 1: Reports & Upload -->
+            <div id="tab-reports" class="tab-content active">
+                <!-- Upload Panel -->
+                <div id="uploadPanel" class="panel" style="display:none; margin-bottom:20px;">
+                    <p class="eyebrow" style="color:var(--accent); margin-bottom:14px;">Upload Medical Report</p>
+                    <div class="upload-drop-zone" id="uploadDropZone">
+                        <input type="file" id="reportFileInput" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx">
+                        <span class="upload-icon"><i class="fas fa-cloud-upload-alt"></i></span>
+                        <p style="margin:0; font-weight:600;">Drag & drop a report here or click to browse</p>
+                        <p class="muted" style="font-size:0.8rem; margin-top:6px;">PDF, PNG, JPEG, DOC — Max 5 MB</p>
+                    </div>
+                    <p id="uploadFileName" style="display:none; margin:10px 0 0; font-weight:600; font-size:0.88rem;">
+                    </p>
+                    <div id="uploadProgress" class="upload-progress">
+                        <div id="uploadProgressBar" class="upload-progress-bar"></div>
+                    </div>
+                    <button id="uploadReportBtn" class="primary-btn" style="margin-top:14px;" disabled>
+                        <i class="fas fa-upload"></i> Upload Report
+                    </button>
+                </div>
+
+                <!-- Stats -->
+                <div class="grid-3" style="margin-bottom:20px;">
+                    <div class="stat-pill"><span>Total Reports</span><strong id="statTotalReports">0</strong></div>
+                    <div class="stat-pill"><span>Processed</span><strong id="statProcessed">0</strong></div>
+                    <div class="stat-pill"><span>Pending / Failed</span><strong id="statPending">0 / 0</strong></div>
+                </div>
+
+                <!-- Sort -->
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                    <p class="eyebrow" style="margin:0;">Reports</p>
+                    <select id="reportSortOrder"
+                        style="padding:5px 12px; border-radius:12px; font-size:0.8rem; border:1px solid rgba(148,163,184,0.3); background:rgba(255,255,255,0.7);">
+                        <option value="date_desc">Newest First</option>
+                        <option value="date_asc">Oldest First</option>
+                        <option value="name_asc">Name (A-Z)</option>
+                    </select>
+                </div>
+
+                <!-- Report List -->
+                <div id="reportsList" class="report-list">
+                    <p class="muted" style="text-align:center; padding:40px;">Select a care recipient to view reports.
+                    </p>
                 </div>
             </div>
 

@@ -234,7 +234,16 @@ async def signup(request: Register, db: Session = Depends(get_db)):
         raise e
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Signup failed: {str(e)}")
+        error_msg = str(e)
+        # Catch unique constraint violations (duplicate phone/email)
+        if "UniqueViolation" in error_msg or "unique constraint" in error_msg.lower():
+            if "phone_number" in error_msg:
+                raise HTTPException(status_code=400, detail="A care recipient with this phone number already exists")
+            elif "email" in error_msg:
+                raise HTTPException(status_code=400, detail="A user with this email already exists")
+            else:
+                raise HTTPException(status_code=400, detail="An account with these details already exists")
+        raise HTTPException(status_code=500, detail=f"Signup failed: {error_msg}")
 
 
 # ---------- NEW ENDPOINT: REGISTER WITH FACE ----------

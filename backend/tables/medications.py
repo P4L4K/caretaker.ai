@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, Date, ForeignKey, Enum, Boolean
 from sqlalchemy.orm import relationship
 from config import Base
 import enum
@@ -26,6 +26,10 @@ class Medication(Base):
     # Stock Management & Auto-Ordering
     current_stock = Column(Integer, default=0, nullable=True)
     doses_per_day = Column(Integer, default=1, nullable=True)
+    
+    # Tata 1mg Auto-Reorder
+    auto_order_enabled = Column(Boolean, default=True, nullable=False, server_default="1")
+    last_auto_order_date = Column(Date, nullable=True)
 
     care_recipient = relationship("CareRecipient", back_populates="active_medications")
 

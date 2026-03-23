@@ -127,3 +127,36 @@ def send_report_upload_reminder(to_email: str, recipient_name: str, days_since_l
     </div>
     """
     return send_email(to_email, subject, html)
+
+
+def send_auto_reorder_notification(to_email: str, recipient_name: str, medicine_name: str, dosage: str, current_stock: int, days_remaining: int, order_link: str):
+    """Send a notification that an auto-reorder has been triggered via Tata 1mg."""
+    subject = f"🛒 Auto-Reorder Triggered: {medicine_name} for {recipient_name}"
+    html = f"""
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0;">
+        <div style="text-align: center; margin-bottom: 20px;">
+            <span style="font-size: 48px;">🛒</span>
+            <h2 style="color: #2d3748; margin: 8px 0;">Auto-Reorder Alert</h2>
+        </div>
+        <div style="background: linear-gradient(135deg, #fff5f5, #fed7d7); padding: 20px; border-radius: 8px; margin-bottom: 16px;">
+            <p style="margin: 4px 0; color: #4a5568;"><strong>Patient:</strong> {recipient_name}</p>
+            <p style="margin: 4px 0; color: #4a5568;"><strong>Medicine:</strong> {medicine_name}</p>
+            <p style="margin: 4px 0; color: #4a5568;"><strong>Dosage:</strong> {dosage or 'As prescribed'}</p>
+            <p style="margin: 4px 0; color: #4a5568;"><strong>Current Stock:</strong> {current_stock} units</p>
+            <p style="margin: 8px 0; color: #c53030; font-weight: 600;">
+                ⚠️ Only {days_remaining} day(s) of stock remaining!
+            </p>
+        </div>
+        <div style="text-align: center; margin: 20px 0;">
+            <a href="{order_link}" 
+               style="display: inline-block; background: linear-gradient(135deg, #FF6B35, #F72C25); color: white; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 1rem;">
+                🛍️ Order Now on Tata 1mg
+            </a>
+        </div>
+        <p style="color: #718096; font-size: 13px; text-align: center;">
+            CareTaker AI has detected low stock and generated this order link automatically.<br>
+            Click the button above to review and complete the purchase on Tata 1mg.
+        </p>
+    </div>
+    """
+    return send_email(to_email, subject, html)

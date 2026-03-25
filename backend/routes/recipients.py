@@ -652,7 +652,8 @@ async def get_care_recipient_profile(
         "respiratory_condition_status": recipient.respiratory_condition_status,
         "registration_date": str(recipient.registration_date) if recipient.registration_date else None,
         "risk_score": recipient.risk_score,
-        "risk_factors": recipient.risk_factors_breakdown.get("factors", []) if isinstance(recipient.risk_factors_breakdown, dict) else []
+        "risk_factors": recipient.risk_factors_breakdown.get("factors", []) if isinstance(recipient.risk_factors_breakdown, dict) else [],
+        "doctor_remarks": recipient.doctor_remarks
     }
 
     # 2. Active Conditions

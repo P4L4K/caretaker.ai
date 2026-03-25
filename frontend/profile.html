@@ -770,6 +770,12 @@
                                 </div>
                             </div>`;
 
+            let doctorRemarksHtml = info.doctor_remarks ? 
+                `<div class="data-item col-span-12" style="background:rgba(74, 144, 226, 0.05); padding:16px; border-radius:8px; margin-top:12px; border-left: 4px solid var(--accent);">
+                    <div class="data-label" style="color:var(--accent); font-weight:700;"><i class="fas fa-stethoscope"></i> Doctor's Clinical Remarks</div>
+                    <div style="font-size:0.95rem; color:var(--text-main); white-space:pre-wrap; line-height: 1.6; margin-top: 8px; font-style: italic;">"${info.doctor_remarks}"</div>
+                </div>` : '';
+
             el.innerHTML = `
                 <div class="data-item"><div class="data-label">Name</div><div class="data-value">${info.name}</div></div>
                 <div class="data-item"><div class="data-label">Age & Gender</div><div class="data-value">${info.age} / ${info.gender || '—'}</div></div>
@@ -777,6 +783,7 @@
                 <div class="data-item"><div class="data-label">Height & Weight</div><div class="data-value">${info.height ? info.height + 'cm' : '—'} / ${info.weight ? info.weight + 'kg' : '—'}</div></div>
                
                 ${riskHtml}
+                ${doctorRemarksHtml}
             `;
         }
 

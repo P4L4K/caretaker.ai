@@ -1132,5 +1132,42 @@
         ],
         "has_falls": true,
         "completed_at": "2026-03-06T14:18:44.438329"
+    },
+    "47659672-572f-45b5-a4a6-16aac94b34cb": {
+        "status": "completed",
+        "progress": 100,
+        "user_email": "2022a6r031@mietjammu.in",
+        "username": "TEST",
+        "caretaker_id": 45,
+        "recipient_id": 45,
+        "input_file": "temp_uploads\\e5b7b035-e3e7-4f06-9463-f10442cb39a2.mp4",
+        "output_file": "processed_videos\\analyzed_e5b7b035-e3e7-4f06-9463-f10442cb39a2.mp4",
+        "output_filename": "analyzed_e5b7b035-e3e7-4f06-9463-f10442cb39a2.mp4",
+        "start_time": 1774029837.9148717,
+        "error": null,
+        "falls_detected": [
+            {
+                "timestamp": "2026-03-20 23:34:29",
+                "message": "Fall Detected",
+                "frame": 37
+            },
+            {
+                "timestamp": "2026-03-20 23:34:34",
+                "message": "Fall Detected",
+                "frame": 54
+            },
+            {
+                "timestamp": "2026-03-20 23:34:40",
+                "message": "Fall Detected",
+                "frame": 70
+            },
+            {
+                "timestamp": "2026-03-20 23:34:50",
+                "message": "Fall Detected",
+                "frame": 104
+            }
+        ],
+        "has_falls": true,
+        "completed_at": "2026-03-20T23:35:19.790039"
     }
 }

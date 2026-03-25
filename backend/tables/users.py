@@ -72,6 +72,9 @@ class CareRecipient(Base):
     # medical reports relation
     medical_reports = relationship('MedicalReport', back_populates='care_recipient', cascade='all, delete-orphan')
 
+    # Doctor Remarks
+    doctor_remarks = Column(Text, nullable=True)
+
     # Video analysis relation
     video_analyses = relationship('VideoAnalysis', back_populates='recipient', cascade='all, delete-orphan')
 

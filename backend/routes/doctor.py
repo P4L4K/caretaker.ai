@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from config import get_db
 from datetime import datetime, timedelta, date
+from pydantic import BaseModel
+
+class RemarksModel(BaseModel):
+    remarks: str
 
 router = APIRouter(tags=["Doctor Dashboard"])
 
@@ -120,6 +124,7 @@ def get_patient_clinical_summary(recipient_id: int, db: Session = Depends(get_db
         "risk_score": recipient.risk_score or 0,
         "risk_factors": recipient.risk_factors_breakdown.get("factors", []) if isinstance(recipient.risk_factors_breakdown, dict) else [],
         "risk_category": recipient.risk_factors_breakdown.get("risk_category", "Unknown") if isinstance(recipient.risk_factors_breakdown, dict) else "Unknown",
+        "doctor_remarks": recipient.doctor_remarks,
     }
 
     # 2. Active Conditions
@@ -277,3 +282,13 @@ def get_patient_clinical_summary(recipient_id: int, db: Session = Depends(get_db
         "audio_summary": audio_summary,
         "clinical_summary": clinical_summary,
     }
+
+@router.post("/doctor/patients/{recipient_id}/remarks")
+def update_doctor_remarks(recipient_id: int, model: RemarksModel, db: Session = Depends(get_db)):
+    from tables.users import CareRecipient
+    recipient = db.query(CareRecipient).filter(CareRecipient.id == recipient_id).first()
+    if not recipient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    recipient.doctor_remarks = model.remarks
+    db.commit()
+    return {"message": "Remarks updated successfully"}

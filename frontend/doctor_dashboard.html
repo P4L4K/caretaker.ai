@@ -838,6 +838,18 @@
                     </div>
                 </div>
 
+                <!-- Doctor's Remarks -->
+                <div class="panel animate-in delay-4">
+                    <div class="panel-header">
+                        <div class="panel-title"><i class="fas fa-stethoscope"></i> Doctor's Remarks</div>
+                        <span class="eyebrow" id="remarksStatus"></span>
+                    </div>
+                    <textarea id="doctorRemarks" style="width: 100%; min-height: 120px; padding: 16px; border-radius: 12px; border: 1px solid var(--border-light); background: rgba(255, 255, 255, 0.7); color: var(--text); font-family: inherit; font-size: 0.95rem; resize: vertical;" placeholder="Enter your clinical remarks or reviews on the patient's condition here..."></textarea>
+                    <div style="text-align: right; margin-top: 14px;">
+                        <button onclick="saveDoctorRemarks()" style="background: var(--accent); color: white; border: none; padding: 10px 20px; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 0.9rem; transition: background 0.2s;"><i class="fas fa-save" style="margin-right: 6px;"></i> Save Remarks</button>
+                    </div>
+                </div>
+
                 <!-- Alerts -->
                 <div class="panel animate-in delay-5">
                     <div class="panel-header">
@@ -991,6 +1003,7 @@
             renderAlerts(data.alerts);
             renderAudioSummary(data.audio_summary);
             renderClinicalSummary(data.clinical_summary);
+            document.getElementById('doctorRemarks').value = data.general_info.doctor_remarks || '';
             renderLabTrends(data.lab_trends);
             renderVitalsChart(data.vitals);
         }
@@ -1176,6 +1189,38 @@
 
         function renderClinicalSummary(summary) {
             document.getElementById('clinicalSummary').textContent = summary || 'No clinical summary available.';
+        }
+
+        async function saveDoctorRemarks() {
+            if (!selectedPatientId) return;
+            const remarks = document.getElementById('doctorRemarks').value;
+            const btn = document.querySelector('button[onclick="saveDoctorRemarks()"]');
+            const statusEl = document.getElementById('remarksStatus');
+            
+            const origText = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+            btn.disabled = true;
+            statusEl.textContent = '';
+            
+            try {
+                const res = await fetch(`${API_BASE}/doctor/patients/${selectedPatientId}/remarks`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ remarks: remarks })
+                });
+                if (!res.ok) throw new Error('Failed to save remarks');
+                
+                statusEl.textContent = 'Saved successfully';
+                statusEl.style.color = 'var(--success)';
+                setTimeout(() => statusEl.textContent = '', 3000);
+            } catch (err) {
+                console.error(err);
+                statusEl.textContent = 'Error saving';
+                statusEl.style.color = 'var(--danger)';
+            } finally {
+                btn.innerHTML = origText;
+                btn.disabled = false;
+            }
         }
 
         // ═══════════════════════════════════════════

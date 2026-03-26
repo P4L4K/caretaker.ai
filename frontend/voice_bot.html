@@ -656,11 +656,24 @@
 
             // ---- PENDING MOOD REPLY HANDLER ----
             // If bot asked "aapka mood kaisa hai?" and user just replied
+            // BUT first check: if user is making a NEW specific command, cancel pending and handle fresh
             if (state.pendingContentRequest && triggerType === "user_initiated") {
-                const contentType = state.pendingContentRequest;
-                state.pendingContentRequest = null;
-                await handleMoodReply(text, contentType);
-                return;
+                const allStoryKeywords = ['bhoot','bhootiya','darawni','horror','kahani','कहानी','katha','ramayan',
+                    'mahabharat','comedy','funny','bhajan','moral','itihas','adventure','romantic','भूतिया','भूत',
+                    'डरावनी','धार्मिक','mazedaar','spiritual','seekh','prerak'];
+                const allPlayKeywords = ['play','bajao','bajao','chala','laga','गाना','संगीत','song','music'];
+                const isNewCommand = allStoryKeywords.some(w => t.includes(w) || tHindi.includes(w))
+                                  || allPlayKeywords.some(w => t.includes(w) || tHindi.includes(w));
+                if (isNewCommand) {
+                    // User issued a new command — cancel pending and fall through to handle it fresh
+                    state.pendingContentRequest = null;
+                } else {
+                    // Genuine mood reply — process it
+                    const contentType = state.pendingContentRequest;
+                    state.pendingContentRequest = null;
+                    await handleMoodReply(text, contentType);
+                    return;
+                }
             }
 
             // ---- STORY COMMANDS ----

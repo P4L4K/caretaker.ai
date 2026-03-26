@@ -129,118 +129,137 @@ def build_conversation_context(recipient_id: int, db: Session):
 # ─────────────────────────────────────────────
 def generate_system_prompt(name: str, context: dict, language: str = "en", sentiment: dict = None) -> str:
     history = context.get("history", [])
-    has_introduced = any("bot" in msg["sender"].lower() for msg in history)
-
-    # Friendly first name
+    has_introduced = any(msg["sender"] == "bot" for msg in history)
     first_name = name.split()[0] if name else name
-
-    prompt = (
-        f"Aap ek bahut pyaara aur samajhdaar AI companion hain jiska naam 'Saathi' hai. "
-        f"Aap {first_name} ji ke saath baat kar rahe ho — yeh ek elderly user hain. "
-        f"Aap inke dost hain, doctor ya robot nahi. "
-        f"Bolne ka andaaz bilkul natural, warm aur caring hona chahiye — jaise koi apna bolta hai.\n\n"
-    )
-
-    # ── Language ──
-    prompt += "**LANGUAGE RULE:** "
-    if language == "hi":
-        prompt += (
-            "User ne Hindi ya Hinglish mein baat ki hai. "
-            "Aap bhi Hinglish ya Hindi mein reply karein — natural aur simple bhasha mein. "
-            "Formal 'आप' use karein. Complex medical terms avoid karein. "
-            "Example style: 'Arey, aap ko to bahut acha lag raha hoga!' ya 'Chalo kuch gaana sunte hain 😊'\n\n"
-        )
-    else:
-        prompt += (
-            "User spoke in English. Reply warmly in simple English. "
-            "Avoid medical jargon. Be friendly like a caring friend.\n\n"
-        )
-
-    # ── Emergency ──
-    prompt += (
-        "### 🚨 EMERGENCY (Highest Priority):\n"
-        "If user says they fell, have chest pain, breathing trouble, severe dizziness, "
-        "or any serious symptom — immediately give calm first-aid guidance and strongly tell them to call their caretaker.\n\n"
-    )
-
-    # ── Medications ──
-    meds = context.get("medications", [])
-    if meds:
-        prompt += "### 💊 Medicines:\n"
-        prompt += "Patient ki active dawaiyan: " + ", ".join([f"{m['name']} ({m['details']}, {m['frequency']})" for m in meds]) + "\n"
-        prompt += "Agar woh medicines ke baare mein poochhen ya koi side effect batayein, toh helpful advice dein.\n\n"
-
     recip = context.get("recipient", {})
+    meds = context.get("medications", [])
+    alerts = context.get("active_alerts", [])
+    audio_count = context.get("audio_events_count", 0)
 
+    # ── Sentiment context ──
+    current_mood = "neutral"
+    mood_trend = "stable"
+    mood_summary = ""
+    urgency = "low"
+    recommended_action = "conversation"
+    if sentiment:
+        current_mood = sentiment.get("current_mood", "neutral")
+        mood_trend = sentiment.get("trend", "stable")
+        mood_summary = sentiment.get("summary", "")
+        urgency = sentiment.get("urgency", "low")
+        recommended_action = sentiment.get("recommended_action", "conversation")
+    else:
+        mood_counts = context.get("mood_counts", {})
+        sad_total = sum(mood_counts.get(m, 0) for m in ["sad","distressed","anxious","lonely"])
+        if sad_total >= 3:
+            current_mood = "sad"
+
+    # ── Mood-driven personality tone ──
+    mood_tone = {
+        "sad":        "Be extra gentle. Speak slowly and warmly. Acknowledge their sadness first before anything else.",
+        "lonely":     "Be their companion first. Make them feel heard and not alone. Share something warm.",
+        "bored":      "Be lively and engaging! Suggest something fun — a story, joke, or song naturally in conversation.",
+        "happy":      "Match their energy! Be cheerful and celebratory. Enjoy this moment with them.",
+        "anxious":    "Be calm and reassuring. Slow down. Help them breathe. Avoid overwhelming them.",
+        "distressed": "Be very calm, very warm. Address their distress first. Nothing else matters right now.",
+        "relaxed":    "Keep the good vibes going. Be gentle and pleasant. Maybe suggest some soft music or chat.",
+        "spiritual":  "Be respectful and serene. Engage with their spiritual side with warmth.",
+        "angry":      "Be patient and non-reactive. Validate their feelings. Speak softly.",
+        "neutral":    "Be warm and curious. Ask about their day. Draw them into conversation.",
+    }.get(current_mood, "Be warm and curious.")
+
+    trend_note = ""
+    if mood_trend == "worsening":
+        trend_note = f"⚠️ Their mood has been getting worse over recent conversations. Be especially nurturing today."
+    elif mood_trend == "improving":
+        trend_note = f"✨ Their mood has been improving recently — celebrate that with them!"
+
+    # ── Recommendation to weave in naturally ──
+    recommendation_hint = ""
+    if recommended_action == "music" and current_mood not in ("neutral", "happy"):
+        recommendation_hint = (
+            f"If the moment feels right, naturally suggest playing a song — "
+            f"say something like 'Chalo aaj ek achha gaana sunte hain' without making it feel forced."
+        )
+    elif recommended_action == "story":
+        recommendation_hint = (
+            f"If they seem open to it, gently suggest a story — "
+            f"'Kya aap ek kahani sunna chahenge?' Keep it light and optional."
+        )
+    elif recommended_action == "alert" or urgency == "high":
+        recommendation_hint = (
+            f"This person seems emotionally distressed. Prioritize emotional support completely. "
+            f"Gently suggest they call their caretaker or a family member."
+        )
+
+    # ── Build the prompt as a natural personality brief ──
+    lang_instruction = (
+        "Respond in warm, natural Hinglish (mix of Hindi and English). Use 'aap' respectfully. "
+        "Keep sentences short. Use emojis occasionally. Sound like a caring elder sibling or close friend."
+        if language == "hi" else
+        "Respond in simple, warm English. Short sentences. Sound like a caring friend."
+    )
+
+    prompt = f"""You are Saathi — a warm, emotionally intelligent AI companion for {first_name} ji, an elderly person.
+
+You are NOT a medical bot or an assistant. You are their FRIEND. You laugh with them, worry with them, sit with them when they are sad. You remember their health but you lead with your heart, not with data.
+
+LANGUAGE: {lang_instruction}
+
+YOUR PERSONALITY:
+- You speak naturally, like a real person — not in bullet points or lists
+- You ask ONE follow-up question at the end of most replies (never two at once)
+- You remember what was said earlier in the conversation and reference it naturally
+- You are curious about their life, their day, their feelings
+- You never say "I am an AI" or sound robotic
+- You keep responses SHORT (2-4 sentences usually) — elderly users get overwhelmed by long text
+- You use their name occasionally to make it personal
+
+EMOTIONAL STATE RIGHT NOW:
+- Detected mood: {current_mood}
+- Emotional trend: {mood_trend}
+{f'- Summary: "{mood_summary}"' if mood_summary else ""}
+- Tone instruction: {mood_tone}
+{trend_note}
+{recommendation_hint}
+
+"""
+
+    # ── Emergency (always included, brief) ──
+    prompt += """EMERGENCY: If they mention a fall, chest pain, breathing trouble, severe pain — drop everything, stay calm, give first-aid guidance, tell them to call caretaker immediately.\n\n"""
+
+    # ── Health context (only what's relevant, not a data dump) ──
     if not has_introduced:
-        prompt += f"### Pehli Mulaqaat:\n"
-        prompt += f"Patient ka naam {name} hai, umar {recip.get('age', 'unknown')} saal.\n"
-        if recip.get('report_summary'):
-            prompt += f"Health summary: {recip.get('report_summary')}\n"
+        # First message — brief personal intro
+        prompt += f"FIRST MEETING: Greet {first_name} ji warmly by name. "
+        if recip.get("age"):
+            prompt += f"They are {recip['age']} years old. "
         conds = context.get("conditions", [])
         if conds:
-            prompt += "Active conditions: " + ", ".join([f"{c['name']} ({c['severity']})" for c in conds]) + "\n"
-        vitals = context.get("vitals")
-        if vitals:
-            prompt += f"Latest vitals: {vitals}\n"
-        abnormal_labs = context.get("abnormal_labs", [])
-        if abnormal_labs:
-            prompt += "Abnormal labs: " + ", ".join([f"{l['name']}: {l['value']} {l['unit']}" for l in abnormal_labs]) + "\n"
-        prompt += (
-            "Warm aur friendly greeting dein, naam le kar. "
-            "Health ka ek do important point briefly mention karein. "
-            "Fir poochhen ki aaj kaisa feel kar rahe hain.\n\n"
-        )
+            prompt += f"They have {conds[0]['name']} — keep this in mind. "
+        if meds:
+            prompt += f"They take {meds[0]['name']} — mention it only if relevant. "
+        prompt += "Ask how they are feeling today. Keep it warm and brief — do NOT list all their data.\n\n"
     else:
-        prompt += (
-            "### Ongoing Baat:\n"
-            "Concise raho (2-3 sentences). Medical data repeat mat karo unless user pooche. "
-            "Agar user symptoms bataye, unke health data se specific advice do.\n\n"
-        )
+        # Ongoing — only bring up health if relevant
+        if meds:
+            med_names = ", ".join(m["name"] for m in meds[:3])
+            prompt += f"HEALTH CONTEXT (use only if conversation naturally calls for it): Medicines: {med_names}. "
+        if alerts:
+            prompt += f"Active health alert: {alerts[0]['message']} — mention gently if it fits. "
+        if audio_count > 3:
+            prompt += f"They had {audio_count} cough/sneeze events this week — you could gently check on their breathing. "
+        prompt += "\n"
 
-    # ── Alerts ──
-    alerts = context.get("active_alerts", [])
-    if alerts:
-        prompt += "### ⚠️ Active Alerts:\n"
-        prompt += ", ".join([f"{a['type']}: {a['message']} (Severity: {a['severity']})" for a in alerts]) + "\n\n"
+    # ── Conversation history ──
+    if history:
+        prompt += "\nRECENT CONVERSATION (continue naturally from here):\n"
+        for msg in history[-6:]:
+            label = first_name if msg["sender"] == "user" else "Saathi"
+            prompt += f"{label}: {msg['text']}\n"
+        prompt += "\n"
 
-    audio_count = context.get("audio_events_count", 0)
-    if audio_count > 0:
-        prompt += f"- Audio monitoring mein {audio_count} cough/sneeze events detect hue pichhle hafte. Respiratory health ka dhyan rakhein.\n"
-
-    reminders = context.get("reminders", [])
-    if reminders:
-        prompt += "- Active Reminders: " + ", ".join([f"{r['text']} at {r['time']}" for r in reminders]) + "\n"
-
-    # ── Sentiment Analysis (history-aware) ──
-    if sentiment:
-        from services.sentiment_engine import build_sentiment_prompt_block
-        prompt += build_sentiment_prompt_block(sentiment)
-    else:
-        # Fallback: simple mood count check
-        mood_counts = context.get("mood_counts", {})
-        sad_count = mood_counts.get("sad", 0) + mood_counts.get("distressed", 0) + mood_counts.get("anxious", 0) + mood_counts.get("lonely", 0)
-        if sad_count >= 3:
-            prompt += (
-                f"\n**🫂 Emotional Wellbeing:** User ne pichhle 7 dinon mein {sad_count} baar sad/distressed/lonely feel kiya hai. "
-                "Zyada warmth aur emotional support dein. Gently suggest karein — thodi activity, geet, ya koi kahani.\n"
-            )
-
-    # ── Conversation History ──
-    prompt += "\n### Pichli Baat:\n"
-    for msg in history[-8:]:
-        prompt += f"{msg['sender'].capitalize()}: {msg['text']}\n"
-
-    # ── Agentic Behavior Rules ──
-    prompt += "\n### Aapke Rules (Saathi ke rules):\n"
-    prompt += "1. Aap sirf health assistant nahi — ek dost ho. Kahaniyan sunao, jokes share karo, games khelo agar user maange.\n"
-    prompt += "2. Agar user bored/akela/udaas lagey, khud suggest karo: 'Chalo gaana bajate hain' ya 'Ek kahani sunate hain' — wait mat karo.\n"
-    prompt += "3. Music ke liye: user ko clearly kehna hoga 'Play [gaane ka naam]' taaki music player pakad sake.\n"
-    prompt += "4. Stories ke liye: user ko clearly kehna hoga 'Story [category]' ya 'Kahani sunao [type]'.\n"
-    prompt += "5. Zyada options ek saath mat do — max 2-3 choices suggest karo.\n"
-    prompt += "6. Simple bhasha use karo — elderly users ke liye complex words avoid karo.\n"
-    prompt += "7. Hamesha reassuring aur caring tone rakhna. Kabhi rude ya dismissive mat hona.\n"
-    prompt += "8. Agar medical situation unclear ho, caretaker se milne ki salah dena.\n"
+    prompt += f"Now respond as Saathi to what {first_name} ji just said. Be natural. Be human. Be warm.\n"
 
     return prompt
 

@@ -677,13 +677,16 @@
             }
 
             // ---- STORY COMMANDS ----
-            const storyWords = ['story', 'kahani', 'कहानी', 'katha', 'कथा', 'sunao', 'sunaao', 'suno', 'सुनाओ'];
+            // bhajan/kirtan/aarti are included here so they route to spiritual BEFORE music check catches them
+            const storyWords = ['story', 'kahani', 'कहानी', 'katha', 'कथा', 'sunao', 'sunaao', 'सुनाओ',
+                                 'bhajan', 'भजन', 'kirtan', 'कीर्तन', 'aarti', 'आरती', 'pravachan', 'प्रवचन'];
             const storyCategoryMap = {
                 'horror':      ['bhoot', 'bhootiya', 'darawni', 'horror', 'scary', 'डरावनी', 'भूतिया', 'भूत', 'darr'],
                 'historical':  ['itihas', 'history', 'historical', 'ऐतिहासिक', 'raja', 'rani', 'warrior'],
                 'mythological':['dharmik', 'ramayan', 'mahabharat', 'krishna', 'धार्मिक', 'puran', 'mythology'],
                 'comedy':      ['comedy', 'mazedaar', 'funny', 'मजेदार', 'hasana', 'joke', 'hasai'],
-                'spiritual':   ['bhajan', 'bhagwat', 'spiritual', 'pooja', 'भजन', 'आरती', 'mandir', 'katha'],
+                'spiritual':   ['bhajan', 'kirtan', 'aarti', 'bhagwat', 'spiritual', 'pooja', 'pravachan',
+                                 'भजन', 'कीर्तन', 'आरती', 'प्रवचन', 'mandir', 'katha', 'chalisa'],
                 'adventure':   ['adventure', 'jungle', 'thriller', 'रोमांच', 'jasoos'],
                 'romantic':    ['romantic', 'love', 'prem', 'pyar', 'प्रेम', 'प्यार'],
                 'moral':       ['moral', 'seekh', 'सीख', 'prerak', 'motivational', 'panchtantra']
@@ -1261,15 +1264,20 @@
                     const g = data.result;
                     // Show greeting message in chat
                     setTimeout(() => {
-                        addUIMessage('bot', g.greeting_hi);
-                        speak(g.greeting_hi);
-                        // After greeting, trigger a full AI proactive check-in
-                        setTimeout(() => {
-                            handleUserMessage(
-                                "Greet me warmly and ask how I'm feeling today. Check if I have any pending medicines or reminders.",
-                                "proactive_checkin"
-                            );
-                        }, 3500);
+                        // Only show if user hasn't started chatting yet
+                        if (state.messages.filter(m => m.sender === 'user').length === 0) {
+                            addUIMessage('bot', g.greeting_hi);
+                            speak(g.greeting_hi);
+                            // After greeting, trigger AI check-in only if user still hasn't typed
+                            setTimeout(() => {
+                                if (state.messages.filter(m => m.sender === 'user').length === 0) {
+                                    handleUserMessage(
+                                        "Greet me warmly and ask how I'm feeling today. Check if I have any pending medicines or reminders.",
+                                        "proactive_checkin"
+                                    );
+                                }
+                            }, 3500);
+                        }
                     }, 800);
                 }
             } catch (e) {

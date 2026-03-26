@@ -34,6 +34,9 @@ STORY_CATEGORIES = {
     "comedy": ["funny hindi stories", "akbar birbal comedy", "tenali raman stories hindi"],
     "moral": ["moral stories hindi for adults", "prerak prasang hindi", "panchtantra stories hindi"],
     "spiritual": ["bhagwat katha", "ramcharitmanas pravachan", "sant kabir dohe explained"],
+    "horror": ["bhootiya kahani hindi", "darawni kahani hindi", "horror story hindi", "bhoot ki kahani"],
+    "adventure": ["adventure stories hindi", "jungle kahani hindi", "thriller kahani hindi"],
+    "romantic": ["romantic kahani hindi", "prem kahani hindi old", "love story hindi"],
 }
 
 # ─────────────────────────────────────────────

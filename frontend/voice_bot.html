@@ -105,6 +105,16 @@
         </div>
     </div>
 
+    <!-- Sentiment Trend Bar -->
+    <div id="sentiment-bar" class="hidden max-w-6xl mx-auto mt-3 px-4">
+        <div class="bg-white rounded-xl border border-slate-100 shadow-sm px-4 py-2 flex items-center gap-3 flex-wrap">
+            <span class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Mood Insight</span>
+            <span id="sentiment-trend-badge" class="text-xs px-2 py-0.5 rounded-full font-semibold"></span>
+            <span id="sentiment-summary-text" class="text-xs text-slate-600 italic flex-1"></span>
+            <div id="sentiment-timeline" class="flex gap-1 items-center"></div>
+        </div>
+    </div>
+
     <main class="max-w-6xl mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         <!-- Left Column: Tools & Widgets -->
@@ -143,6 +153,38 @@
                         class="flex-1 bg-blue-100 text-blue-700 py-2 rounded-lg text-sm font-semibold hover:bg-blue-200 transition-colors cursor-pointer">⏸</button>
                     <button onclick="controlMusic('next')"
                         class="flex-1 bg-slate-100 text-slate-700 py-2 rounded-lg text-sm font-semibold hover:bg-slate-200 transition-colors cursor-pointer">⏭</button>
+                </div>
+            </div>
+
+            <!-- Mood Suggestion Card (shown when mood detected) -->
+            <div id="mood-suggestion-card" class="hidden bg-gradient-to-br from-purple-50 to-blue-50 rounded-2xl shadow-sm p-4 border border-purple-100">
+                <div class="flex justify-between items-center mb-2">
+                    <p class="text-sm font-bold text-purple-700" id="mood-suggestion-msg">Suggestion</p>
+                    <button onclick="dismissSuggestion()" class="text-slate-400 hover:text-slate-600 cursor-pointer text-lg leading-none">&times;</button>
+                </div>
+                <div id="mood-suggestion-options" class="flex flex-col gap-2"></div>
+            </div>
+
+            <!-- Stories Widget -->
+            <div class="bg-white rounded-2xl shadow-sm p-4 border border-slate-100">
+                <h3 class="text-sm font-bold text-[#2c5282] mb-3 flex items-center gap-2">
+                    <i data-lucide="book-open" class="h-4 w-4"></i> Kahani Suniye 📚
+                </h3>
+                <div class="grid grid-cols-2 gap-2 mb-3">
+                    <button onclick="playStory('historical')" class="py-2 px-2 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded-xl text-xs font-semibold border border-orange-100 cursor-pointer transition-colors">⚔️ Itihas</button>
+                    <button onclick="playStory('mythological')" class="py-2 px-2 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 rounded-xl text-xs font-semibold border border-yellow-100 cursor-pointer transition-colors">🕉️ Dharmik</button>
+                    <button onclick="playStory('comedy')" class="py-2 px-2 bg-green-50 hover:bg-green-100 text-green-700 rounded-xl text-xs font-semibold border border-green-100 cursor-pointer transition-colors">😄 Mazedaar</button>
+                    <button onclick="playStory('moral')" class="py-2 px-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-semibold border border-blue-100 cursor-pointer transition-colors">💡 Seekh</button>
+                    <button onclick="playStory('spiritual')" class="col-span-2 py-2 px-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl text-xs font-semibold border border-purple-100 cursor-pointer transition-colors">🙏 Bhajan / Katha</button>
+                </div>
+                <!-- Story player iframe -->
+                <div id="story-container" class="hidden w-full rounded-xl overflow-hidden shadow-sm">
+                    <div class="flex justify-between items-center mb-1">
+                        <p class="text-xs text-slate-500 font-semibold" id="story-title">—</p>
+                        <button onclick="stopStory()" class="text-xs text-red-400 hover:text-red-600 cursor-pointer">Stop</button>
+                    </div>
+                    <iframe id="story-player" width="100%" height="80" src="" frameborder="0"
+                        allow="autoplay; encrypted-media" allowfullscreen></iframe>
                 </div>
             </div>
 
@@ -223,7 +265,7 @@
                     </button>
                 </div>
                 <p class="text-center text-xs text-slate-400 mt-2">
-                    🎤 Speak in English or Hindi — I understand both! | 🎵 Ask me to play any song!
+                    🎤 English / Hindi dono chalega | 🎵 "Play Tum Hi Ho" | 📚 "Story sunao" | 😊 Bas dil ki baat karo!
                 </p>
             </div>
         </div>
@@ -256,7 +298,11 @@
     <script>
         // ========== CONSTANTS & STATE ==========
         const sessionId = "session_" + Math.random().toString(36).substr(2, 9);
-        const moodEmojis = { "happy": "😊", "sad": "😢", "anxious": "😟", "angry": "😠", "neutral": "😐", "distressed": "😫" };
+        const moodEmojis = {
+            "happy": "😊", "sad": "😢", "anxious": "😟", "angry": "😠",
+            "neutral": "😐", "distressed": "😫", "lonely": "😞",
+            "bored": "😑", "relaxed": "😌", "spiritual": "🙏"
+        };
 
         let state = {
             isListening: false,
@@ -272,7 +318,11 @@
             musicPlaying: false,
             youtubeMode: false,    // true when playing YouTube iframe
             recipientInfo: null,
-            healthSummary: ""
+            healthSummary: "",
+            favoriteSongs: [],
+            favoriteStories: [],
+            storyMode: false,
+            pendingContentRequest: null  // "music" or "story" — waiting for mood reply
         };
 
         // ========== LANGUAGE DETECTION ==========
@@ -354,6 +404,10 @@
                     : `🎵 Now playing: ${track.name}`;
                 addUIMessage('bot', msg);
                 speak(hindi ? `बजा रहा हूँ ${track.name}` : `Playing ${track.name}`);
+                // Offer to save as favorite
+                const safeTitle = (track.name || query).replace(/'/g, "\\'");
+                const safeQuery = query.replace(/'/g, "\\'");
+                addUIMessageHTML('bot', `<button onclick="saveFavoriteSong('${safeTitle}','${safeQuery}','${track.youtube_id || ''}')" class="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1 rounded-full cursor-pointer">❤️ Favorite mein save karo</button>`);
                 return true;
             }
 
@@ -598,16 +652,39 @@
                 }
             }
 
+            // ---- PENDING MOOD REPLY HANDLER ----
+            // If bot asked "aapka mood kaisa hai?" and user just replied
+            if (state.pendingContentRequest && triggerType === "user_initiated") {
+                const contentType = state.pendingContentRequest;
+                state.pendingContentRequest = null;
+                await handleMoodReply(text, contentType);
+                return;
+            }
+
+            // ---- STORY COMMANDS ----
+            const storyWords = ['story', 'kahani', 'कहानी', 'सुनाओ', 'katha', 'कथा', 'sunao', 'sunaao'];
+            const storyCategories = { 'historical': ['itihas', 'history', 'ऐतिहासिक'], 'mythological': ['dharmik', 'ramayan', 'mahabharat', 'krishna', 'धार्मिक'], 'comedy': ['comedy', 'mazedaar', 'funny', 'मजेदार', 'hasana'], 'spiritual': ['bhajan', 'bhagwat', 'spiritual', 'pooja', 'भजन', 'आरती'], 'moral': ['moral', 'seekh', 'सीख', 'prerak'] };
+            if (storyWords.some(w => t.includes(w) || tHindi.includes(w))) {
+                // Ask mood first before playing story
+                await askMoodBeforeContent('story', hindi);
+                return;
+            }
+
             const excludeWords = ['story', 'kahani', 'joke', 'chutkula', 'news', 'samachar'];
 
             // Play music command
             if (playWords.some(w => t.includes(w) || tHindi.includes(w)) && !excludeWords.some(w => t.includes(w) || tHindi.includes(w))) {
-                // Check favourites first
+                // Check favourites first — try backend saved favorites, fallback to local
                 if (favWords.some(w => t.includes(w) || tHindi.includes(w))) {
-                    playlist = [...localPlaylist]; state.youtubeMode = false;
-                    playSong(0);
-                    const msg = hindi ? 'आपका पसंदीदा गाना बजा रहा हूँ। ❤️' : 'Playing your favourite song. Enjoy! ❤️';
-                    addUIMessage('bot', msg); speak(msg);
+                    if (state.favoriteSongs && state.favoriteSongs.length > 0) {
+                        const fav = state.favoriteSongs[0];
+                        playYouTubeSong(fav.query || fav.title);
+                    } else {
+                        playlist = [...localPlaylist]; state.youtubeMode = false;
+                        playSong(0);
+                        const msg = hindi ? 'आपका पसंदीदा गाना बजा रहा हूँ। ❤️' : 'Playing your favourite song. Enjoy! ❤️';
+                        addUIMessage('bot', msg); speak(msg);
+                    }
                     return;
                 }
 
@@ -625,13 +702,10 @@
                     }
                 }
 
-                // Generic "play a song / music / कोई गाना" → calming local
-                const genericPlay = ['कोई गाना', 'गाना बजाओ', 'संगीत बजाओ', 'a song', 'some music', 'कुछ सुनाओ'];
+                // Generic "play a song / music / कोई गाना" → ask mood first
+                const genericPlay = ['कोई गाना', 'गाना बजाओ', 'संगीत बजाओ', 'a song', 'some music', 'कुछ सुनाओ', 'music', 'gaana', 'gana'];
                 if (genericPlay.some(w => t.includes(w) || tHindi.includes(w))) {
-                    playlist = [...localPlaylist]; state.youtubeMode = false;
-                    playSong(1);
-                    const msg = hindi ? 'शांत संगीत बजा रहा हूँ। 🎵' : 'Playing some calming music. 🎵';
-                    addUIMessage('bot', msg); speak(msg);
+                    await askMoodBeforeContent('music', hindi);
                     return;
                 }
 
@@ -696,6 +770,16 @@
                         document.getElementById('depression-alert').classList.remove('hidden');
                     } else {
                         document.getElementById('depression-alert').classList.add('hidden');
+                    }
+
+                    // Update sentiment trend bar
+                    if (data.result.sentiment) {
+                        updateSentimentBar(data.result.sentiment);
+                    }
+
+                    // Agentic: show mood-based content suggestion card
+                    if (data.result.recommendation && triggerType === "user_initiated") {
+                        setTimeout(() => showMoodSuggestion(data.result.recommendation, mood), 1200);
                     }
                 } else {
                     throw new Error("API Error");
@@ -833,16 +917,12 @@
             lucide.createIcons();
             loadBackendData();
             fetchReminders();
+            loadFavoriteSongs();
 
             if (localStorage.getItem('healthBotEmergency') === 'true') toggleEmergencyMode(true);
 
-            // Proactive greeting — backend decides language based on context
-            setTimeout(() => {
-                handleUserMessage(
-                    "Provide a gentle morning/evening contextual greeting directly based on my name and latest health info. If appropriate, greet in Hindi.",
-                    "proactive_checkin"
-                );
-            }, 1000);
+            // Daily greeting — uses backend to avoid duplicate greetings same day
+            checkDailyGreeting();
 
             // Poll for scheduled reminders/triggers every 60 seconds
             setInterval(() => { pollTriggers(); }, 60000);
@@ -853,6 +933,316 @@
         }
 
         window.onload = init;
+
+        // ========== SENTIMENT TREND BAR ==========
+        const trendConfig = {
+            improving: { label: "📈 Improving", cls: "bg-green-100 text-green-700" },
+            worsening: { label: "📉 Worsening", cls: "bg-red-100 text-red-700" },
+            stable:    { label: "➡️ Stable",    cls: "bg-blue-100 text-blue-700" }
+        };
+
+        function updateSentimentBar(sentiment) {
+            if (!sentiment) return;
+            const bar = document.getElementById('sentiment-bar');
+            const badge = document.getElementById('sentiment-trend-badge');
+            const summary = document.getElementById('sentiment-summary-text');
+            const timeline = document.getElementById('sentiment-timeline');
+
+            bar.classList.remove('hidden');
+
+            const cfg = trendConfig[sentiment.trend] || trendConfig.stable;
+            badge.textContent = cfg.label;
+            badge.className = `text-xs px-2 py-0.5 rounded-full font-semibold ${cfg.cls}`;
+
+            if (sentiment.summary) {
+                summary.textContent = `"${sentiment.summary}"`;
+            }
+
+            // Render mood timeline dots
+            if (sentiment.mood_timeline && sentiment.mood_timeline.length > 0) {
+                timeline.innerHTML = sentiment.mood_timeline.map(m => {
+                    const emoji = moodEmojis[m] || '😐';
+                    return `<span title="${m}" class="text-sm">${emoji}</span>`;
+                }).join('');
+            }
+        }
+
+        // ========== MOOD-FIRST CONTENT FLOW ==========
+
+        // Step 1: Bot asks user about their mood before playing anything
+        async function askMoodBeforeContent(contentType, hindi) {
+            state.pendingContentRequest = contentType;
+
+            const questions = {
+                music: [
+                    "Aapka mood kaisa hai aaj? 😊 Thoda batao — main uske hisaab se bilkul sahi gaana suggest karta hoon!",
+                    "Pehle bata do aaj kaisa feel ho raha hai? Khush ho, udaas ho, ya relax karna chahte ho? 🎵",
+                    "Aaj ka mood kya hai aapka? Main perfect gaana dhundhunga! 😄"
+                ],
+                story: [
+                    "Kahani sunne se pehle bata do — aaj kaisa feel kar rahe ho? Mood ke hisaab se sahi kahani choose karunga! 📚",
+                    "Aaj ka dil kaisa hai? Khush, thaka hua, ya kuch spiritual chahiye? Batao! 🙏",
+                    "Koi bhi kahani sun sakte ho — pehle mood batao, main best wali suggest karta hoon! 😊"
+                ]
+            };
+
+            const opts = questions[contentType] || questions.music;
+            const msg = opts[Math.floor(Math.random() * opts.length)];
+            addUIMessage('bot', msg);
+            speak(msg);
+        }
+
+        // Step 2: User replied with mood → Gemini detects it → plays content
+        async function handleMoodReply(text, contentType) {
+            const token = localStorage.getItem('token');
+            const rid = localStorage.getItem('selectedRecipientId') || "1";
+            const hindi = isHindi(text);
+
+            // Show searching indicator
+            const searchMsg = hindi
+                ? "🔍 Aapka mood samajh raha hoon..."
+                : "🔍 Understanding your mood...";
+            addUIMessage('bot', searchMsg);
+
+            try {
+                const res = await fetch('http://127.0.0.1:8000/api/voice-bot/detect-and-recommend', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    },
+                    body: JSON.stringify({
+                        text: text,
+                        content_type: contentType,
+                        recipient_id: parseInt(rid)
+                    })
+                });
+
+                const data = await res.json();
+
+                if (data.code === 200) {
+                    const { mood, effective_mood, warm_message, recommendation, sentiment_summary, trend, mood_timeline } = data.result;
+
+                    // Show warm empathetic response from Gemini
+                    addUIMessage('bot', warm_message);
+                    speak(warm_message);
+
+                    // Update mood emoji on last user message
+                    if (state.messages.length > 0) {
+                        state.messages[state.messages.length - 2].mood = mood;
+                        renderMessages();
+                    }
+
+                    // Update sentiment bar
+                    updateSentimentBar({ trend: trend || 'stable', summary: sentiment_summary, mood_timeline: mood_timeline || [] });
+
+                    // Small delay for natural feel, then play content using effective_mood
+                    const playMood = effective_mood || mood;
+                    setTimeout(async () => {
+                        if (contentType === 'music') {
+                            const query = recommendation.queries && recommendation.queries[0]
+                                ? recommendation.queries[0]
+                                : 'soothing hindi songs';
+                            await playYouTubeSong(query);
+                        } else {
+                            const moodToCategory = {
+                                spiritual: 'spiritual', bored: 'comedy', sad: 'moral',
+                                lonely: 'moral', happy: 'comedy', relaxed: 'historical',
+                                anxious: 'spiritual', distressed: 'moral',
+                                angry: 'spiritual', neutral: 'historical'
+                            };
+                            const category = moodToCategory[playMood] || 'moral';
+                            await playStory(category);
+                        }
+                    }, 1800);
+
+                } else {
+                    throw new Error("API failed");
+                }
+            } catch (e) {
+                // Fallback — just play something nice
+                const fallback = hindi
+                    ? "Chalo kuch soothing sunate hain 😊"
+                    : "Let me play something nice for you 😊";
+                addUIMessage('bot', fallback);
+                speak(fallback);
+                if (contentType === 'music') {
+                    playYouTubeSong('soothing hindi songs');
+                } else {
+                    playStory('moral');
+                }
+            }
+        }
+
+        // ========== STORIES ==========
+        async function playStory(category) {
+            const hindi = true; // stories always in Hindi
+            addUIMessage('bot', `📚 ${category} kahani dhundh raha hoon...`);
+            speak(`${category} kahani dhundh raha hoon`);
+            try {
+                const token = localStorage.getItem('token');
+                const res = await fetch(`http://127.0.0.1:8000/api/story/youtube?category=${encodeURIComponent(category)}`);
+                const data = await res.json();
+                if (data.tracks && data.tracks.length > 0) {
+                    const story = data.tracks[0];
+                    document.getElementById('story-container').classList.remove('hidden');
+                    document.getElementById('story-player').src = story.url;
+                    document.getElementById('story-title').textContent = story.name;
+                    state.storyMode = true;
+                    // Stop music if playing
+                    if (state.musicPlaying) controlMusic('stop');
+                    addUIMessage('bot', `📖 Shuru kar raha hoon: "${story.name}" — Enjoy karo! 😊`);
+                    speak(`Kahani shuru kar raha hoon. Enjoy karo!`);
+
+                    // Offer to save as favorite
+                    const saveMsg = `<button onclick="saveFavoriteStory('${story.name.replace(/'/g,"\\'")}','${category}','${story.youtube_id || ''}')" class="text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 px-3 py-1 rounded-full mt-1 cursor-pointer">❤️ Favorite mein save karo</button>`;
+                    addUIMessageHTML('bot', saveMsg);
+                } else {
+                    addUIMessage('bot', 'Abhi yeh kahani nahi mili. Koi aur category try karein? 😊');
+                }
+            } catch (e) {
+                addUIMessage('bot', 'Kahani load nahi ho saki. Internet check karein. 🙏');
+            }
+        }
+
+        function stopStory() {
+            document.getElementById('story-player').src = "";
+            document.getElementById('story-container').classList.add('hidden');
+            state.storyMode = false;
+            addUIMessage('bot', 'Kahani band kar di. Phir kabhi sunenge! 😊');
+        }
+
+        // ========== MOOD SUGGESTION CARD ==========
+        function showMoodSuggestion(recommendation, mood) {
+            if (!recommendation || recommendation.type === 'choice') return;
+            const card = document.getElementById('mood-suggestion-card');
+            const msgEl = document.getElementById('mood-suggestion-msg');
+            const optEl = document.getElementById('mood-suggestion-options');
+
+            msgEl.textContent = recommendation.message || 'Kuch suggest karta hoon 😊';
+
+            if (recommendation.type === 'music') {
+                const query = recommendation.queries && recommendation.queries[0] ? recommendation.queries[0] : 'soothing hindi songs';
+                optEl.innerHTML = `
+                    <button onclick="playYouTubeSong('${query.replace(/'/g,"\\'")}'); dismissSuggestion();"
+                        class="w-full py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-xl text-xs font-semibold cursor-pointer transition-colors">
+                        🎵 Haan, gaana bajao
+                    </button>
+                    <button onclick="dismissSuggestion()"
+                        class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-semibold cursor-pointer transition-colors">
+                        Nahi, theek hoon
+                    </button>`;
+            } else if (recommendation.type === 'story') {
+                const category = mood === 'spiritual' ? 'spiritual' : (mood === 'bored' ? 'comedy' : 'moral');
+                optEl.innerHTML = `
+                    <button onclick="playStory('${category}'); dismissSuggestion();"
+                        class="w-full py-2 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-xl text-xs font-semibold cursor-pointer transition-colors">
+                        📚 Haan, kahani sunao
+                    </button>
+                    <button onclick="dismissSuggestion()"
+                        class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-semibold cursor-pointer transition-colors">
+                        Nahi, theek hoon
+                    </button>`;
+            }
+
+            card.classList.remove('hidden');
+            lucide.createIcons();
+        }
+
+        function dismissSuggestion() {
+            document.getElementById('mood-suggestion-card').classList.add('hidden');
+        }
+
+        // ========== FAVORITES ==========
+        async function saveFavoriteSong(title, query, youtubeId) {
+            const token = localStorage.getItem('token');
+            const rid = localStorage.getItem('selectedRecipientId');
+            if (!token || !rid) return;
+            try {
+                await fetch('http://127.0.0.1:8000/api/voice-bot/favorites/song', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ recipient_id: parseInt(rid), title, query, youtube_id: youtubeId || '' })
+                });
+                addUIMessage('bot', `❤️ "${title}" aapke favorites mein save ho gaya!`);
+                loadFavoriteSongs();
+            } catch (e) { console.log('Save favorite failed', e); }
+        }
+
+        async function saveFavoriteStory(title, category, youtubeId) {
+            const token = localStorage.getItem('token');
+            const rid = localStorage.getItem('selectedRecipientId');
+            if (!token || !rid) return;
+            try {
+                await fetch('http://127.0.0.1:8000/api/voice-bot/favorites/story', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ recipient_id: parseInt(rid), title, category, youtube_id: youtubeId || '' })
+                });
+                addUIMessage('bot', `❤️ "${title}" kahani favorites mein save ho gayi!`);
+            } catch (e) { console.log('Save story favorite failed', e); }
+        }
+
+        async function loadFavoriteSongs() {
+            const token = localStorage.getItem('token');
+            const rid = localStorage.getItem('selectedRecipientId');
+            if (!token || !rid) return;
+            try {
+                const res = await fetch(`http://127.0.0.1:8000/api/voice-bot/favorites/songs/${rid}`, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                const data = await res.json();
+                if (data.code === 200) state.favoriteSongs = data.result.favorites || [];
+            } catch (e) { }
+        }
+
+        // ========== DAILY GREETING ==========
+        async function checkDailyGreeting() {
+            const token = localStorage.getItem('token');
+            const rid = localStorage.getItem('selectedRecipientId') || "1";
+            if (!token) {
+                // Fallback greeting
+                setTimeout(() => {
+                    handleUserMessage("Give me a warm friendly morning greeting in Hinglish.", "proactive_checkin");
+                }, 1000);
+                return;
+            }
+            try {
+                const res = await fetch(`http://127.0.0.1:8000/api/voice-bot/daily-greeting/${rid}`, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                const data = await res.json();
+                if (data.code === 200) {
+                    const g = data.result;
+                    // Show greeting message in chat
+                    setTimeout(() => {
+                        addUIMessage('bot', g.greeting_hi);
+                        speak(g.greeting_hi);
+                        // After greeting, trigger a full AI proactive check-in
+                        setTimeout(() => {
+                            handleUserMessage(
+                                "Greet me warmly and ask how I'm feeling today. Check if I have any pending medicines or reminders.",
+                                "proactive_checkin"
+                            );
+                        }, 3500);
+                    }, 800);
+                }
+            } catch (e) {
+                setTimeout(() => {
+                    handleUserMessage("Give me a warm friendly morning greeting in Hinglish.", "proactive_checkin");
+                }, 1000);
+            }
+        }
+
+        // ========== UTILITY: add raw HTML message ==========
+        function addUIMessageHTML(sender, html) {
+            const c = document.getElementById('chat-container');
+            const div = document.createElement('div');
+            div.className = `flex w-full ${sender === 'user' ? 'justify-end' : 'justify-start'}`;
+            div.innerHTML = `<div class="max-w-[80%] p-2">${html}</div>`;
+            c.appendChild(div);
+            c.scrollTop = c.scrollHeight;
+        }
     </script>
 </body>
 

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, Text, Enum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, Text, Enum, JSON
 from sqlalchemy.orm import relationship
 from config import Base
 import datetime
@@ -16,6 +16,10 @@ class MoodEnum(str, enum.Enum):
     angry = "angry"
     neutral = "neutral"
     distressed = "distressed"
+    lonely = "lonely"
+    bored = "bored"
+    relaxed = "relaxed"
+    spiritual = "spiritual"
 
 class TriggerTypeEnum(str, enum.Enum):
     user_initiated = "user_initiated"
@@ -73,3 +77,26 @@ class ProactiveReminder(Base):
 
     # Relationship
     care_recipient = relationship("CareRecipient", back_populates="proactive_reminders")
+
+
+class VoiceBotPreferences(Base):
+    """Stores per-recipient favorites and preferences for music, stories, and content."""
+    __tablename__ = "voice_bot_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    care_recipient_id = Column(Integer, ForeignKey("care_recipients.id", ondelete="CASCADE"), nullable=False, unique=True)
+
+    # Favorite songs: list of {"title": str, "query": str, "youtube_id": str}
+    favorite_songs = Column(JSON, default=list)
+    # Favorite stories: list of {"title": str, "category": str, "youtube_id": str}
+    favorite_stories = Column(JSON, default=list)
+    # Preferred content type per mood: {"sad": "music", "bored": "story", ...}
+    mood_content_preferences = Column(JSON, default=dict)
+    # Last greeted date (YYYY-MM-DD) to avoid duplicate daily greetings
+    last_greeted_date = Column(String, nullable=True)
+    # Preferred language: 'en' or 'hi'
+    preferred_language = Column(String, default="hi")
+
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    care_recipient = relationship("CareRecipient", backref="voice_bot_preferences")

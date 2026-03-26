@@ -56,6 +56,7 @@ audio_events_tables.Base.metadata.create_all(bind=engine)
 medical_conditions_tables.Base.metadata.create_all(bind=engine)
 disease_dictionary_tables.Base.metadata.create_all(bind=engine)
 conversation_history_tables.Base.metadata.create_all(bind=engine)
+# VoiceBotPreferences is defined in conversation_history — already covered above
 environment_tables.Base.metadata.create_all(bind=engine)
 medications_tables.Base.metadata.create_all(bind=engine)
 allergies_tables.Base.metadata.create_all(bind=engine)

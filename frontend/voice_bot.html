@@ -673,51 +673,57 @@
             const excludeWords = ['story', 'kahani', 'joke', 'chutkula', 'news', 'samachar'];
 
             // Play music command
-            if (playWords.some(w => t.includes(w) || tHindi.includes(w)) && !excludeWords.some(w => t.includes(w) || tHindi.includes(w))) {
-                // Check favourites first — try backend saved favorites, fallback to local
+            const allPlayTriggers = [...playWords, ...musicWords,
+                'chala do', 'laga do', 'baja do', 'sun', 'suno', 'chalao',
+                'चला दो', 'लगा दो', 'सुनो', 'चलाओ', 'बजा'];
+            if (allPlayTriggers.some(w => t.includes(w) || tHindi.includes(w)) && !excludeWords.some(w => t.includes(w) || tHindi.includes(w))) {
+
+                // --- Favourites ---
                 if (favWords.some(w => t.includes(w) || tHindi.includes(w))) {
                     if (state.favoriteSongs && state.favoriteSongs.length > 0) {
-                        const fav = state.favoriteSongs[0];
-                        playYouTubeSong(fav.query || fav.title);
+                        playYouTubeSong(state.favoriteSongs[0].query || state.favoriteSongs[0].title);
                     } else {
                         playlist = [...localPlaylist]; state.youtubeMode = false;
                         playSong(0);
-                        const msg = hindi ? 'आपका पसंदीदा गाना बजा रहा हूँ। ❤️' : 'Playing your favourite song. Enjoy! ❤️';
+                        const msg = hindi ? 'आपका पसंदीदा गाना बजा रहा हूँ। ❤️' : 'Playing your favourite song! ❤️';
                         addUIMessage('bot', msg); speak(msg);
                     }
                     return;
                 }
 
-                // Check local playlist by name
-                for (let i = 0; i < localPlaylist.length; i++) {
-                    if (t.includes(localPlaylist[i].title.toLowerCase())) {
-                        playlist = [...localPlaylist]; state.youtubeMode = false;
-                        playSong(i);
-                        const msg = hindi
-                            ? `बजा रहा हूँ: ${localPlaylist[i].title} 🎵`
-                            : `Playing ${localPlaylist[i].title}. 🎵`;
-                        addUIMessage('bot', msg);
-                        speak(hindi ? `बजा रहा हूँ ${localPlaylist[i].title}` : `Playing ${localPlaylist[i].title}`);
-                        return;
-                    }
-                }
-
-                // Generic "play a song / music / कोई गाना" → ask mood first
-                const genericPlay = ['कोई गाना', 'गाना बजाओ', 'संगीत बजाओ', 'a song', 'some music', 'कुछ सुनाओ', 'music', 'gaana', 'gana'];
-                if (genericPlay.some(w => t.includes(w) || tHindi.includes(w))) {
-                    await askMoodBeforeContent('music', hindi);
-                    return;
-                }
-
-                // Specific song request → search YouTube for full-length!
+                // --- Extract song name FIRST (remove all command words) ---
+                const stripWords = [
+                    ...playWords, ...musicWords,
+                    'chala do', 'laga do', 'baja do', 'chalao', 'suno', 'sun',
+                    'चला दो', 'लगा दो', 'सुनो', 'चलाओ', 'बजा',
+                    'please', 'कृपया', 'zara', 'ek', 'the', 'a', 'an', 'mujhe', 'मुझे',
+                    'गाना', 'संगीत', 'song', 'music', 'गीत'
+                ];
                 let songQuery = text;
-                [...playWords, ...musicWords, 'the', 'a', 'an', 'please', 'कृपया'].forEach(w => {
-                    songQuery = songQuery.replace(new RegExp(w, 'gi'), '').trim();
+                stripWords.forEach(w => {
+                    songQuery = songQuery.replace(new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi'), '').trim();
                 });
-                if (songQuery.length > 1) {
-                    playYouTubeSong(songQuery);
+                songQuery = songQuery.replace(/\s+/g, ' ').trim();
+
+                // --- If specific song name remains → play it directly ---
+                if (songQuery.length > 2) {
+                    // Check local playlist first
+                    const localMatch = localPlaylist.findIndex(s => t.includes(s.title.toLowerCase()));
+                    if (localMatch !== -1) {
+                        playlist = [...localPlaylist]; state.youtubeMode = false;
+                        playSong(localMatch);
+                        const msg = hindi ? `बजा रहा हूँ: ${localPlaylist[localMatch].title} 🎵` : `Playing ${localPlaylist[localMatch].title} 🎵`;
+                        addUIMessage('bot', msg); speak(msg);
+                    } else {
+                        // Specific song → YouTube search directly, NO mood question
+                        playYouTubeSong(songQuery);
+                    }
                     return;
                 }
+
+                // --- No specific song name → ask mood first ---
+                await askMoodBeforeContent('music', hindi);
+                return;
             }
 
             // ---- EMERGENCY COMMANDS (fast local handling) ----

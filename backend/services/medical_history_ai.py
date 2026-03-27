@@ -8,6 +8,7 @@ import os
 import json
 import datetime
 from sqlalchemy.orm import Session
+from utils.gemini_client import call_gemini
 from sqlalchemy import desc, func
 from dotenv import load_dotenv
 
@@ -274,16 +275,14 @@ Return a JSON object with EXACTLY these keys (no markdown, no code fences):
 """
 
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-        resp = requests.post(url, json={
+        data = call_gemini({
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"maxOutputTokens": 1500, "temperature": 0.2}
-        }, headers={"Content-Type": "application/json"}, timeout=60)
+        }, timeout=60, caller="[medical_history_ai]")
 
-        if resp.status_code == 200:
-            data = resp.json()
-            if "candidates" in data and data["candidates"]:
-                raw = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        if data and "candidates" in data and data["candidates"]:
+            raw = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if True:
                 print(f"[medical_history_ai] Raw Gemini response (first 500 chars): {raw[:500]}")
                 # Clean code fences (multiline-safe)
                 import re
@@ -302,7 +301,6 @@ Return a JSON object with EXACTLY these keys (no markdown, no code fences):
                     print(f"[medical_history_ai] Failed to parse Gemini response. Cleaned text: {cleaned[:300]}")
                     return _fallback_interpretation(patient_state)
 
-        print(f"[medical_history_ai] Gemini returned status {resp.status_code}: {resp.text[:300]}")
         return _fallback_interpretation(patient_state)
 
     except Exception as e:

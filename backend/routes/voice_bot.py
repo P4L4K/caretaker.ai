@@ -6,6 +6,7 @@ from pydantic import BaseModel
 import os
 import requests
 from config import get_db
+from utils.gemini_client import call_gemini
 from models.users import ResponseSchema
 from tables.users import CareRecipient, CareTaker
 from repository.users import UsersRepo
@@ -118,16 +119,8 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
     system_prompt = generate_system_prompt(recipient.full_name, context, payload.language, sentiment)
     is_at_risk = check_depression_risk(payload.recipient_id, db) or sentiment.get("urgency") == "high"
 
-    api_key = os.environ.get('GEMINI_API_KEY')
-    api_endpoint = os.environ.get('GEMINI_API_ENDPOINT')
-    if not api_key:
+    if not os.environ.get('GEMINI_API_KEY'):
         return ResponseSchema(code=500, status="error", message="Gemini API key not configured")
-
-    url = (
-        f"{api_endpoint}?key={api_key}"
-        if api_endpoint
-        else f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-    )
 
     gemini_payload = {
         "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser says: {user_text}"}]}],
@@ -135,10 +128,8 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
     }
 
     try:
-        resp = requests.post(url, json=gemini_payload, timeout=20)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get('candidates'):
+        data = call_gemini(gemini_payload, timeout=20, caller="[voice_bot/chat]")
+        if data and data.get('candidates'):
                 ai_text = data['candidates'][0]['content']['parts'][0]['text'].strip()
                 save_message(payload.recipient_id, SenderEnum.bot, ai_text, MoodEnum.neutral, trigger_enum, payload.session_id, db)
 
@@ -165,9 +156,9 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
                         }
                     }
                 )
-        return ResponseSchema(code=resp.status_code, status="error", message=f"Gemini API failed: {resp.status_code}")
+        return ResponseSchema(code=500, status="error", message="Gemini API failed or quota exceeded")
     except Exception as e:
-        print(f"[voice_bot] Chat error: {e}")
+        print(f"[voice_bot/chat] Error: {e}")
         return ResponseSchema(code=500, status="error", message=f"Chat error: {str(e)}")
 
 
@@ -210,16 +201,9 @@ async def detect_and_recommend(
     recommendation = get_content_recommendation(effective_mood)
 
     # 3. Generate a warm Hinglish confirmation message via Gemini
-    api_key = os.environ.get('GEMINI_API_KEY')
-    api_endpoint = os.environ.get('GEMINI_API_ENDPOINT')
     warm_message = recommendation.get("message", "Chalo kuch acha sunate hain 😊")
 
-    if api_key and confidence > 0.4:
-        url = (
-            f"{api_endpoint}?key={api_key}"
-            if api_endpoint
-            else f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-        )
+    if os.environ.get('GEMINI_API_KEY') and confidence > 0.4:
         prompt = (
             f"An elderly user said: \"{payload.text}\"\n"
             f"Current mood: {mood_str} (confidence: {confidence:.0%})\n"
@@ -233,15 +217,12 @@ async def detect_and_recommend(
             f"Use emojis. Be like a caring friend. Example: 'Samajh gaya... chalo kuch soothing gaane sunte hain ❤️'"
         )
         try:
-            resp = requests.post(
-                url,
-                json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"maxOutputTokens": 60, "temperature": 0.7}},
-                timeout=8
+            data = call_gemini(
+                {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"maxOutputTokens": 60, "temperature": 0.7}},
+                timeout=8, caller="[detect-and-recommend]"
             )
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("candidates"):
-                    warm_message = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if data and data.get("candidates"):
+                warm_message = data["candidates"][0]["content"]["parts"][0]["text"].strip()
         except Exception as e:
             print(f"[detect-and-recommend] Gemini warm message error: {e}")
 

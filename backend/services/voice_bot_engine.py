@@ -2,6 +2,7 @@ import os
 import json
 import requests
 from datetime import datetime, timedelta
+from utils.gemini_client import call_gemini
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -267,17 +268,8 @@ EMOTIONAL STATE RIGHT NOW:
 # Mood analysis  (expanded to 10 moods)
 # ─────────────────────────────────────────────
 def analyze_mood(text: str) -> dict:
-    api_key = os.environ.get('GEMINI_API_KEY')
-    api_endpoint = os.environ.get('GEMINI_API_ENDPOINT')
-
-    if not api_key:
+    if not os.environ.get('GEMINI_API_KEY'):
         return {"mood": MoodEnum.neutral, "confidence": 0.5}
-
-    url = (
-        f"{api_endpoint}?key={api_key}"
-        if api_endpoint
-        else f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-    )
 
     prompt = (
         'Analyze the emotional tone of this text from an elderly user.\n'
@@ -294,22 +286,19 @@ def analyze_mood(text: str) -> dict:
     )
 
     try:
-        resp = requests.post(
-            url,
-            json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1}},
-            timeout=10
+        data = call_gemini(
+            {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1}},
+            timeout=10, caller="[analyze_mood]"
         )
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get('candidates'):
-                ai_text = data['candidates'][0]['content']['parts'][0]['text']
-                ai_text = ai_text.replace("```json", "").replace("```", "").strip()
-                result = json.loads(ai_text)
-                mood_str = result.get("mood", "neutral").lower()
-                valid_moods = [m.value for m in MoodEnum]
-                if mood_str not in valid_moods:
-                    mood_str = "neutral"
-                return {"mood": MoodEnum(mood_str), "confidence": float(result.get("confidence", 0.5))}
+        if data and data.get('candidates'):
+            ai_text = data['candidates'][0]['content']['parts'][0]['text']
+            ai_text = ai_text.replace("```json", "").replace("```", "").strip()
+            result = json.loads(ai_text)
+            mood_str = result.get("mood", "neutral").lower()
+            valid_moods = [m.value for m in MoodEnum]
+            if mood_str not in valid_moods:
+                mood_str = "neutral"
+            return {"mood": MoodEnum(mood_str), "confidence": float(result.get("confidence", 0.5))}
     except Exception as e:
         print(f"[analyze_mood] Error: {e}")
 

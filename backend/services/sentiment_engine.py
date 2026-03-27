@@ -21,6 +21,7 @@ import os
 import json
 import requests
 from datetime import datetime, timedelta
+from utils.gemini_client import call_gemini
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -136,12 +137,6 @@ def analyze_sentiment_with_history(
 
     gemini_result = None
     if api_key and (history_snippets or current_text):
-        url = (
-            f"{api_endpoint}?key={api_key}"
-            if api_endpoint
-            else f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-        )
-
         history_text = "\n".join(
             [f"  [{i+1}] (mood={h['mood']}) \"{h['text']}\"" for i, h in enumerate(history_snippets)]
         ) or "  (no prior messages)"
@@ -174,20 +169,14 @@ Rules:
 """
 
         try:
-            resp = requests.post(
-                url,
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.1, "maxOutputTokens": 300}
-                },
-                timeout=12
+            data = call_gemini(
+                {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1, "maxOutputTokens": 300}},
+                timeout=12, caller="[sentiment_engine]"
             )
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("candidates"):
-                    raw = data["candidates"][0]["content"]["parts"][0]["text"]
-                    raw = raw.replace("```json", "").replace("```", "").strip()
-                    gemini_result = json.loads(raw)
+            if data and data.get("candidates"):
+                raw = data["candidates"][0]["content"]["parts"][0]["text"]
+                raw = raw.replace("```json", "").replace("```", "").strip()
+                gemini_result = json.loads(raw)
         except Exception as e:
             print(f"[sentiment_engine] Gemini error: {e}")
 

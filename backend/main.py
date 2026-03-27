@@ -460,26 +460,26 @@ async def startup_event():
         API_KEY = os.getenv("WEATHER_API_KEY", "628d4985109c4f6baa3182527250312")
         DEFAULT_CITY = os.getenv("DEFAULT_CITY", "Jammu")
         weather_model = WeatherPredictionModel(API_KEY, DEFAULT_CITY)
-        print("✅ Weather service initialized successfully")
+        print("[OK] Weather service initialized successfully")
     except Exception as e:
-        print(f"❌ Failed to initialize weather service: {e}")
+        print(f"[ERROR] Failed to initialize weather service: {e}")
 
     # Seed disease dictionary
     try:
         seed_db = SessionLocal()
         disease_dictionary_tables.seed_disease_dictionary(seed_db)
         seed_db.close()
-        print("✅ Disease dictionary seeded")
+        print("[OK] Disease dictionary seeded")
     except Exception as e:
-        print(f"❌ Disease dictionary seeding failed: {e}")
+        print(f"[ERROR] Disease dictionary seeding failed: {e}")
 
     # Start background notification scheduler (medicine reminders, stock decrement, auto-reorder)
     try:
         from services.notification_scheduler import start_scheduler
         start_scheduler()
-        print("✅ Notification scheduler started")
+        print("[OK] Notification scheduler started")
     except Exception as e:
-        print(f"❌ Notification scheduler failed to start: {e}")
+        print(f"[ERROR] Notification scheduler failed to start: {e}")
 
 # Make sure this is at the end of the file
 # ... (existing imports)

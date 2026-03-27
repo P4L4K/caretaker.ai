@@ -2,6 +2,7 @@ import os
 from io import BytesIO
 import re
 from dotenv import load_dotenv
+from utils.gemini_client import call_gemini
 
 # Ensure environmental variables are loaded
 load_dotenv(override=True)
@@ -199,15 +200,10 @@ Medical Document:
                 ]
             }
             
-            url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}'
             print(f'[summarizer] Calling Gemini REST API for clinical extraction')
-            resp = requests.post(url, json=payload, headers=headers, timeout=60)
-            print(f'[summarizer] Gemini response status: {resp.status_code}')
-            
-            if resp.status_code == 200:
+            data = call_gemini(payload, timeout=60, caller="[summarizer/clinical]")
+            if data:
                 try:
-                    data = resp.json()
-                    # Extract text from Gemini response
                     if 'candidates' in data and len(data['candidates']) > 0:
                         candidate = data['candidates'][0]
                         if 'content' in candidate and 'parts' in candidate['content']:
@@ -217,9 +213,7 @@ Medical Document:
                 except Exception as e:
                     print(f'[summarizer] Failed to parse Gemini response: {e}')
                     return ''
-            else:
-                print(f'[summarizer] Gemini API returned status {resp.status_code}')
-                return ''
+            return ''
                 
     except Exception as e:
         print(f'[summarizer] Clinical extraction failed: {e}')
@@ -262,14 +256,6 @@ def summarize_text_via_gemini(text: str, target_words: int = 250) -> str:
         return local_summary(text)
 
     try:
-        # Build the URL - use gemini-2.5-flash as default if endpoint not set
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-        
-        # Set up headers and payload according to Gemini API spec
-        headers = {
-            'Content-Type': 'application/json'
-        }
-        
         # Log the input text for debugging
         print(f'[summarizer] Input text length: {len(text)} characters')
         if len(text) > 200:
@@ -335,14 +321,10 @@ Medical Document Text:
             }
         }
         
-        print(f'[summarizer] Calling Gemini endpoint {url} (payload words approx {len(prompt.split())})')
-        resp = requests.post(url, json=payload, headers=headers, timeout=60)
-        print(f'[summarizer] Gemini response status: {getattr(resp, "status_code", "?")}')
-        
-        if resp.status_code == 200:
+        print(f'[summarizer] Calling Gemini (payload words approx {len(prompt.split())})')
+        data = call_gemini(payload, timeout=60, caller="[summarizer/text]")
+        if data:
             try:
-                data = resp.json()
-                # Extract text from Gemini response
                 if 'candidates' in data and data['candidates']:
                     candidate = data['candidates'][0]
                     if 'content' in candidate and 'parts' in candidate['content']:
@@ -380,10 +362,6 @@ Medical Document Text:
             except Exception as e:
                 print(f'[summarizer] Failed to parse Gemini response: {e}')
                 return local_summary(text)
-        
-        print(f'[summarizer] Gemini call failed with status {resp.status_code} — using local summary')
-        if hasattr(resp, 'text'):
-            print(f'[summarizer] Response text: {resp.text[:500]}...')  # Log first 500 chars of response
         return local_summary(text)
         
     except Exception as e:
@@ -503,32 +481,18 @@ INDIVIDUAL REPORT SUMMARIES:
 {text}""".format(text=history_text.strip())
 
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-        headers = {'Content-Type': 'application/json'}
         payload = {
             'contents': [{'parts': [{'text': prompt}]}],
-            "generationConfig": {
-                "maxOutputTokens": 2000,
-                "temperature": 0.2
-            }
+            "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.2}
         }
-        
         print(f'[summarizer] Calling Gemini for AGGREGATE summary (history_text_len={len(history_text)})')
-        resp = requests.post(url, json=payload, headers=headers, timeout=60)
-        print(f'[summarizer] Gemini Aggregate response status: {resp.status_code}')
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            if 'candidates' in data and len(data['candidates']) > 0:
-                summary = data['candidates'][0]['content']['parts'][0]['text']
-                # Clean up formatting for the parser
-                summary = summary.replace('•', '\n•')
-                summary = '\n'.join(line.strip() for line in summary.split('\n'))
-                print(f'[summarizer] Aggregate summary produced: {len(summary.split())} words')
-                return summary
-        
-        if hasattr(resp, 'text'):
-            print(f'[summarizer] Aggregate failure response: {resp.text[:500]}')
+        data = call_gemini(payload, timeout=60, caller="[summarizer/aggregate]")
+        if data and 'candidates' in data and len(data['candidates']) > 0:
+            summary = data['candidates'][0]['content']['parts'][0]['text']
+            summary = summary.replace('•', '\n•')
+            summary = '\n'.join(line.strip() for line in summary.split('\n'))
+            print(f'[summarizer] Aggregate summary produced: {len(summary.split())} words')
+            return summary
         return "Failed to synthesize aggregate history."
     except Exception as e:
         print(f'[summarizer] Aggregate synthesis failed: {e}')

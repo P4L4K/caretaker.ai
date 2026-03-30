@@ -773,7 +773,75 @@
                 }
             }
 
-            const excludeWords = ['story', 'kahani', 'joke', 'chutkula', 'news', 'samachar'];
+            const excludeWords = ['story', 'kahani', 'joke', 'chutkula', 'news', 'samachar',
+                                  'कहानी', 'किस्सा', 'चुटकुला', 'समाचार', 'कथा'];
+
+            // ── STORY HANDLER (must run BEFORE music check) ──
+            const storyTriggers  = ['कहानी', 'kahani', 'story', 'किस्सा', 'kissa', 'कथा', 'katha'];
+            const storyPlayWords = ['सुनाओ', 'बताओ', 'सुनना', 'सुनो', 'sunao', 'batao', 'play', 'चलाओ', 'लगाओ', 'सुना दो'];
+
+            const wantsStory = storyTriggers.some(w => t.includes(w) || text.includes(w))
+                            && storyPlayWords.some(w => t.includes(w) || text.includes(w));
+
+            if (wantsStory) {
+                // Detect story category from user text
+                let storyQuery = 'moral stories hindi for adults prerak prasang';
+                let categoryLabel = 'moral';
+
+                if (t.includes('भूतिया') || t.includes('bhootiya') || t.includes('डरावनी') || t.includes('horror') || t.includes('darawni') || t.includes('bhoot')) {
+                    storyQuery = 'bhootiya kahani hindi horror story';
+                    categoryLabel = 'horror 👻';
+                } else if (t.includes('comedy') || t.includes('funny') || t.includes('मज़ेदार') || t.includes('mazedaar') || t.includes('हँसी') || t.includes('joke')) {
+                    storyQuery = 'funny hindi stories akbar birbal comedy';
+                    categoryLabel = 'funny 😄';
+                } else if (t.includes('spiritual') || t.includes('bhajan') || t.includes('dharmik') || t.includes('धार्मिक') || t.includes('ram') || t.includes('krishna')) {
+                    storyQuery = 'ramayan katha hindi pravachan';
+                    categoryLabel = 'spiritual 🙏';
+                } else if (t.includes('itihas') || t.includes('इतिहास') || t.includes('historical') || t.includes('maharana') || t.includes('shivaji')) {
+                    storyQuery = 'historical stories hindi maharana pratap';
+                    categoryLabel = 'historical 🏛️';
+                } else if (t.includes('adventure') || t.includes('jungle') || t.includes('रोमांच')) {
+                    storyQuery = 'adventure thriller kahani hindi';
+                    categoryLabel = 'adventure 🌿';
+                } else if (t.includes('bachon') || t.includes('बच्चों') || t.includes('panchtantra')) {
+                    storyQuery = 'panchtantra stories hindi moral';
+                    categoryLabel = 'Panchtantra 📚';
+                }
+
+                const searchMsg = hindi
+                    ? `📖 ${categoryLabel} कहानी खोज रहे हैं YouTube पर...`
+                    : `📖 Finding a ${categoryLabel} story on YouTube...`;
+                addUIMessage('bot', searchMsg);
+                speakHindi(hindi ? `${categoryLabel} कहानी खोज रहे हैं` : `Finding a story for you`);
+
+                const tracks = await searchYouTube(storyQuery);
+                if (tracks && tracks.length > 0) {
+                    const track = tracks[0];
+                    // Stop any music playing
+                    audioPlayer.pause(); audioPlayer.currentTime = 0;
+                    state.youtubeMode = true; state.musicPlaying = true;
+
+                    document.getElementById('music-widget').classList.remove('hidden');
+                    document.getElementById('music-widget-title').textContent = '📖 Story';
+                    document.getElementById('yt-container').classList.remove('hidden');
+                    document.getElementById('local-music-info').classList.add('hidden');
+                    document.getElementById('yt-player').src = track.url;
+                    document.getElementById('play-pause-btn').textContent = '⏹ Stop';
+
+                    const doneMsg = hindi
+                        ? `📖 यह ${categoryLabel} कहानी सुनिए: ${track.name}`
+                        : `📖 Here's a ${categoryLabel} story: ${track.name}`;
+                    addUIMessage('bot', doneMsg);
+                    speakHindi(hindi ? `${categoryLabel} कहानी शुरू हो रही है` : `Starting story`);
+                } else {
+                    const failMsg = hindi
+                        ? '😔 अभी YouTube पर कहानी नहीं मिली। थोड़ी देर बाद फिर कोशिश करें।'
+                        : '😔 Could not find a story on YouTube right now. Try again shortly.';
+                    addUIMessage('bot', failMsg);
+                    speakHindi(failMsg);
+                }
+                return;
+            }
 
             // ── PLAY MUSIC ──
             const playWords = ['बजाओ', 'सुनाओ', 'लगाओ', 'play', 'चलाओ', 'बजा दो', 'सुना दो', 'प्ले'];

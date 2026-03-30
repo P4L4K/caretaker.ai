@@ -45,3 +45,6 @@ frontend/model/
 *.pt
 models/
 weights/
+
+# Google Cloud Credentials
+google_creds.json

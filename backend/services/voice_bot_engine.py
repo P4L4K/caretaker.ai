@@ -195,8 +195,9 @@ def generate_system_prompt(name: str, context: dict, language: str = "en", senti
 
     # ── Build the prompt as a natural personality brief ──
     lang_instruction = (
-        "Respond in warm, natural Hinglish (mix of Hindi and English). Use 'aap' respectfully. "
-        "Keep sentences short. Use emojis occasionally. Sound like a caring elder sibling or close friend."
+        "Respond in warm, natural Hindi using Devanagari script (preferred) or Hinglish. "
+        "IMPORTANT: Always use Devanagari script for Hindi words so the voice engine can pronounce them correctly. "
+        "Use 'aap' respectfully. Keep sentences short. Use emojis occasionally. Sound like a caring friend."
         if language == "hi" else
         "Respond in simple, warm English. Short sentences. Sound like a caring friend."
     )

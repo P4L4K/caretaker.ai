@@ -322,9 +322,8 @@
         // LANGUAGE DETECTION
         // ═══════════════════════════════════════════
         function isHindi(text) {
-            const hindiChars = (text.match(/[\u0900-\u097F]/g) || []).length;
-            const totalChars = text.replace(/\s/g, '').length;
-            return hindiChars > 0 && (hindiChars / totalChars) > 0.3;
+            // Check for ANY Devanagari Unicode characters — very robust
+            return /[\u0900-\u097F]/.test(text);
         }
 
         function detectLanguage(text) {
@@ -489,64 +488,80 @@
         loadVoices();
 
         function getBestHindiVoice() {
-            const v = cachedVoices.length ? cachedVoices : synth.getVoices();
-            // Prefer Microsoft voices on Windows, then Google Hindi
-            return v.find(x => x.name.includes('Heera'))
+            const v = synth.getVoices();
+            return v.find(x => x.lang === 'hi-IN' || x.lang.startsWith('hi'))
+                || v.find(x => x.name.includes('Heera'))
                 || v.find(x => x.name.includes('Kalpana'))
                 || v.find(x => x.name.toLowerCase().includes('hindi'))
-                || v.find(x => x.lang === 'hi-IN')
-                || v.find(x => x.lang.startsWith('hi'))
                 || null;
         }
 
-        function getBestEnglishVoice() {
-            const v = cachedVoices.length ? cachedVoices : synth.getVoices();
-            return v.find(x => x.name.includes('Google US English'))
-                || v.find(x => x.name.includes('Samantha'))
-                || v.find(x => x.name.includes('Zira'))
-                || v.find(x => x.lang === 'en-US')
-                || null;
-        }
-
-        /**
-         * speakHindi — always use Hindi voice for Hinglish/Hindi bot responses.
-         * Bot responds in Hinglish (Roman script) so we need hi-IN voice always
-         * when the user's language preference is Hindi.
-         */
-        function speakHindi(text, forceHindi = null) {
+        async function speak(text, base64Audio = null) {
             if (synth.speaking) synth.cancel();
-
-            // Strip emojis and special chars for cleaner TTS
-            const cleanText = text.replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}]/gu, '').trim();
+            
+            // Strip emoji from speech
+            const cleanText = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
             if (!cleanText) return;
 
+            // 1. If we already have base64 audio (from chat response), play it immediately
+            if (base64Audio) {
+                try {
+                    const audio = new Audio("data:audio/mp3;base64," + base64Audio);
+                    await audio.play();
+                    return;
+                } catch (e) {
+                    console.error("Base64 playback failed, falling back to browser TTS", e);
+                }
+            }
+
+            // 2. Try fetching from backend TTS endpoint for high-quality Neural2 voice
+            try {
+                const token = localStorage.getItem('token');
+                if (token) {
+                    const res = await fetch('http://127.0.0.1:8000/api/voice-bot/tts', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                        body: JSON.stringify({ text: cleanText, language_code: isHindi(cleanText) ? 'hi-IN' : 'en-US' })
+                    });
+                    const data = await res.json();
+                    if (data.code === 200 && data.result.audio_base64) {
+                        const audio = new Audio("data:audio/mp3;base64," + data.result.audio_base64);
+                        await audio.play();
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.error("Backend TTS failed, falling back to browser TTS", e);
+            }
+
+            // 3. Fallback: Browser's built-in speech synthesis
             const u = new SpeechSynthesisUtterance(cleanText);
-            u.rate = 0.88;    // Slightly slower — better for elderly
-            u.pitch = 1.05;
-            u.volume = 1.0;
+            u.rate = 1.0;
+            u.pitch = 1.0;
 
-            // Determine language: use Hindi voice if:
-            // 1. forceHindi is true, OR
-            // 2. user language preference is 'hi', OR
-            // 3. text contains Devanagari characters
-            const useHindi = forceHindi === true
-                || (forceHindi !== false && (state.userLanguage === 'hi' || isHindi(text)));
+            const hasDevanagari = isHindi(cleanText);
+            const isHindiPref = state.userLanguage === 'hi';
+            const isPureEnglish = /^[a-zA-Z0-9\s.,?!'"]+$/.test(cleanText);
 
-            if (useHindi) {
+            if (hasDevanagari || (isHindiPref && !isPureEnglish)) {
                 u.lang = 'hi-IN';
                 const hindiVoice = getBestHindiVoice();
                 if (hindiVoice) u.voice = hindiVoice;
             } else {
                 u.lang = 'en-US';
-                const engVoice = getBestEnglishVoice();
-                if (engVoice) u.voice = engVoice;
+                const vv = synth.getVoices();
+                const pref = vv.find(v =>
+                    v.name.includes('Google US English') ||
+                    v.name.includes('Samantha') ||
+                    v.name.includes('Zira') ||
+                    v.lang === 'en-US'
+                );
+                if (pref) u.voice = pref;
             }
-
             synth.speak(u);
         }
 
-        // Keep backward compat alias
-        const speak = speakHindi;
+        const speakHindi = speak;
 
         // ═══════════════════════════════════════════
         // DATA FETCHING (DB-driven)
@@ -595,14 +610,15 @@
             if (!token || !rid) return;
 
             try {
-                // Load favorite songs from DB
-                const res = await fetch(`http://127.0.0.1:8000/api/voice-bot/favorites/songs/${rid}`, {
+                // Load favorites AND general preferences
+                const res = await fetch(`http://127.0.0.1:8000/api/voice-bot/preferences/${rid}`, {
                     headers: { 'Authorization': 'Bearer ' + token }
                 });
                 if (res.ok) {
                     const data = await res.json();
-                    if (data.result && data.result.favorites) {
-                        state.favoriteSongs = data.result.favorites;
+                    if (data.result) {
+                        state.userLanguage = data.result.preferred_language || 'hi';
+                        state.favoriteSongs = data.result.favorite_songs || [];
                     }
                 }
             } catch (e) {}
@@ -1019,7 +1035,7 @@
                     }
 
                     addUIMessage('bot', data.result.reply);
-                    speakHindi(data.result.reply);
+                    speak(data.result.reply, data.result.audio_base64);
 
                     // Show recommendation card if mood-driven suggestion exists
                     if (data.result.recommendation && data.result.recommendation.type !== 'choice') {
@@ -1220,13 +1236,13 @@
 
             if (localStorage.getItem('healthBotEmergency') === 'true') toggleEmergencyMode(true);
 
-            // Proactive greeting — backend uses name + health context from DB
+            // Proactive greeting — backend decides language based on context
             setTimeout(() => {
                 handleUserMessage(
-                    "Provide a gentle contextual greeting based on my name and latest health info. Greet warmly in Hinglish.",
+                    "Provide a gentle morning/evening contextual greeting directly based on my name and latest health info. If appropriate, greet in Hindi.",
                     "proactive_checkin"
                 );
-            }, 800);
+            }, 1000);
 
             // Poll reminders every 60 seconds
             setInterval(pollTriggers, 60000);

@@ -23,6 +23,7 @@ from services.voice_bot_engine import (
 )
 from services.sentiment_engine import analyze_sentiment_with_history
 from services.proactive_triggers import get_pending_triggers, create_default_reminders
+from utils.tts_handler import generate_speech_base64, is_hindi
 
 load_dotenv()
 
@@ -79,6 +80,7 @@ class ChatRequest(BaseModel):
     session_id: str = "default_session"
     trigger_type: str = "user_initiated"
     language: str = "en"
+    use_tts: bool = True
 
 
 @router.post('/voice-bot/chat', response_model=ResponseSchema)
@@ -139,10 +141,18 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
                 if mood_str not in ("neutral",):
                     recommendation = get_content_recommendation(mood_str)
 
+                # ── ADD TTS GENERATION ──
+                audio_base64 = ""
+                if payload.use_tts:
+                    # Detect if response is Hindi for correct voice selection
+                    lang_hi = "hi-IN" if is_hindi(ai_text) else "en-US"
+                    audio_base64 = generate_speech_base64(ai_text, lang_hi)
+
                 return ResponseSchema(
                     code=200, status="success", message="AI response generated",
                     result={
                         "reply": ai_text,
+                        "audio_base64": audio_base64,
                         "mood_detected": mood_str,
                         "depression_risk": is_at_risk,
                         "recommendation": recommendation,
@@ -255,6 +265,24 @@ async def get_recommendation(
     verify_and_get_caretaker(authorization, db)
     recommendation = get_content_recommendation(mood)
     return ResponseSchema(code=200, status="success", message="Recommendation fetched", result=recommendation)
+
+
+@router.get('/voice-bot/preferences/{recipient_id}', response_model=ResponseSchema)
+async def get_preferences(
+    recipient_id: int,
+    authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
+):
+    verify_and_get_caretaker(authorization, db)
+    prefs = _get_or_create_preferences(recipient_id, db)
+    return ResponseSchema(
+        code=200, status="success", message="Preferences fetched",
+        result={
+            "preferred_language": prefs.preferred_language or "hi",
+            "favorite_songs": prefs.favorite_songs or [],
+            "favorite_stories": prefs.favorite_stories or [],
+            "mood_content_preferences": prefs.mood_content_preferences or {}
+        }
+    )
 
 
 # ─────────────────────────────────────────────
@@ -507,3 +535,24 @@ async def init_reminders(recipient_id: int, authorization: Optional[str] = Heade
         return ResponseSchema(code=400, status="error", message="Reminders already initialized")
     create_default_reminders(recipient_id, db)
     return ResponseSchema(code=200, status="success", message="Default reminders initialized")
+
+
+# ── STANDALONE TTS ENDPOINT ──
+class TTSRequest(BaseModel):
+    text: str
+    language_code: str = "hi-IN"
+
+@router.post('/voice-bot/tts', response_model=ResponseSchema)
+async def get_standalone_tts(payload: TTSRequest):
+    """Generates audio for given text using Google Cloud TTS Neural2."""
+    if not payload.text:
+        return ResponseSchema(code=400, status="error", message="No text provided")
+    
+    audio_b64 = generate_speech_base64(payload.text, payload.language_code)
+    if not audio_b64:
+        return ResponseSchema(code=500, status="error", message="TTS generation failed. Check credentials/quota.")
+    
+    return ResponseSchema(
+        code=200, status="success", message="TTS generated",
+        result={"audio_base64": audio_b64}
+    )

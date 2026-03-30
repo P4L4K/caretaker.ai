@@ -350,9 +350,10 @@
             playSong();
         });
 
-        async function searchYouTube(query) {
+        async function searchYouTube(query, minDuration = 180) {
             try {
-                const res = await fetch(`http://127.0.0.1:8000/api/music/youtube?q=${encodeURIComponent(query)}`);
+                const url = `http://127.0.0.1:8000/api/music/youtube?q=${encodeURIComponent(query)}&min_duration=${minDuration}`;
+                const res = await fetch(url);
                 if (!res.ok) return null;
                 const data = await res.json();
                 return data.tracks && data.tracks.length > 0 ? data.tracks : null;
@@ -848,7 +849,7 @@
                 addUIMessage('bot', searchMsg);
                 speakHindi(hindi ? `${categoryLabel} कहानी खोज रहे हैं` : `Finding a story for you`);
 
-                const tracks = await searchYouTube(storyQuery);
+                const tracks = await searchYouTube(storyQuery, 300); // 5-min minimum for stories
                 if (tracks && tracks.length > 0) {
                     const track = tracks[0];
                     // Stop any music playing

@@ -1,8 +1,14 @@
 """Music & Story Search API Routes.
 
-Searches YouTube for songs, mood-based content, and story videos.
-Primary: YouTube Data API v3 (reliable, quota-based).
-Fallback: HTML scrape (used automatically if API fails or quota is exceeded).
+Primary:  YouTube Data API v3
+Fallback: HTML scrape (auto if API fails / quota exceeded)
+
+Quality algorithm:
+  1. Fetch 10 candidates from Search API
+  2. Batch-fetch duration + viewCount via videos.list
+  3. Filter out clips shorter than min_duration (songs ≥ 3 min, stories ≥ 5 min)
+  4. Sort survivors by viewCount (most watched = best match)
+  5. Return top N results
 """
 
 from fastapi import APIRouter, Query
@@ -17,14 +23,64 @@ from services.voice_bot_engine import get_content_recommendation, get_story_quer
 
 router = APIRouter(tags=["Music Search"])
 
+# ─────────────────────────────────────────────
+# Duration helpers
+# ─────────────────────────────────────────────
+def _parse_iso_duration(d: str) -> int:
+    """Convert ISO 8601 duration (PT3M45S) to total seconds."""
+    m = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', d or "")
+    if not m:
+        return 0
+    return int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + int(m.group(3) or 0)
+
+
+def _enrich_with_details(video_ids: list, api_key: str) -> dict:
+    """
+    Batch-fetch duration + viewCount for a list of video IDs.
+    Returns {video_id: {duration_sec, views}}.
+    """
+    if not video_ids or not api_key:
+        return {}
+    try:
+        params = urllib.parse.urlencode({
+            "part": "contentDetails,statistics",
+            "id": ",".join(video_ids),
+            "key": api_key
+        })
+        req = urllib.request.Request(
+            "https://www.googleapis.com/youtube/v3/videos?" + params,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        raw = urllib.request.urlopen(req, timeout=10).read().decode()
+        data = json.loads(raw)
+        result = {}
+        for item in data.get("items", []):
+            vid_id = item["id"]
+            dur = _parse_iso_duration(item.get("contentDetails", {}).get("duration", "PT0S"))
+            views = int(item.get("statistics", {}).get("viewCount", 0))
+            result[vid_id] = {"duration_sec": dur, "views": views}
+        return result
+    except Exception as e:
+        print(f"[YouTube] videos.list error: {e}")
+        return {}
+
 
 # ─────────────────────────────────────────────
-# YouTube Data API v3 — primary method
+# YouTube Data API v3 — primary
 # ─────────────────────────────────────────────
-def _youtube_api_search(query: str, max_results: int = 3) -> list[dict]:
+def _youtube_api_search(query: str, max_results: int = 3, min_duration: int = 180) -> list[dict]:
     """
-    Search using the official YouTube Data API v3.
-    Returns a list of result dicts, or empty list on failure/quota exceeded.
+    Full quality-ranked search:
+      - Fetches 10 candidates from Search API
+      - Enriches with real duration + view count
+      - Drops anything shorter than min_duration seconds
+      - Sorts survivors by view count (descending)
+      - Returns top max_results
+
+    min_duration defaults:
+      songs        → 180 s (3 min)
+      stories      → 300 s (5 min)
+      motivational → 180 s (3 min)
     """
     api_key = os.environ.get("YOUTUBE_API_KEY", "")
     if not api_key:
@@ -35,40 +91,79 @@ def _youtube_api_search(query: str, max_results: int = 3) -> list[dict]:
             "part": "snippet",
             "q": query,
             "type": "video",
-            "maxResults": max_results,
+            "maxResults": 10,          # fetch more candidates so filter has room
             "key": api_key,
             "relevanceLanguage": "hi",
-            "regionCode": "IN"
+            "regionCode": "IN",
+            "order": "relevance"       # relevance first, re-rank by views after filter
         })
-        url = "https://www.googleapis.com/youtube/v3/search?" + params
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        req = urllib.request.Request(
+            "https://www.googleapis.com/youtube/v3/search?" + params,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
         raw = urllib.request.urlopen(req, timeout=10).read().decode()
         data = json.loads(raw)
 
-        results = []
+        candidates = []
         for item in data.get("items", []):
             video_id = item.get("id", {}).get("videoId")
             if not video_id:
                 continue
-            title = item.get("snippet", {}).get("title", query.title())
-            channel = item.get("snippet", {}).get("channelTitle", "YouTube")
-            results.append({
-                "name": title,
-                "artist": channel,
+            candidates.append({
+                "name":       item.get("snippet", {}).get("title", query.title()),
+                "artist":     item.get("snippet", {}).get("channelTitle", "YouTube"),
                 "youtube_id": video_id,
-                "url": f"https://www.youtube.com/embed/{video_id}?autoplay=1"
+                "url":        f"https://www.youtube.com/embed/{video_id}?autoplay=1"
             })
 
-        if results:
-            print(f"[YouTube API] Found {len(results)} results for: {query!r}")
-        return results
+        if not candidates:
+            return []
+
+        # Enrich with duration + views
+        details = _enrich_with_details([c["youtube_id"] for c in candidates], api_key)
+
+        # Attach details to each candidate
+        for c in candidates:
+            d = details.get(c["youtube_id"], {})
+            c["duration_sec"] = d.get("duration_sec", 0)
+            c["views"]        = d.get("views", 0)
+
+        # Filter: drop clips shorter than min_duration
+        before = len(candidates)
+        candidates = [c for c in candidates if c["duration_sec"] >= min_duration]
+        print(f"[YouTube API] {before} candidates → {len(candidates)} after ≥{min_duration}s filter for: {query!r}")
+
+        if not candidates:
+            print(f"[YouTube API] All results too short for {query!r}, relaxing filter to 60s")
+            # Relax filter once rather than returning nothing
+            candidates = [c for c in [
+                {**c2, "duration_sec": details.get(c2["youtube_id"], {}).get("duration_sec", 0),
+                        "views":        details.get(c2["youtube_id"], {}).get("views", 0)}
+                for c2 in [{
+                    "name": item.get("snippet", {}).get("title", query.title()),
+                    "artist": item.get("snippet", {}).get("channelTitle", "YouTube"),
+                    "youtube_id": item.get("id", {}).get("videoId"),
+                    "url": f"https://www.youtube.com/embed/{item.get('id', {}).get('videoId')}?autoplay=1"
+                } for item in data.get("items", []) if item.get("id", {}).get("videoId")]
+            ] if c["duration_sec"] >= 60]
+
+        # Sort by view count — most watched = best quality match
+        candidates.sort(key=lambda c: c["views"], reverse=True)
+
+        top = candidates[:max_results]
+        for c in top:
+            mins = c["duration_sec"] // 60
+            secs = c["duration_sec"] % 60
+            print(f"  → {c['name'][:50]} | {mins}m{secs:02d}s | {c['views']:,} views")
+
+        return top
 
     except urllib.error.HTTPError as e:
         body = e.read().decode()
         if e.code == 403 and ("quotaExceeded" in body or "keyInvalid" in body):
-            print(f"[YouTube API] Quota/key error for {query!r} — falling back to scrape")
+            print(f"[YouTube API] Quota/key error — falling back to scrape")
         else:
-            print(f"[YouTube API] HTTP {e.code} for {query!r}: {body[:200]}")
+            print(f"[YouTube API] HTTP {e.code}: {body[:200]}")
         return []
     except Exception as e:
         print(f"[YouTube API] Error for {query!r}: {e}")
@@ -79,10 +174,7 @@ def _youtube_api_search(query: str, max_results: int = 3) -> list[dict]:
 # HTML scrape fallback
 # ─────────────────────────────────────────────
 def _youtube_scrape(query: str, suffix: str = "") -> dict | None:
-    """
-    Fallback: scrape YouTube search page for first video ID.
-    Used automatically when the API fails or quota is exceeded.
-    """
+    """Fallback: scrape YouTube results page. No duration filtering (no API)."""
     try:
         q = urllib.parse.urlencode({"search_query": f"{query} {suffix}".strip()})
         req = urllib.request.Request(
@@ -92,12 +184,12 @@ def _youtube_scrape(query: str, suffix: str = "") -> dict | None:
         html = urllib.request.urlopen(req, timeout=10).read().decode()
         ids = re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', html)
         if ids:
-            print(f"[YouTube Scrape] Found result for: {query!r}")
+            print(f"[YouTube Scrape] Fallback result for: {query!r}")
             return {
-                "name": query.title(),
-                "artist": "YouTube",
+                "name": query.title(), "artist": "YouTube",
                 "youtube_id": ids[0],
-                "url": f"https://www.youtube.com/embed/{ids[0]}?autoplay=1"
+                "url": f"https://www.youtube.com/embed/{ids[0]}?autoplay=1",
+                "duration_sec": 0, "views": 0
             }
     except Exception as e:
         print(f"[YouTube Scrape] Error for {query!r}: {e}")
@@ -107,104 +199,80 @@ def _youtube_scrape(query: str, suffix: str = "") -> dict | None:
 # ─────────────────────────────────────────────
 # Unified search: API → scrape fallback
 # ─────────────────────────────────────────────
-def _youtube_search(query: str, suffix: str = "") -> dict | None:
-    """
-    Try YouTube Data API v3 first; fall back to HTML scrape automatically.
-    Always returns a single best result dict, or None.
-    """
-    full_query = f"{query} {suffix}".strip()
-
-    # 1. Try official API
-    api_results = _youtube_api_search(full_query, max_results=1)
-    if api_results:
-        return api_results[0]
-
-    # 2. Fallback to HTML scrape
-    return _youtube_scrape(query, suffix=suffix)
+def _youtube_search(query: str, min_duration: int = 180) -> dict | None:
+    """Single best result. API first, scrape fallback."""
+    results = _youtube_api_search(query, max_results=1, min_duration=min_duration)
+    if results:
+        return results[0]
+    return _youtube_scrape(query)
 
 
-def _youtube_search_many(query: str, max_results: int = 3) -> list[dict]:
-    """
-    Return up to max_results results. API first, scrape as fallback (1 result).
-    """
-    full_query = query.strip()
-
-    api_results = _youtube_api_search(full_query, max_results=max_results)
-    if api_results:
-        return api_results
-
-    # Scrape fallback gives only 1 result
-    single = _youtube_scrape(full_query)
+def _youtube_search_many(query: str, max_results: int = 3, min_duration: int = 180) -> list[dict]:
+    """Up to max_results quality results. API first, scrape fallback (1 result)."""
+    results = _youtube_api_search(query, max_results=max_results, min_duration=min_duration)
+    if results:
+        return results
+    single = _youtube_scrape(query)
     return [single] if single else []
 
 
 # ─────────────────────────────────────────────
-# Route: generic search
+# Routes
 # ─────────────────────────────────────────────
 @router.get("/music/youtube")
-def search_youtube_track(q: str = Query(..., min_length=1, description="Search query")):
-    """Search YouTube and return the best matching video for a song or story."""
-    results = _youtube_search_many(q, max_results=3)
-    source = "youtube_api" if results and results[0].get("artist") != "YouTube" else "youtube_scrape"
+def search_youtube_track(
+    q: str = Query(..., min_length=1),
+    min_duration: int = Query(180, description="Minimum video duration in seconds (default 180 = 3 min)")
+):
+    """Search YouTube — filters short clips, returns top 3 ranked by view count."""
+    results = _youtube_search_many(q, max_results=3, min_duration=min_duration)
+    source = "youtube_api" if results and results[0].get("views", 0) > 0 else "youtube_scrape"
     if results:
         return {"tracks": results, "source": source}
     return {"tracks": [], "source": source, "error": "No results found"}
 
 
-# ─────────────────────────────────────────────
-# Route: mood-based music
-# ─────────────────────────────────────────────
 @router.get("/music/mood")
-def search_by_mood(mood: str = Query(..., description="User mood")):
-    """Return YouTube video suggestions based on user mood."""
+def search_by_mood(mood: str = Query(...)):
+    """Mood-based music — 3-min minimum, sorted by views."""
     rec = get_content_recommendation(mood)
     tracks = []
     for query in rec.get("queries", []):
-        result = _youtube_search(query)
+        result = _youtube_search(query, min_duration=180)
         if result:
             result["name"] = query.title()
             tracks.append(result)
     return {
-        "tracks": tracks,
-        "mood": mood,
+        "tracks": tracks, "mood": mood,
         "content_type": rec.get("type", "music"),
         "message": rec.get("message", ""),
         "source": "youtube"
     }
 
 
-# ─────────────────────────────────────────────
-# Route: story search
-# ─────────────────────────────────────────────
 @router.get("/story/youtube")
-def search_story(category: str = Query("moral", description="Story category")):
-    """Search YouTube for a story/katha video by category."""
+def search_story(category: str = Query("moral")):
+    """Story search — 5-min minimum so we get full episodes, not clips."""
     queries = get_story_queries(category)
     tracks = []
     for query in queries:
-        result = _youtube_search(query)
+        result = _youtube_search(query, min_duration=300)   # 5 minutes minimum for stories
         if result:
             result["name"] = query.title()
             result["category"] = category
             tracks.append(result)
     return {
-        "tracks": tracks,
-        "category": category,
+        "tracks": tracks, "category": category,
         "available_categories": list(STORY_CATEGORIES.keys()),
         "source": "youtube"
     }
 
 
-# ─────────────────────────────────────────────
-# Route: list categories
-# ─────────────────────────────────────────────
 @router.get("/story/categories")
 def list_story_categories():
-    """List all available story categories."""
     return {"categories": list(STORY_CATEGORIES.keys())}
 
 
-# Legacy alias
 @router.get("/spotify/search")
 def search_tracks(q: str = Query(...)):
     return search_youtube_track(q)

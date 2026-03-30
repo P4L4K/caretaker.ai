@@ -62,6 +62,10 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
             throw new Error(validationError);
         }
 
+        if (formData.care_recipients.length === 0) {
+            throw new Error('Please fill in at least one care recipient\'s details (name, email, age, gender, and 10-digit phone number).');
+        }
+
         console.log('Sending registration data:', formData);
         const API_BASE = 'http://127.0.0.1:8000';
         const response = await fetch(API_BASE + '/api/signup', {

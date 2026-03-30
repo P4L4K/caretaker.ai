@@ -134,7 +134,8 @@
                 </div>
                 <div id="yt-container" class="w-full rounded-xl overflow-hidden shadow-sm hidden mb-3">
                     <iframe id="yt-player" width="100%" height="80" src="" frameborder="0"
-                        allow="autoplay; encrypted-media" allowfullscreen></iframe>
+                        allow="autoplay; encrypted-media" allowfullscreen
+                        enablejsapi="1"></iframe>
                 </div>
                 <div id="local-music-info" class="flex gap-3 items-center mb-3">
                     <div class="flex-1 min-w-0">
@@ -305,6 +306,8 @@
             musicIndex: 0,
             musicPlaying: false,
             youtubeMode: false,
+            videoQueue: [],       // holds multiple results; auto-retried on embed error
+            videoQueueIdx: 0,
             recipientInfo: null,
             healthSummary: "",
             // DB-driven fields
@@ -358,28 +361,59 @@
             }
         }
 
-        async function playYouTubeSong(query) {
+        // Load a specific track index from the queue into the YouTube iframe
+        function loadYouTubeTrack(idx, widgetTitle) {
+            const track = state.videoQueue[idx];
+            if (!track) return false;
+            audioPlayer.pause(); audioPlayer.currentTime = 0;
+            state.youtubeMode = true;
+            state.musicPlaying = true;
+            state.videoQueueIdx = idx;
+            document.getElementById('music-widget').classList.remove('hidden');
+            if (widgetTitle) document.getElementById('music-widget-title').textContent = widgetTitle;
+            document.getElementById('yt-container').classList.remove('hidden');
+            document.getElementById('local-music-info').classList.add('hidden');
+            // enablejsapi=1 lets us receive postMessage errors from YouTube
+            const base = track.url.split('?')[0];
+            document.getElementById('yt-player').src = base + '?autoplay=1&enablejsapi=1';
+            document.getElementById('play-pause-btn').textContent = '⏹ Stop';
+            return true;
+        }
+
+        // Called when YouTube postMessage signals error 101/150 (video not embeddable)
+        function tryNextVideo() {
+            const next = state.videoQueueIdx + 1;
+            if (next < state.videoQueue.length) {
+                console.log(`[YouTube] Video ${state.videoQueueIdx} not embeddable, trying index ${next}`);
+                loadYouTubeTrack(next);
+            } else {
+                console.log('[YouTube] All queued videos unembeddable, falling back to local music');
+                controlMusic('stop');
+                const hindi = state.userLanguage === 'hi';
+                const msg = hindi
+                    ? '😔 यह वीडियो यहाँ नहीं चल सकता। स्थानीय संगीत बजा रहे हैं। 🎵'
+                    : '😔 These videos cannot be embedded here. Playing local music instead. 🎵';
+                addUIMessage('bot', msg);
+                speakHindi(msg);
+                playlist = [...localPlaylist]; state.youtubeMode = false;
+                playSong(1);
+            }
+        }
+
+        async function playYouTubeSong(query, widgetTitle) {
             const hindi = state.userLanguage === 'hi' || isHindi(query);
+            const wt = widgetTitle || '🎵 Now Playing';
             addUIMessage('bot', hindi ? "🔍 गाना खोज रहे हैं..." : "🔍 Searching for your song...");
 
             const tracks = await searchYouTube(query);
 
             if (tracks && tracks.length > 0) {
-                const track = tracks[0];
-                state.youtubeMode = true;
-                state.musicPlaying = true;
-                audioPlayer.pause();
-                audioPlayer.currentTime = 0;
-
-                document.getElementById('music-widget').classList.remove('hidden');
-                document.getElementById('yt-container').classList.remove('hidden');
-                document.getElementById('local-music-info').classList.add('hidden');
-                document.getElementById('yt-player').src = track.url;
-                document.getElementById('play-pause-btn').textContent = '⏹ Stop';
-
-                const msg = hindi ? `🎵 बजा रहा हूं: ${track.name}` : `🎵 Now playing: ${track.name}`;
+                state.videoQueue = tracks;
+                state.videoQueueIdx = 0;
+                loadYouTubeTrack(0, wt);
+                const msg = hindi ? `🎵 बजा रहा हूं: ${tracks[0].name}` : `🎵 Now playing: ${tracks[0].name}`;
                 addUIMessage('bot', msg);
-                speakHindi(hindi ? `बजा रहा हूं ${track.name}` : `Playing ${track.name}`, hindi);
+                speakHindi(hindi ? `बजा रहा हूं ${tracks[0].name}` : `Playing ${tracks[0].name}`, hindi);
                 return true;
             }
 
@@ -387,8 +421,7 @@
                 ? "यह गाना इंटरनेट पर नहीं मिला। स्थानीय लाइब्रेरी से बजा रहा हूं। 🎵"
                 : "Couldn't find that song online. Playing from local library. 🎵";
             addUIMessage('bot', fallback);
-            playlist = [...localPlaylist];
-            state.youtubeMode = false;
+            playlist = [...localPlaylist]; state.youtubeMode = false;
             playSong(1);
             return false;
         }
@@ -774,7 +807,8 @@
             }
 
             const excludeWords = ['story', 'kahani', 'joke', 'chutkula', 'news', 'samachar',
-                                  'कहानी', 'किस्सा', 'चुटकुला', 'समाचार', 'कथा'];
+                                  'कहानी', 'किस्सा', 'चुटकुला', 'समाचार', 'कथा',
+                                  'video', 'वीडियो', 'motivational', 'मोटिवेशनल'];
 
             // ── STORY HANDLER (must run BEFORE music check) ──
             const storyTriggers  = ['कहानी', 'kahani', 'story', 'किस्सा', 'kissa', 'कथा', 'katha'];
@@ -818,19 +852,12 @@
                 if (tracks && tracks.length > 0) {
                     const track = tracks[0];
                     // Stop any music playing
-                    audioPlayer.pause(); audioPlayer.currentTime = 0;
-                    state.youtubeMode = true; state.musicPlaying = true;
-
-                    document.getElementById('music-widget').classList.remove('hidden');
-                    document.getElementById('music-widget-title').textContent = '📖 Story';
-                    document.getElementById('yt-container').classList.remove('hidden');
-                    document.getElementById('local-music-info').classList.add('hidden');
-                    document.getElementById('yt-player').src = track.url;
-                    document.getElementById('play-pause-btn').textContent = '⏹ Stop';
-
+                    state.videoQueue = tracks;
+                    state.videoQueueIdx = 0;
+                    loadYouTubeTrack(0, '📖 Story');
                     const doneMsg = hindi
-                        ? `📖 यह ${categoryLabel} कहानी सुनिए: ${track.name}`
-                        : `📖 Here's a ${categoryLabel} story: ${track.name}`;
+                        ? `📖 यह ${categoryLabel} कहानी सुनिए: ${tracks[0].name}`
+                        : `📖 Here's a ${categoryLabel} story: ${tracks[0].name}`;
                     addUIMessage('bot', doneMsg);
                     speakHindi(hindi ? `${categoryLabel} कहानी शुरू हो रही है` : `Starting story`);
                 } else {
@@ -839,6 +866,36 @@
                         : '😔 Could not find a story on YouTube right now. Try again shortly.';
                     addUIMessage('bot', failMsg);
                     speakHindi(failMsg);
+                }
+                return;
+            }
+
+            // ── VIDEO HANDLER (motivational, news, any "वीडियो" request) ──
+            const videoTriggers  = ['वीडियो', 'video'];
+            const videoPlayWords = ['चलाओ', 'play', 'दिखाओ', 'देखना', 'लगाओ', 'दिखा दो', 'दिखा'];
+            const wantsVideo = videoTriggers.some(w => t.includes(w) || text.includes(w))
+                            && videoPlayWords.some(w => t.includes(w) || text.includes(w));
+
+            if (wantsVideo) {
+                let videoQuery = text;
+                [...videoPlayWords, ...videoTriggers, 'please', 'कृपया', 'जरा', 'एक'].forEach(w => {
+                    videoQuery = videoQuery.replace(new RegExp(w, 'gi'), '').trim();
+                });
+                if (!videoQuery || videoQuery.length < 2) videoQuery = 'motivational hindi video';
+                videoQuery = videoQuery + ' hindi';
+
+                addUIMessage('bot', hindi ? `🔍 वीडियो खोज रहे हैं...` : `🔍 Searching for video...`);
+                const tracks = await searchYouTube(videoQuery);
+                if (tracks && tracks.length > 0) {
+                    state.videoQueue = tracks;
+                    state.videoQueueIdx = 0;
+                    loadYouTubeTrack(0, '▶ Video');
+                    const doneMsg = hindi ? `▶ चला रहे हैं: ${tracks[0].name}` : `▶ Playing: ${tracks[0].name}`;
+                    addUIMessage('bot', doneMsg);
+                    speakHindi(hindi ? `वीडियो शुरू हो रहा है` : `Starting video`);
+                } else {
+                    const failMsg = hindi ? '😔 वीडियो नहीं मिला। बाद में कोशिश करें।' : '😔 Video not found. Try again later.';
+                    addUIMessage('bot', failMsg); speakHindi(failMsg);
                 }
                 return;
             }
@@ -1173,6 +1230,20 @@
             // Poll reminders every 60 seconds
             setInterval(pollTriggers, 60000);
         }
+
+        // ── YouTube IFrame API error listener ──
+        // YouTube sends postMessage when a video can't be embedded (error 101 / 150)
+        window.addEventListener('message', (event) => {
+            if (event.origin !== 'https://www.youtube.com') return;
+            try {
+                const data = JSON.parse(event.data);
+                // info=101 or info=150 = "video not embeddable on this domain"
+                if (data.event === 'onError' && (data.info === 101 || data.info === 150)) {
+                    console.warn(`[YouTube] Embed error ${data.info} — trying next video`);
+                    tryNextVideo();
+                }
+            } catch (e) { /* not a JSON message, ignore */ }
+        });
 
         window.onload = init;
     </script>

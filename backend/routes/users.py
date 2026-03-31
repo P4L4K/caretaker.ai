@@ -5,8 +5,9 @@ import json
 from typing import Optional, List, Dict
 
 from models.users import ResponseSchema, Register, Login, CaretakerUpdate
-from tables.users import CareTaker, CareRecipient
+from tables.users import CareTaker, CareRecipient, Doctor
 from tables.vital_signs import VitalSign
+from tables.medications import Medication, MedicationStatus
 from sqlalchemy import desc
 from config import get_db, ACCESS_TOKEN_EXPIRE_MINUTES
 from repository.users import UsersRepo, JWTRepo
@@ -55,59 +56,95 @@ async def profile(authorization: Optional[str] = Header(None), db: Session = Dep
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid token")
 
         user = UsersRepo.find_by_username(db, CareTaker, username)
+        role = 'caretaker'
+        if not user:
+            user = UsersRepo.find_by_username(db, Doctor, username)
+            role = 'doctor'
+            
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-        recipients = []
-        for r in user.care_recipients:
-            # Query vitals directly from DB (same approach as insights_engine)
-            latest_vital = db.query(VitalSign).filter(
-                VitalSign.care_recipient_id == r.id
-            ).order_by(desc(VitalSign.recorded_at)).first()
+        if role == 'caretaker':
+            recipients = []
+            for r in user.care_recipients:
+                # Query vitals directly from DB (same approach as insights_engine)
+                latest_vital = db.query(VitalSign).filter(
+                    VitalSign.care_recipient_id == r.id
+                ).order_by(desc(VitalSign.recorded_at)).first()
 
-            vitals_data = None
-            if latest_vital:
-                vitals_data = {
-                    'heart_rate': latest_vital.heart_rate,
-                    'systolic_bp': latest_vital.systolic_bp,
-                    'diastolic_bp': latest_vital.diastolic_bp,
-                    'oxygen_saturation': latest_vital.oxygen_saturation,
-                    'sleep_score': latest_vital.sleep_score,
-                    'temperature': latest_vital.temperature,
-                    'bmi': latest_vital.bmi,
-                    'height': latest_vital.height,
-                    'weight': latest_vital.weight,
-                    'recorded_at': latest_vital.recorded_at.isoformat() if latest_vital.recorded_at else None
+                vitals_data = None
+                if latest_vital:
+                    vitals_data = {
+                        'heart_rate': latest_vital.heart_rate,
+                        'systolic_bp': latest_vital.systolic_bp,
+                        'diastolic_bp': latest_vital.diastolic_bp,
+                        'oxygen_saturation': latest_vital.oxygen_saturation,
+                        'sleep_score': latest_vital.sleep_score,
+                        'temperature': latest_vital.temperature,
+                        'bmi': latest_vital.bmi,
+                        'height': latest_vital.height,
+                        'weight': latest_vital.weight,
+                        'recorded_at': latest_vital.recorded_at.isoformat() if latest_vital.recorded_at else None
+                    }
+
+                # Fetch active medications for voice bot medicine reminders
+                active_meds = db.query(Medication).filter(
+                    Medication.care_recipient_id == r.id,
+                    Medication.status == MedicationStatus.active
+                ).all()
+                meds_data = [
+                    {
+                        'medicine_name': m.medicine_name,
+                        'dosage': m.dosage,
+                        'frequency': m.frequency,
+                        'schedule_time': m.schedule_time
+                    }
+                    for m in active_meds
+                ]
+
+                recipients.append({
+                    'id': r.id,
+                    'full_name': r.full_name,
+                    'email': r.email,
+                    'phone_number': r.phone_number,
+                    'age': r.age,
+                    'gender': r.gender.value if r.gender else None,
+                    'respiratory_condition_status': bool(r.respiratory_condition_status),
+                    'report_summary': r.report_summary,
+                    'vitals': vitals_data,
+                    'height': r.height,
+                    'weight': r.weight,
+                    'blood_group': r.blood_group,
+                    'emergency_contact': r.emergency_contact,
+                    'medications': meds_data
+                })
+
+            return {
+                'status': 'success',
+                'role': 'caretaker',
+                'caretaker': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'full_name': user.full_name,
+                    'phone_number': user.phone_number,
+                    'face_registered': user.face_descriptor is not None
+                },
+                'care_recipients': recipients
+            }
+        else:
+            return {
+                'status': 'success',
+                'role': 'doctor',
+                'doctor': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'full_name': user.full_name,
+                    'phone_number': user.phone_number,
+                    'specialization': user.specialization
                 }
-
-            recipients.append({
-                'id': r.id,
-                'full_name': r.full_name,
-                'email': r.email,
-                'phone_number': r.phone_number,
-                'age': r.age,
-                'gender': r.gender.value if r.gender else None,
-                'respiratory_condition_status': bool(r.respiratory_condition_status),
-                'report_summary': r.report_summary,
-                'vitals': vitals_data,
-                'height': r.height,
-                'weight': r.weight,
-                'blood_group': r.blood_group,
-                'emergency_contact': r.emergency_contact
-            })
-
-        return {
-            'status': 'success',
-            'caretaker': {
-                'id': user.id,
-                'username': user.username,
-                'email': user.email,
-                'full_name': user.full_name,
-                'phone_number': user.phone_number,
-                'face_registered': user.face_descriptor is not None
-            },
-            'care_recipients': recipients
-        }
+            }
     except HTTPException:
         raise
     except Exception as e:
@@ -164,71 +201,100 @@ async def delete_caretaker_account(authorization: Optional[str] = Header(None), 
 @router.post('/signup', response_model=ResponseSchema)
 async def signup(request: Register, db: Session = Depends(get_db)):
     try:
-        # Check if caretaker already exists
-        existing_user = UsersRepo.find_by_username(db, CareTaker, request.username)
-        if existing_user:
+        # Check if user already exists in either table
+        existing_caretaker = UsersRepo.find_by_username(db, CareTaker, request.username)
+        existing_doctor = UsersRepo.find_by_username(db, Doctor, request.username)
+        
+        if existing_caretaker or existing_doctor:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Username already exists"
             )
 
-        # Create CareTaker entry (plain-text password)
-        caretaker = CareTaker(
-            email=request.email,
-            username=request.username,
-            phone_number=request.phone_number,
-            password=request.password,  # no hashing
-            full_name=request.full_name
-        )
-        db.add(caretaker)
-        db.commit()
-        db.refresh(caretaker)
-
-        # Add care recipients and keep references so we can return their IDs
-        created_recipients = []
-        for recipient in request.care_recipients:
-            new_recipient = CareRecipient(
-                caretaker_id=caretaker.id,
-                full_name=recipient.full_name,
-                email=recipient.email,
-                phone_number=recipient.phone_number,
-                age=recipient.age,
-                gender=recipient.gender,
-                respiratory_condition_status=recipient.respiratory_condition_status,
-                height=recipient.height,
-                weight=recipient.weight,
-                blood_group=recipient.blood_group,
-                emergency_contact=recipient.emergency_contact
+        if request.role == 'doctor':
+            # Create Doctor entry
+            doctor = Doctor(
+                email=request.email,
+                username=request.username,
+                phone_number=request.phone_number,
+                password=request.password,
+                full_name=request.full_name,
+                specialization=request.specialization
             )
-            db.add(new_recipient)
-            created_recipients.append(new_recipient)
+            db.add(doctor)
+            db.commit()
+            db.refresh(doctor)
+            
+            # Generate JWT token
+            access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            token = JWTRepo.generate_token(
+                {"sub": doctor.username}, expires_delta=access_token_expires
+            )
 
-        db.commit()
-        for r in created_recipients:
-            db.refresh(r)
+            return ResponseSchema(
+                code=200,
+                status="success",
+                message="Doctor registered successfully!",
+                result={"access_token": token, "token_type": "bearer", "role": "doctor"}
+            )
+        else:
+            # Create CareTaker entry
+            caretaker = CareTaker(
+                email=request.email,
+                username=request.username,
+                phone_number=request.phone_number,
+                password=request.password,
+                full_name=request.full_name
+            )
+            db.add(caretaker)
+            db.commit()
+            db.refresh(caretaker)
 
-        # Send registration email
-        await send_registration_email(request.email, request.username)
+            # Add care recipients
+            created_recipients = []
+            if request.care_recipients:
+                for recipient in request.care_recipients:
+                    new_recipient = CareRecipient(
+                        caretaker_id=caretaker.id,
+                        full_name=recipient.full_name,
+                        email=recipient.email,
+                        phone_number=recipient.phone_number,
+                        age=recipient.age,
+                        gender=recipient.gender,
+                        respiratory_condition_status=recipient.respiratory_condition_status,
+                        height=recipient.height,
+                        weight=recipient.weight,
+                        blood_group=recipient.blood_group,
+                        emergency_contact=recipient.emergency_contact
+                    )
+                    db.add(new_recipient)
+                    created_recipients.append(new_recipient)
 
-        # Generate JWT token
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        token = JWTRepo.generate_token(
-            {"sub": caretaker.username}, expires_delta=access_token_expires
-        )
+                db.commit()
+                for r in created_recipients:
+                    db.refresh(r)
 
-        # Return token and created recipient metadata (ids) so client can upload files
-        recipients_out = [{
-            'id': r.id,
-            'full_name': r.full_name,
-            'email': r.email
-        } for r in created_recipients]
+            # Send registration email
+            await send_registration_email(request.email, request.username)
 
-        return ResponseSchema(
-            code=200,
-            status="success",
-            message="Caretaker registered successfully!",
-            result={"access_token": token, "token_type": "bearer", "care_recipients": recipients_out}
-        )
+            # Generate JWT token
+            access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            token = JWTRepo.generate_token(
+                {"sub": caretaker.username}, expires_delta=access_token_expires
+            )
+
+            recipients_out = [{
+                'id': r.id,
+                'full_name': r.full_name,
+                'email': r.email
+            } for r in created_recipients]
+
+            return ResponseSchema(
+                code=200,
+                status="success",
+                message="Caretaker registered successfully!",
+                result={"access_token": token, "token_type": "bearer", "care_recipients": recipients_out, "role": "caretaker"}
+            )
 
     except HTTPException as e:
         raise e
@@ -400,21 +466,19 @@ async def login(request: Login, db: Session = Depends(get_db)):
         print(f"Request data: {request.dict()}")
         print(f"Database URL: {db.bind.url if hasattr(db, 'bind') else 'No DB connection'}")
         
-        # Check if user exists
-        user = UsersRepo.find_by_username(db, CareTaker, request.username)
-        print(f"User found: {user is not None}")
+        # Check if user exists in Doctor table
+        user = UsersRepo.find_by_username(db, Doctor, request.username)
+        role = 'doctor'
         
         if not user:
-            print(f"Login failed: User '{request.username}' not found")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect username or password"
-            )
-
-        print(f"Password check: {'passed' if user.password == request.password else 'failed'}")
+            # Check if user exists in CareTaker table
+            user = UsersRepo.find_by_username(db, CareTaker, request.username)
+            role = 'caretaker'
+            
+        print(f"User found: {user is not None}, Role: {role if user else 'N/A'}")
         
-        if user.password != request.password:
-            print(f"Login failed: Invalid password for user '{request.username}'")
+        if not user or user.password != request.password:
+            print(f"Login failed: Incorrect username or password for user '{request.username}'")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect username or password"
@@ -427,13 +491,21 @@ async def login(request: Login, db: Session = Depends(get_db)):
             expires_delta=access_token_expires
         )
         
-        print("Login successful")
-        print("=================\n")
+        print(f"Login successful for {role}: {user.username}")
         
-        print(f"Login successful for user: {user.username}")
-        print(f"Generated token: {token[:10]}...")
+        user_data = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": role
+        }
+        
+        if role == 'caretaker':
+            user_data["face_registered"] = user.face_descriptor is not None
+        else:
+            user_data["specialization"] = user.specialization
 
-        # Return user details along with the token
         return ResponseSchema(
             code=200,
             status="success",
@@ -441,13 +513,7 @@ async def login(request: Login, db: Session = Depends(get_db)):
             result={
                 "access_token": token, 
                 "token_type": "bearer",
-                "user": {
-                    "id": user.id,
-                    "username": user.username,
-                    "email": user.email,
-                    "full_name": user.full_name,
-                    "face_registered": user.face_descriptor is not None
-                }
+                "user": user_data
             }
         )
 

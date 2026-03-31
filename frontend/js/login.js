@@ -1,3 +1,19 @@
+const urlParams = new URLSearchParams(window.location.search);
+const role = urlParams.get('role');
+const loginTitle = document.getElementById('loginTitle');
+
+if (role) {
+    if (role === 'doctor') {
+        loginTitle.innerText = 'Doctor Login';
+        const regLink = document.querySelector('.form-footer a');
+        if (regLink) regLink.href = 'register.html?role=doctor';
+    } else if (role === 'caretaker') {
+        loginTitle.innerText = 'Caretaker Login';
+        const regLink = document.querySelector('.form-footer a');
+        if (regLink) regLink.href = 'register.html?role=caretaker';
+    }
+}
+
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     
@@ -22,10 +38,31 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
         const data = await response.json();
 
         if (response.ok) {
-            // Store the token
+            console.log("FULL RESPONSE:", data);
+
+            // Store the token and role
             localStorage.setItem('token', data.result.access_token);
-            // Redirect to the redesigned profile landing page
-            window.location.href = 'profile.html';
+            const userRole = data?.result?.user?.role;
+
+            if (!userRole) {
+                alert("Role not found in response");
+                console.error("Invalid response:", data);
+                return;
+            }
+
+            console.log("User role:", userRole);
+            localStorage.setItem('role', userRole);
+
+            // Normalize role and redirect
+            const roleNormalized = userRole.trim().toLowerCase();
+
+            if (roleNormalized === 'doctor') {
+                window.location.href = '/doctor_dashboard.html';
+            } else if (roleNormalized === 'caretaker') {
+                window.location.href = '/dashboard.html';
+            } else {
+                alert("Unknown role: " + userRole);
+            }
         } else {
             alert(data.detail || 'Login failed. Please try again.');
         }

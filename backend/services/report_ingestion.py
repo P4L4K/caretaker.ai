@@ -9,6 +9,7 @@ import json
 import re
 from datetime import date
 from dotenv import load_dotenv
+from utils.gemini_client import call_gemini
 
 load_dotenv(override=True)
 
@@ -76,24 +77,14 @@ Medical Report:
 """ + text[:8000]  # Limit text to avoid token overflow
 
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-        headers = {"Content-Type": "application/json"}
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "maxOutputTokens": 2000,
-                "temperature": 0.1,
-                "topP": 0.8
-            }
-        }
-
         print(f"[report_ingestion] Calling Gemini for structured extraction ({len(text)} chars)")
-        resp = requests.post(url, json=payload, headers=headers, timeout=60)
+        data = call_gemini({
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.1, "topP": 0.8}
+        }, timeout=60, caller="[report_ingestion]")
 
-        if resp.status_code == 200:
-            data = resp.json()
-            if "candidates" in data and data["candidates"]:
-                raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+        if data and "candidates" in data and data["candidates"]:
+            raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
 
                 # Clean markdown code fences if present (multiline-safe)
                 raw_text = raw_text.strip()
@@ -133,7 +124,6 @@ Medical Report:
                     print(f"[report_ingestion] Raw response: {raw_text[:500]}")
                     return empty_result
         else:
-            print(f"[report_ingestion] Gemini returned status {resp.status_code}")
             return empty_result
 
     except Exception as e:

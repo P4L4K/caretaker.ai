@@ -23,3 +23,5 @@ pillow
 pytesseract
 deepface
 python-socketio
+google-cloud-texttospeech
+google-generativeai

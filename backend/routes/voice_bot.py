@@ -6,19 +6,29 @@ from pydantic import BaseModel
 import os
 import requests
 from config import get_db
+from utils.gemini_client import call_gemini
 from models.users import ResponseSchema
 from tables.users import CareRecipient, CareTaker
 from repository.users import UsersRepo
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
-from tables.conversation_history import ProactiveReminder, ConversationMessage, MoodEnum, SenderEnum, TriggerTypeEnum, ReminderTypeEnum, RecurrenceEnum
-from services.voice_bot_engine import build_conversation_context, generate_system_prompt, analyze_mood, save_message, check_depression_risk
+from tables.conversation_history import (
+    ProactiveReminder, ConversationMessage, MoodEnum, SenderEnum,
+    TriggerTypeEnum, ReminderTypeEnum, RecurrenceEnum, VoiceBotPreferences
+)
+from services.voice_bot_engine import (
+    build_conversation_context, generate_system_prompt, analyze_mood,
+    save_message, check_depression_risk, get_content_recommendation, get_story_queries
+)
+from services.sentiment_engine import analyze_sentiment_with_history
 from services.proactive_triggers import get_pending_triggers, create_default_reminders
+from utils.tts_handler import generate_speech_base64, is_hindi
 
 load_dotenv()
 
 router = APIRouter(tags=["VoiceBot"])
+
 
 def _get_username_from_auth(auth_header: Optional[str]):
     if not auth_header:
@@ -34,6 +44,7 @@ def _get_username_from_auth(auth_header: Optional[str]):
     except Exception:
         return None
 
+
 def verify_and_get_caretaker(authorization: str, db: Session):
     username = _get_username_from_auth(authorization)
     if not username:
@@ -43,95 +54,406 @@ def verify_and_get_caretaker(authorization: str, db: Session):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return caretaker
 
+
+def _get_or_create_preferences(recipient_id: int, db: Session) -> VoiceBotPreferences:
+    prefs = db.query(VoiceBotPreferences).filter(VoiceBotPreferences.care_recipient_id == recipient_id).first()
+    if not prefs:
+        prefs = VoiceBotPreferences(
+            care_recipient_id=recipient_id,
+            favorite_songs=[],
+            favorite_stories=[],
+            mood_content_preferences={},
+            preferred_language="hi"
+        )
+        db.add(prefs)
+        db.commit()
+        db.refresh(prefs)
+    return prefs
+
+
+# ─────────────────────────────────────────────
+# Chat endpoint
+# ─────────────────────────────────────────────
 class ChatRequest(BaseModel):
     recipient_id: Optional[int] = 1
     text: str
     session_id: str = "default_session"
-    trigger_type: str = "user_initiated" # or proactive_checkin, reminder, etc.
-    language: str = "en"  # 'en' or 'hi' for Hindi
+    trigger_type: str = "user_initiated"
+    language: str = "en"
+    use_tts: bool = True
+
 
 @router.post('/voice-bot/chat', response_model=ResponseSchema)
 async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
     caretaker = verify_and_get_caretaker(authorization, db)
-    
-    recipient = db.query(CareRecipient).filter(CareRecipient.id == payload.recipient_id, CareRecipient.caretaker_id == caretaker.id).first()
+
+    recipient = db.query(CareRecipient).filter(
+        CareRecipient.id == payload.recipient_id,
+        CareRecipient.caretaker_id == caretaker.id
+    ).first()
     if not recipient:
         return ResponseSchema(code=404, status="error", message="Recipient not found")
-        
+
     user_text = payload.text
     if not user_text:
         return ResponseSchema(code=400, status="error", message="No text provided")
 
-    # 1. Analyze user mood if it's user initiated
-    trigger_enum = TriggerTypeEnum(payload.trigger_type) if payload.trigger_type in [t.value for t in TriggerTypeEnum] else TriggerTypeEnum.user_initiated
+    trigger_enum = (
+        TriggerTypeEnum(payload.trigger_type)
+        if payload.trigger_type in [t.value for t in TriggerTypeEnum]
+        else TriggerTypeEnum.user_initiated
+    )
+
     mood_result = {"mood": MoodEnum.neutral, "confidence": 0.5}
     if trigger_enum == TriggerTypeEnum.user_initiated:
         mood_result = analyze_mood(user_text)
 
-    # 2. Save User Message
     save_message(payload.recipient_id, SenderEnum.user, user_text, mood_result["mood"], trigger_enum, payload.session_id, db)
 
-    # 3. Build Context & System Prompt
-    context = build_conversation_context(payload.recipient_id, db)
-    system_prompt = generate_system_prompt(recipient.full_name, context, payload.language)
-    
-    # Check depression risk to maybe add an alert in response text
-    is_at_risk = check_depression_risk(payload.recipient_id, db)
-    
-    # 4. Call Gemini
-    api_key = os.environ.get('GEMINI_API_KEY')
-    api_endpoint = os.environ.get('GEMINI_API_ENDPOINT')
-    
-    if not api_key:
-        return ResponseSchema(code=500, status="error", message="Gemini API key not configured")
+    # Run sentiment analysis across history + current message
+    sentiment = analyze_sentiment_with_history(user_text, payload.recipient_id, db)
 
-    url = f"{api_endpoint}?key={api_key}" if api_endpoint else f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}'
+    # Override simple mood with history-aware mood if confidence is higher
+    if sentiment and sentiment["confidence"] >= mood_result["confidence"]:
+        mood_result["mood"] = MoodEnum(sentiment["current_mood"]) if sentiment["current_mood"] in [m.value for m in MoodEnum] else mood_result["mood"]
+
+    context = build_conversation_context(payload.recipient_id, db)
+    system_prompt = generate_system_prompt(recipient.full_name, context, payload.language, sentiment)
+    is_at_risk = check_depression_risk(payload.recipient_id, db) or sentiment.get("urgency") == "high"
+
+    if not os.environ.get('GEMINI_API_KEY'):
+        return ResponseSchema(code=500, status="error", message="Gemini API key not configured")
 
     gemini_payload = {
         "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser says: {user_text}"}]}],
         "generationConfig": {"maxOutputTokens": 1000, "temperature": 0.7}
     }
-    
+
     try:
-        resp = requests.post(url, json=gemini_payload, timeout=20)
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            if 'candidates' in data and data['candidates']:
+        data = call_gemini(gemini_payload, timeout=20, caller="[voice_bot/chat]")
+        if data and data.get('candidates'):
                 ai_text = data['candidates'][0]['content']['parts'][0]['text'].strip()
-                
-                # Save Bot Reply
                 save_message(payload.recipient_id, SenderEnum.bot, ai_text, MoodEnum.neutral, trigger_enum, payload.session_id, db)
-                
-                result_data = {
-                    "reply": ai_text,
-                    "mood_detected": mood_result["mood"].value,
-                    "depression_risk": is_at_risk
-                }
-                return ResponseSchema(code=200, status="success", message="AI response generated", result=result_data)
-        else:
-            return ResponseSchema(code=resp.status_code, status="error", message=f"Gemini API failed: {resp.status_code}")
+
+                # Attach content recommendation when mood is actionable
+                mood_str = mood_result["mood"].value
+                recommendation = None
+                if mood_str not in ("neutral",):
+                    recommendation = get_content_recommendation(mood_str)
+
+                # ── ADD TTS GENERATION ──
+                audio_base64 = ""
+                if payload.use_tts:
+                    # Detect if response is Hindi for correct voice selection
+                    lang_hi = "hi-IN" if is_hindi(ai_text) else "en-US"
+                    audio_base64 = generate_speech_base64(ai_text, lang_hi)
+
+                return ResponseSchema(
+                    code=200, status="success", message="AI response generated",
+                    result={
+                        "reply": ai_text,
+                        "audio_base64": audio_base64,
+                        "mood_detected": mood_str,
+                        "depression_risk": is_at_risk,
+                        "recommendation": recommendation,
+                        "sentiment": {
+                            "trend": sentiment.get("trend", "stable"),
+                            "dominant_mood": sentiment.get("dominant_mood", mood_str),
+                            "stability_score": sentiment.get("stability_score", 0.5),
+                            "summary": sentiment.get("summary", ""),
+                            "urgency": sentiment.get("urgency", "low"),
+                            "mood_timeline": sentiment.get("mood_timeline", [])
+                        }
+                    }
+                )
+        return ResponseSchema(code=500, status="error", message="Gemini API failed or quota exceeded")
     except Exception as e:
-        print(f"[voice_bot] Chat error: {e}")
+        print(f"[voice_bot/chat] Error: {e}")
         return ResponseSchema(code=500, status="error", message=f"Chat error: {str(e)}")
 
+
+# ─────────────────────────────────────────────
+# Detect mood from text + return content recommendation
+# ─────────────────────────────────────────────
+class MoodContentRequest(BaseModel):
+    text: str                        # User's mood description in any language
+    content_type: str = "music"      # "music" or "story"
+    recipient_id: Optional[int] = 1
+
+@router.post('/voice-bot/detect-and-recommend', response_model=ResponseSchema)
+async def detect_and_recommend(
+    payload: MoodContentRequest,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Analyzes user's text to detect mood, then returns a warm
+    Hinglish response + content recommendation (YouTube queries).
+    Used when user says 'play music' or 'sunao kahani' without
+    specifying mood — bot asks mood, user replies, this endpoint handles it.
+    """
+    verify_and_get_caretaker(authorization, db)
+
+    # 1. Full sentiment analysis — history + current message
+    sentiment = analyze_sentiment_with_history(payload.text, payload.recipient_id, db)
+    mood_str = sentiment["current_mood"]
+    confidence = sentiment["confidence"]
+    dominant_mood = sentiment["dominant_mood"]
+    trend = sentiment["trend"]
+
+    # If dominant historical mood differs from current and trend is worsening,
+    # weight the recommendation toward the dominant (persistent) mood
+    effective_mood = mood_str
+    if trend == "worsening" and dominant_mood != mood_str:
+        effective_mood = dominant_mood  # use persistent mood for recommendation
+
+    # 2. Get content recommendation for effective mood
+    recommendation = get_content_recommendation(effective_mood)
+
+    # 3. Generate a warm Hinglish confirmation message via Gemini
+    warm_message = recommendation.get("message", "Chalo kuch acha sunate hain 😊")
+
+    if os.environ.get('GEMINI_API_KEY') and confidence > 0.4:
+        prompt = (
+            f"An elderly user said: \"{payload.text}\"\n"
+            f"Current mood: {mood_str} (confidence: {confidence:.0%})\n"
+            f"Dominant mood recently: {dominant_mood}\n"
+            f"Emotional trend: {trend} (improving/worsening/stable)\n"
+            f"Emotional summary: {sentiment.get('summary', '')}\n"
+            f"They want: {payload.content_type}\n\n"
+            f"Write ONE short, warm, empathetic Hinglish sentence (max 15 words) acknowledging their emotional state "
+            f"and telling them you're going to play {'music' if payload.content_type == 'music' else 'a story'} for them. "
+            f"If trend is worsening, be extra nurturing. If improving, be celebratory. "
+            f"Use emojis. Be like a caring friend. Example: 'Samajh gaya... chalo kuch soothing gaane sunte hain ❤️'"
+        )
+        try:
+            data = call_gemini(
+                {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"maxOutputTokens": 60, "temperature": 0.7}},
+                timeout=8, caller="[detect-and-recommend]"
+            )
+            if data and data.get("candidates"):
+                warm_message = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except Exception as e:
+            print(f"[detect-and-recommend] Gemini warm message error: {e}")
+
+    return ResponseSchema(
+        code=200, status="success", message="Mood detected",
+        result={
+            "mood": mood_str,
+            "effective_mood": effective_mood,
+            "dominant_mood": dominant_mood,
+            "trend": trend,
+            "confidence": confidence,
+            "warm_message": warm_message,
+            "recommendation": recommendation,
+            "content_type": payload.content_type,
+            "sentiment_summary": sentiment.get("summary", ""),
+            "urgency": sentiment.get("urgency", "low"),
+            "mood_timeline": sentiment.get("mood_timeline", [])
+        }
+    )
+
+
+# ─────────────────────────────────────────────
+# Content recommendation by mood
+# ─────────────────────────────────────────────
+@router.get('/voice-bot/recommend/{recipient_id}', response_model=ResponseSchema)
+async def get_recommendation(
+    recipient_id: int, mood: str = "neutral",
+    authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
+):
+    verify_and_get_caretaker(authorization, db)
+    recommendation = get_content_recommendation(mood)
+    return ResponseSchema(code=200, status="success", message="Recommendation fetched", result=recommendation)
+
+
+@router.get('/voice-bot/preferences/{recipient_id}', response_model=ResponseSchema)
+async def get_preferences(
+    recipient_id: int,
+    authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
+):
+    verify_and_get_caretaker(authorization, db)
+    prefs = _get_or_create_preferences(recipient_id, db)
+    return ResponseSchema(
+        code=200, status="success", message="Preferences fetched",
+        result={
+            "preferred_language": prefs.preferred_language or "hi",
+            "favorite_songs": prefs.favorite_songs or [],
+            "favorite_stories": prefs.favorite_stories or [],
+            "mood_content_preferences": prefs.mood_content_preferences or {}
+        }
+    )
+
+
+# ─────────────────────────────────────────────
+# Story category queries
+# ─────────────────────────────────────────────
+@router.get('/voice-bot/story-queries', response_model=ResponseSchema)
+async def get_story_category_queries(
+    category: str = "moral",
+    authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
+):
+    verify_and_get_caretaker(authorization, db)
+    queries = get_story_queries(category)
+    return ResponseSchema(code=200, status="success", message="Story queries fetched", result={"category": category, "queries": queries})
+
+
+# ─────────────────────────────────────────────
+# Daily greeting check
+# ─────────────────────────────────────────────
+@router.get('/voice-bot/daily-greeting/{recipient_id}', response_model=ResponseSchema)
+async def check_daily_greeting(
+    recipient_id: int,
+    authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
+):
+    caretaker = verify_and_get_caretaker(authorization, db)
+    recipient = db.query(CareRecipient).filter(
+        CareRecipient.id == recipient_id, CareRecipient.caretaker_id == caretaker.id
+    ).first()
+    if not recipient:
+        return ResponseSchema(code=404, status="error", message="Recipient not found")
+
+    prefs = _get_or_create_preferences(recipient_id, db)
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    already_greeted = prefs.last_greeted_date == today
+
+    if not already_greeted:
+        prefs.last_greeted_date = today
+        db.commit()
+
+    hour = datetime.utcnow().hour
+    if hour < 12:
+        time_greeting = "Good morning! Shubh Prabhat 🌅"
+        hi_greeting = "Suprabhat! Aaj ka din bahut accha ho aapka ☀️"
+    elif hour < 17:
+        time_greeting = "Good afternoon! 🌤️"
+        hi_greeting = "Namaskar! Dopahar ki shubhkaamnayein 🌤️"
+    else:
+        time_greeting = "Good evening! 🌙"
+        hi_greeting = "Shubh Sandhya! Aaiye thodi baatein karein 🌙"
+
+    first_name = recipient.full_name.split()[0] if recipient.full_name else recipient.full_name
+
+    return ResponseSchema(
+        code=200, status="success", message="Daily greeting",
+        result={
+            "already_greeted": already_greeted,
+            "greeting_en": f"{time_greeting} {first_name}! How are you feeling today?",
+            "greeting_hi": f"{hi_greeting} {first_name} ji! Aaj aap kaisa feel kar rahe hain?",
+        }
+    )
+
+
+# ─────────────────────────────────────────────
+# Favorites – songs
+# ─────────────────────────────────────────────
+class FavoriteSongRequest(BaseModel):
+    recipient_id: int
+    title: str
+    query: str
+    youtube_id: str = ""
+
+
+@router.post('/voice-bot/favorites/song', response_model=ResponseSchema)
+async def add_favorite_song(
+    payload: FavoriteSongRequest,
+    authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
+):
+    verify_and_get_caretaker(authorization, db)
+    prefs = _get_or_create_preferences(payload.recipient_id, db)
+
+    songs = list(prefs.favorite_songs or [])
+    # Avoid duplicates
+    if not any(s.get("title") == payload.title for s in songs):
+        songs.append({"title": payload.title, "query": payload.query, "youtube_id": payload.youtube_id})
+        prefs.favorite_songs = songs
+        db.commit()
+
+    return ResponseSchema(code=200, status="success", message="Song saved to favorites", result={"favorites": songs})
+
+
+@router.get('/voice-bot/favorites/songs/{recipient_id}', response_model=ResponseSchema)
+async def get_favorite_songs(
+    recipient_id: int,
+    authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
+):
+    verify_and_get_caretaker(authorization, db)
+    prefs = _get_or_create_preferences(recipient_id, db)
+    return ResponseSchema(code=200, status="success", message="Favorite songs", result={"favorites": prefs.favorite_songs or []})
+
+
+@router.delete('/voice-bot/favorites/song', response_model=ResponseSchema)
+async def remove_favorite_song(
+    recipient_id: int, title: str,
+    authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
+):
+    verify_and_get_caretaker(authorization, db)
+    prefs = _get_or_create_preferences(recipient_id, db)
+    prefs.favorite_songs = [s for s in (prefs.favorite_songs or []) if s.get("title") != title]
+    db.commit()
+    return ResponseSchema(code=200, status="success", message="Song removed from favorites")
+
+
+# ─────────────────────────────────────────────
+# Favorites – stories
+# ─────────────────────────────────────────────
+class FavoriteStoryRequest(BaseModel):
+    recipient_id: int
+    title: str
+    category: str
+    youtube_id: str = ""
+
+
+@router.post('/voice-bot/favorites/story', response_model=ResponseSchema)
+async def add_favorite_story(
+    payload: FavoriteStoryRequest,
+    authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
+):
+    verify_and_get_caretaker(authorization, db)
+    prefs = _get_or_create_preferences(payload.recipient_id, db)
+
+    stories = list(prefs.favorite_stories or [])
+    if not any(s.get("title") == payload.title for s in stories):
+        stories.append({"title": payload.title, "category": payload.category, "youtube_id": payload.youtube_id})
+        prefs.favorite_stories = stories
+        db.commit()
+
+    return ResponseSchema(code=200, status="success", message="Story saved to favorites", result={"favorites": stories})
+
+
+@router.get('/voice-bot/favorites/stories/{recipient_id}', response_model=ResponseSchema)
+async def get_favorite_stories(
+    recipient_id: int,
+    authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
+):
+    verify_and_get_caretaker(authorization, db)
+    prefs = _get_or_create_preferences(recipient_id, db)
+    return ResponseSchema(code=200, status="success", message="Favorite stories", result={"favorites": prefs.favorite_stories or []})
+
+
+# ─────────────────────────────────────────────
+# Triggers
+# ─────────────────────────────────────────────
 @router.get('/voice-bot/triggers/{recipient_id}', response_model=ResponseSchema)
 async def fetch_triggers(recipient_id: int, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
     caretaker = verify_and_get_caretaker(authorization, db)
-    
     recipient = db.query(CareRecipient).filter(CareRecipient.id == recipient_id, CareRecipient.caretaker_id == caretaker.id).first()
     if not recipient:
         return ResponseSchema(code=404, status="error", message="Recipient not found")
-        
     triggers = get_pending_triggers(recipient_id, db)
     return ResponseSchema(code=200, status="success", message="Fetched triggers", result={"triggers": triggers})
 
+
+# ─────────────────────────────────────────────
+# Reminders
+# ─────────────────────────────────────────────
 class ReminderCreate(BaseModel):
     recipient_id: int
-    reminder_type: str # water, food, medicine, exercise, custom
+    reminder_type: str
     reminder_text: str
-    scheduled_time: str # HH:MM
+    scheduled_time: str
     recurrence: str = "daily"
+
 
 @router.post('/voice-bot/reminders', response_model=ResponseSchema)
 async def create_reminder(payload: ReminderCreate, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
@@ -139,10 +461,10 @@ async def create_reminder(payload: ReminderCreate, authorization: Optional[str] 
     recipient = db.query(CareRecipient).filter(CareRecipient.id == payload.recipient_id, CareRecipient.caretaker_id == caretaker.id).first()
     if not recipient:
         return ResponseSchema(code=404, status="error", message="Recipient not found")
-        
+
     r_type = ReminderTypeEnum(payload.reminder_type) if payload.reminder_type in [t.value for t in ReminderTypeEnum] else ReminderTypeEnum.custom
     recur = RecurrenceEnum(payload.recurrence) if payload.recurrence in [t.value for t in RecurrenceEnum] else RecurrenceEnum.daily
-    
+
     reminder = ProactiveReminder(
         care_recipient_id=payload.recipient_id,
         reminder_type=r_type,
@@ -152,14 +474,13 @@ async def create_reminder(payload: ReminderCreate, authorization: Optional[str] 
     )
     db.add(reminder)
     db.commit()
-    
     return ResponseSchema(code=200, status="success", message="Reminder created successfully")
+
 
 @router.get('/voice-bot/reminders/{recipient_id}', response_model=ResponseSchema)
 async def get_reminders(recipient_id: int, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
-    caretaker = verify_and_get_caretaker(authorization, db)
+    verify_and_get_caretaker(authorization, db)
     reminders = db.query(ProactiveReminder).filter(ProactiveReminder.care_recipient_id == recipient_id).all()
-    
     res = [{
         "id": r.id,
         "type": r.reminder_type.value,
@@ -168,24 +489,26 @@ async def get_reminders(recipient_id: int, authorization: Optional[str] = Header
         "recurrence": r.recurrence.value,
         "is_active": r.is_active
     } for r in reminders]
-    
     return ResponseSchema(code=200, status="success", message="Fetched reminders", result={"reminders": res})
+
 
 @router.delete('/voice-bot/reminders/{reminder_id}', response_model=ResponseSchema)
 async def delete_reminder(reminder_id: int, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
-    caretaker = verify_and_get_caretaker(authorization, db)
+    verify_and_get_caretaker(authorization, db)
     reminder = db.query(ProactiveReminder).filter(ProactiveReminder.id == reminder_id).first()
     if not reminder:
         return ResponseSchema(code=404, status="error", message="Reminder not found")
-    
     db.delete(reminder)
     db.commit()
     return ResponseSchema(code=200, status="success", message="Reminder deleted successfully")
 
+
+# ─────────────────────────────────────────────
+# Mood trend
+# ─────────────────────────────────────────────
 @router.get('/voice-bot/mood-trend/{recipient_id}', response_model=ResponseSchema)
 async def get_mood_trend(recipient_id: int, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
-    caretaker = verify_and_get_caretaker(authorization, db)
-    
+    verify_and_get_caretaker(authorization, db)
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
     recent_messages = db.query(ConversationMessage).filter(
         ConversationMessage.care_recipient_id == recipient_id,
@@ -193,23 +516,43 @@ async def get_mood_trend(recipient_id: int, authorization: Optional[str] = Heade
         ConversationMessage.sender == SenderEnum.user,
         ConversationMessage.mood_detected != None
     ).all()
-    
     mood_counts = {}
     for msg in recent_messages:
         mood = msg.mood_detected.value if msg.mood_detected else "unknown"
         mood_counts[mood] = mood_counts.get(mood, 0) + 1
-        
     is_at_risk = check_depression_risk(recipient_id, db)
-    
     return ResponseSchema(code=200, status="success", message="Fetched mood trend", result={"trend": mood_counts, "depression_risk": is_at_risk})
 
+
+# ─────────────────────────────────────────────
+# Init default reminders
+# ─────────────────────────────────────────────
 @router.post('/voice-bot/init-reminders/{recipient_id}', response_model=ResponseSchema)
 async def init_reminders(recipient_id: int, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
-    caretaker = verify_and_get_caretaker(authorization, db)
-    # Check if they already have reminders
+    verify_and_get_caretaker(authorization, db)
     existing = db.query(ProactiveReminder).filter(ProactiveReminder.care_recipient_id == recipient_id).count()
     if existing > 0:
         return ResponseSchema(code=400, status="error", message="Reminders already initialized")
-        
     create_default_reminders(recipient_id, db)
     return ResponseSchema(code=200, status="success", message="Default reminders initialized")
+
+
+# ── STANDALONE TTS ENDPOINT ──
+class TTSRequest(BaseModel):
+    text: str
+    language_code: str = "hi-IN"
+
+@router.post('/voice-bot/tts', response_model=ResponseSchema)
+async def get_standalone_tts(payload: TTSRequest):
+    """Generates audio for given text using Google Cloud TTS Neural2."""
+    if not payload.text:
+        return ResponseSchema(code=400, status="error", message="No text provided")
+    
+    audio_b64 = generate_speech_base64(payload.text, payload.language_code)
+    if not audio_b64:
+        return ResponseSchema(code=500, status="error", message="TTS generation failed. Check credentials/quota.")
+    
+    return ResponseSchema(
+        code=200, status="success", message="TTS generated",
+        result={"audio_base64": audio_b64}
+    )

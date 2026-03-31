@@ -15,6 +15,20 @@ from pydantic import BaseModel
 class RemarksModel(BaseModel):
     remarks: str
 
+class PrescriptionModel(BaseModel):
+    medicine_name: str
+    dosage: str
+    frequency: str
+    schedule_time: str
+    duration_days: int
+    notes: str = ""
+    current_stock: int = 0
+    doses_per_day: int = 1
+
+class LabOrderModel(BaseModel):
+    test_name: str
+    doctor_notes: str = ""
+
 router = APIRouter(tags=["Doctor Dashboard"])
 
 
@@ -283,6 +297,29 @@ def get_patient_clinical_summary(recipient_id: int, db: Session = Depends(get_db
         "clinical_summary": clinical_summary,
     }
 
+class AIChatModel(BaseModel):
+    message: str
+    history: list = []
+
+@router.post("/doctor/patients/{recipient_id}/ai_chat")
+def patient_ai_chat(recipient_id: int, model: AIChatModel, db: Session = Depends(get_db)):
+    # 1. Get patient context using existing method
+    try:
+        context = get_patient_clinical_summary(recipient_id, db)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    # 2. Call Gemini
+    from utils.summarizer import chat_with_patient_ai
+    
+    answer = chat_with_patient_ai(
+        patient_context=context,
+        chat_history=model.history,
+        user_message=model.message
+    )
+    
+    return {"reply": answer}
+
 @router.post("/doctor/patients/{recipient_id}/remarks")
 def update_doctor_remarks(recipient_id: int, model: RemarksModel, db: Session = Depends(get_db)):
     from tables.users import CareRecipient
@@ -292,3 +329,76 @@ def update_doctor_remarks(recipient_id: int, model: RemarksModel, db: Session = 
     recipient.doctor_remarks = model.remarks
     db.commit()
     return {"message": "Remarks updated successfully"}
+
+@router.post("/doctor/patients/{recipient_id}/prescribe")
+def prescribe_medication(recipient_id: int, model: PrescriptionModel, db: Session = Depends(get_db)):
+    from tables.users import CareRecipient
+    from tables.medications import Medication, MedicationStatus
+    from tables.medical_conditions import MedicalAlert, AlertType, AlertSeverity
+
+    recipient = db.query(CareRecipient).filter(CareRecipient.id == recipient_id).first()
+    if not recipient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    # 1. Create Medication
+    new_med = Medication(
+        care_recipient_id=recipient_id,
+        medicine_name=model.medicine_name,
+        dosage=model.dosage,
+        frequency=model.frequency,
+        schedule_time=model.schedule_time,
+        start_date=date.today(),
+        end_date=date.today() + timedelta(days=model.duration_days),
+        status=MedicationStatus.active,
+        current_stock=model.current_stock,
+        doses_per_day=model.doses_per_day,
+        auto_order_enabled=True
+    )
+    db.add(new_med)
+
+    # 2. Create Notification/Alert for the Patient
+    alert = MedicalAlert(
+        care_recipient_id=recipient_id,
+        alert_type=AlertType.new_diagnosis, # Using new_diagnosis as a filler for now, or just a generic one
+        message=f"Dr. has prescribed new medication: {model.medicine_name} ({model.dosage}). Please follow the schedule: {model.frequency}.",
+        severity=AlertSeverity.medium,
+        is_read=False
+    )
+    db.add(alert)
+
+    db.commit()
+    return {"message": "Prescription added and notification sent successfully"}
+
+@router.post("/doctor/patients/{recipient_id}/lab_order")
+def order_lab_test(recipient_id: int, model: LabOrderModel, db: Session = Depends(get_db)):
+    from tables.users import CareRecipient
+    from tables.medical_conditions import LabOrderDetail, MedicalAlert, AlertType, AlertSeverity
+    
+    recipient = db.query(CareRecipient).filter(CareRecipient.id == recipient_id).first()
+    if not recipient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    # 1. Create Lab Order record
+    new_order = LabOrderDetail(
+        care_recipient_id=recipient_id,
+        test_name=model.test_name,
+        doctor_notes=model.doctor_notes,
+        status="pending"
+    )
+    db.add(new_order)
+
+    # 2. Create Notification/Alert for the Caretaker
+    alert = MedicalAlert(
+        care_recipient_id=recipient_id,
+        alert_type=AlertType.monitoring_gap, 
+        message=f"Dr. has ordered a new lab test: {model.test_name}. Please book an appointment with Dr. Lal PathLabs.",
+        severity=AlertSeverity.medium,
+        is_read=False
+    )
+    db.add(alert)
+
+    db.commit()
+    return {
+        "message": "Lab order recorded. Redirecting to booking service...",
+        "redirect_url": "https://www.lalpathlabs.com/"
+    }

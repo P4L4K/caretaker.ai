@@ -217,3 +217,33 @@ class MedicalAlert(Base):
     # Relationships
     care_recipient = relationship("CareRecipient", back_populates="medical_alerts")
     condition = relationship("PatientCondition", foreign_keys=[condition_id])
+
+
+# ---------- Lab Orders (Doctor Requests) ----------
+
+class LabOrderDetail(Base):
+    __tablename__ = "lab_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    care_recipient_id = Column(
+        Integer,
+        ForeignKey("care_recipients.id", ondelete="CASCADE"),
+        nullable=False, index=True
+    )
+    
+    test_name = Column(String, nullable=False)
+    order_date = Column(Date, default=datetime.date.today, nullable=False)
+    status = Column(String, default="pending")  # pending, completed, cancelled
+    doctor_notes = Column(Text, nullable=True)
+    
+    # Optional link to the result once it arrives
+    results_report_id = Column(
+        Integer,
+        ForeignKey("medical_reports.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    # Relationships
+    care_recipient = relationship("CareRecipient", back_populates="lab_orders")

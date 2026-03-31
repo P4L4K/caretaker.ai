@@ -2,6 +2,7 @@ import os
 from io import BytesIO
 import re
 from dotenv import load_dotenv
+from utils.gemini_client import call_gemini
 
 # Ensure environmental variables are loaded
 load_dotenv(override=True)
@@ -199,15 +200,10 @@ Medical Document:
                 ]
             }
             
-            url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}'
             print(f'[summarizer] Calling Gemini REST API for clinical extraction')
-            resp = requests.post(url, json=payload, headers=headers, timeout=60)
-            print(f'[summarizer] Gemini response status: {resp.status_code}')
-            
-            if resp.status_code == 200:
+            data = call_gemini(payload, timeout=60, caller="[summarizer/clinical]")
+            if data:
                 try:
-                    data = resp.json()
-                    # Extract text from Gemini response
                     if 'candidates' in data and len(data['candidates']) > 0:
                         candidate = data['candidates'][0]
                         if 'content' in candidate and 'parts' in candidate['content']:
@@ -217,9 +213,7 @@ Medical Document:
                 except Exception as e:
                     print(f'[summarizer] Failed to parse Gemini response: {e}')
                     return ''
-            else:
-                print(f'[summarizer] Gemini API returned status {resp.status_code}')
-                return ''
+            return ''
                 
     except Exception as e:
         print(f'[summarizer] Clinical extraction failed: {e}')
@@ -262,14 +256,6 @@ def summarize_text_via_gemini(text: str, target_words: int = 250) -> str:
         return local_summary(text)
 
     try:
-        # Build the URL - use gemini-2.5-flash as default if endpoint not set
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-        
-        # Set up headers and payload according to Gemini API spec
-        headers = {
-            'Content-Type': 'application/json'
-        }
-        
         # Log the input text for debugging
         print(f'[summarizer] Input text length: {len(text)} characters')
         if len(text) > 200:
@@ -335,14 +321,10 @@ Medical Document Text:
             }
         }
         
-        print(f'[summarizer] Calling Gemini endpoint {url} (payload words approx {len(prompt.split())})')
-        resp = requests.post(url, json=payload, headers=headers, timeout=60)
-        print(f'[summarizer] Gemini response status: {getattr(resp, "status_code", "?")}')
-        
-        if resp.status_code == 200:
+        print(f'[summarizer] Calling Gemini (payload words approx {len(prompt.split())})')
+        data = call_gemini(payload, timeout=60, caller="[summarizer/text]")
+        if data:
             try:
-                data = resp.json()
-                # Extract text from Gemini response
                 if 'candidates' in data and data['candidates']:
                     candidate = data['candidates'][0]
                     if 'content' in candidate and 'parts' in candidate['content']:
@@ -380,10 +362,6 @@ Medical Document Text:
             except Exception as e:
                 print(f'[summarizer] Failed to parse Gemini response: {e}')
                 return local_summary(text)
-        
-        print(f'[summarizer] Gemini call failed with status {resp.status_code} — using local summary')
-        if hasattr(resp, 'text'):
-            print(f'[summarizer] Response text: {resp.text[:500]}...')  # Log first 500 chars of response
         return local_summary(text)
         
     except Exception as e:
@@ -503,33 +481,114 @@ INDIVIDUAL REPORT SUMMARIES:
 {text}""".format(text=history_text.strip())
 
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-        headers = {'Content-Type': 'application/json'}
         payload = {
             'contents': [{'parts': [{'text': prompt}]}],
-            "generationConfig": {
-                "maxOutputTokens": 2000,
-                "temperature": 0.2
-            }
+            "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.2}
         }
-        
         print(f'[summarizer] Calling Gemini for AGGREGATE summary (history_text_len={len(history_text)})')
-        resp = requests.post(url, json=payload, headers=headers, timeout=60)
-        print(f'[summarizer] Gemini Aggregate response status: {resp.status_code}')
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            if 'candidates' in data and len(data['candidates']) > 0:
-                summary = data['candidates'][0]['content']['parts'][0]['text']
-                # Clean up formatting for the parser
-                summary = summary.replace('•', '\n•')
-                summary = '\n'.join(line.strip() for line in summary.split('\n'))
-                print(f'[summarizer] Aggregate summary produced: {len(summary.split())} words')
-                return summary
-        
-        if hasattr(resp, 'text'):
-            print(f'[summarizer] Aggregate failure response: {resp.text[:500]}')
+        data = call_gemini(payload, timeout=60, caller="[summarizer/aggregate]")
+        if data and 'candidates' in data and len(data['candidates']) > 0:
+            summary = data['candidates'][0]['content']['parts'][0]['text']
+            summary = summary.replace('•', '\n•')
+            summary = '\n'.join(line.strip() for line in summary.split('\n'))
+            print(f'[summarizer] Aggregate summary produced: {len(summary.split())} words')
+            return summary
         return "Failed to synthesize aggregate history."
     except Exception as e:
         print(f'[summarizer] Aggregate synthesis failed: {e}')
         return "Synthesis error."
+
+def chat_with_patient_ai(patient_context: dict, chat_history: list, user_message: str) -> str:
+    """Answers a doctor's question about a specific patient using Gemini 2.5 Flash with full clinical context."""
+    import json
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key or not requests:
+        return 'Unable to use AI Clinical Chat without Gemini API key.'
+
+    # Convert context dict to structured string to feed to the AI
+    # We include more data here for the doctor's expert review
+    safe_context = {
+        "patient_profile": patient_context.get("general_info", {}),
+        "active_conditions": patient_context.get("conditions", []),
+        "medications_and_adherence": {
+            "current": patient_context.get("medications", []),
+            "adherence_stats": patient_context.get("medication_adherence", {})
+        },
+        "allergies": patient_context.get("allergies", []),
+        "vitals_history": patient_context.get("vitals", [])[-15:], # Last 15 readings for trend analysis
+        "recent_clinical_alerts": patient_context.get("alerts", [])[:15], 
+        "lab_metrics_trends": patient_context.get("lab_trends", {}),
+        "respiratory_events_7d": patient_context.get("audio_summary", {}),
+        "ai_generated_clinical_summary": patient_context.get("clinical_summary", "")
+    }
+    context_str = json.dumps(safe_context, indent=2, default=str)
+
+    system_prompt = f"""You are a Senior Clinical AI Assistant powered by Gemini 2.5 Flash. 
+You are assisting a licensed physician in analyzing a patient's case.
+
+[STRICT PROTOCOL]:
+1. ANSWERING: Use ONLY the provided [Patient Context] facts. 
+2. REASONING: Connect dots between different data points (e.g., if BP is high and medication adherence is low, mention the correlation).
+3. CLINICAL TONE: Be professional, objective, and precise. Use medical terminology correctly.
+4. LIMITATIONS: If the data is insufficient for a conclusion, state: "The provided clinical data does not contain sufficient information to determine [X]."
+5. HALLUCINATION: DO NOT invent vitals, lab results, or patient history.
+
+[Patient Context]:
+{context_str}
+"""
+
+    # Format history for Gemini API
+    # chat_history is list of {"role": "user"|"model", "content": "..."}
+    contents = []
+    
+    # Add previous turns
+    for turn in chat_history:
+        contents.append({
+            "role": turn["role"],
+            "parts": [{"text": turn["content"]}]
+        })
+    
+    # Add current message
+    # If no history, we include the system prompt/context in the first user message
+    current_prompt = user_message
+    if not chat_history:
+        current_prompt = f"{system_prompt}\n\n[Doctor's Query]: {user_message}"
+    else:
+        # If there is history, we still remind it of the context briefly if needed, 
+        # but Gemini usually holds the context well if it's in the first turn.
+        # However, to be safe and ensure context is always fresh:
+        current_prompt = f"[Note: Context Updated]\n{user_message}"
+
+    contents.append({
+        "role": "user",
+        "parts": [{"text": current_prompt}]
+    })
+    
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        headers = {'Content-Type': 'application/json'}
+        
+        payload = {
+            'contents': contents,
+            "generationConfig": {
+                "maxOutputTokens": 1024,
+                "temperature": 0.2, # Lower temperature for clinical accuracy
+                "topP": 0.8
+            }
+        }
+        
+        print(f"[summarizer] Sending clinical chat request (turns: {len(contents)})")
+        resp = requests.post(url, json=payload, headers=headers, timeout=60)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            if 'candidates' in data and len(data['candidates']) > 0:
+                answer = data['candidates'][0]['content']['parts'][0]['text']
+                return answer
+        else:
+            print(f"[summarizer] Gemini API error {resp.status_code}: {resp.text}")
+        
+        return "I apologize, but I am unable to analyze the clinical data at this moment."
+    except Exception as e:
+        print(f"[summarizer] AI Case Chat failed: {e}")
+        return "An error occurred during clinical data analysis."

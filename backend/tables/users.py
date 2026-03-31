@@ -22,7 +22,7 @@ class CareTaker(Base):
     phone_number = Column(String(10), unique=True, index=True, nullable=False)
     password = Column(String, nullable=False)
     full_name = Column(String, nullable=True)
-    face_descriptor = Column(JSON, nullable=True)  # ADD THIS LINE - stores face data as JSON array
+    face_descriptor = Column(JSON, nullable=True)  # stores face data as JSON array
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -31,6 +31,21 @@ class CareTaker(Base):
 
     # Relationship: caretaker -> video analyses (history)
     video_analyses = relationship("VideoAnalysis", back_populates="caretaker")
+
+
+# ---------- Doctor Table ----------
+class Doctor(Base):
+    __tablename__ = "doctors"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    username = Column(String, unique=True, index=True, nullable=False)
+    phone_number = Column(String(10), unique=True, index=True, nullable=False)
+    password = Column(String, nullable=False)
+    full_name = Column(String, nullable=True)
+    specialization = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 
 # ---------- CareRecipient Table ----------
@@ -97,3 +112,4 @@ class CareRecipient(Base):
     active_medications = relationship('Medication', back_populates='care_recipient', cascade='all, delete-orphan')
     medication_history = relationship('MedicationHistory', back_populates='care_recipient', cascade='all, delete-orphan')
     allergies = relationship('Allergy', back_populates='care_recipient', cascade='all, delete-orphan')
+    lab_orders = relationship('LabOrderDetail', back_populates='care_recipient', cascade='all, delete-orphan')

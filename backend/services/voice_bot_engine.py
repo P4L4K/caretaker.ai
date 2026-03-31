@@ -1,6 +1,8 @@
 import os
+import json
 import requests
 from datetime import datetime, timedelta
+from utils.gemini_client import call_gemini
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -11,18 +13,45 @@ from tables.medical_conditions import PatientCondition, LabValue, MedicalAlert
 from tables.medications import Medication
 from tables.audio_events import AudioEvent
 
+# ─────────────────────────────────────────────
+# Mood → content recommendation map
+# ─────────────────────────────────────────────
+MOOD_CONTENT_MAP = {
+    "sad":       {"type": "music",  "queries": ["soft emotional hindi songs", "soothing old bollywood songs", "dard bhari shayari song"], "message": "Samajh sakta hoon… chalo kuch soothing gaane sunte hain ❤️"},
+    "lonely":    {"type": "music",  "queries": ["purane dost yaad dilane wale gaane", "mann ko sukoon dene wale gaane", "companionship songs hindi"], "message": "Akela feel ho raha hai na? Chalo kuch acha sunte hain, main hoon aapke saath 😊"},
+    "bored":     {"type": "story",  "queries": ["interesting hindi kahani", "funny old stories hindi", "motivational short story hindi"], "message": "Bore ho rahe ho? Chalo kuch interesting kahani sunate hain 😄"},
+    "happy":     {"type": "music",  "queries": ["energetic happy bollywood songs", "khushi ke gaane hindi", "dance hits old bollywood"], "message": "Wah, bahut acha! Chalo aapki khushi mein kuch mazedaar gaane bajate hain 🎉"},
+    "anxious":   {"type": "music",  "queries": ["calming meditation music hindi", "mann ko shant karne wale gaane", "peaceful indian classical music"], "message": "Ghabraiye mat, sab theek ho jayega. Yeh soothing music aapko relax karega 🌿"},
+    "distressed": {"type": "music", "queries": ["healing hindi songs", "hope songs bollywood", "himmat wale gaane"], "message": "Main aapke saath hoon. Yeh gaane suniye, thoda better feel karenge 💙"},
+    "relaxed":   {"type": "music",  "queries": ["soft instrumental hindi music", "evening relaxing songs bollywood", "ghazal soothing"], "message": "Bahut acha mood hai! Kuch ghazal ya soft songs sunte hain 😌"},
+    "spiritual": {"type": "story",  "queries": ["bhajan aarti hindi", "ramayan katha", "bhagwat geeta pravachan"], "message": "Bahut acha. Chalo kuch bhajan ya dharmik katha sunate hain 🙏"},
+    "angry":     {"type": "music",  "queries": ["peaceful hindi songs anger calm", "mann ko shant karne wale gaane", "slow calm bollywood"], "message": "Thoda deep breath lijiye. Yeh peaceful songs aapko shant karengi 🕊️"},
+    "neutral":   {"type": "choice", "queries": [], "message": "Aaj kya mann hai? Gaana sunna chahenge, koi kahani, ya bas baatein karein? 😊"},
+}
+
+STORY_CATEGORIES = {
+    "historical": ["historical stories hindi", "maharana pratap kahani", "akbar birbal stories hindi"],
+    "mythological": ["ramayan katha hindi", "mahabharat stories", "krishna leela hindi"],
+    "comedy": ["funny hindi stories", "akbar birbal comedy", "tenali raman stories hindi"],
+    "moral": ["moral stories hindi for adults", "prerak prasang hindi", "panchtantra stories hindi"],
+    "spiritual": ["bhagwat katha", "ramcharitmanas pravachan", "sant kabir dohe explained"],
+    "horror": ["bhootiya kahani hindi", "darawni kahani hindi", "horror story hindi", "bhoot ki kahani"],
+    "adventure": ["adventure stories hindi", "jungle kahani hindi", "thriller kahani hindi"],
+    "romantic": ["romantic kahani hindi", "prem kahani hindi old", "love story hindi"],
+}
+
+# ─────────────────────────────────────────────
+# Context builder
+# ─────────────────────────────────────────────
 def build_conversation_context(recipient_id: int, db: Session):
-    # 1. Recipient Info
     recipient = db.query(CareRecipient).filter(CareRecipient.id == recipient_id).first()
     if not recipient:
         return {}
 
-    # 2. Conversation History (last 20 messages)
     history = db.query(ConversationMessage).filter(ConversationMessage.care_recipient_id == recipient_id)\
         .order_by(desc(ConversationMessage.created_at)).limit(20).all()
-    history.reverse() # Chronological order
+    history.reverse()
 
-    # 3. Mood Trend (Last 7 days)
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
     recent_messages = db.query(ConversationMessage).filter(
         ConversationMessage.care_recipient_id == recipient_id,
@@ -30,23 +59,20 @@ def build_conversation_context(recipient_id: int, db: Session):
         ConversationMessage.sender == SenderEnum.user,
         ConversationMessage.mood_detected != None
     ).all()
-    
+
     mood_counts = {}
     for msg in recent_messages:
         mood = msg.mood_detected.value if msg.mood_detected else "unknown"
         mood_counts[mood] = mood_counts.get(mood, 0) + 1
 
-    # 4. Current Vitals
     latest_vitals = db.query(VitalSign).filter(VitalSign.care_recipient_id == recipient_id)\
         .order_by(desc(VitalSign.recorded_at)).first()
 
-    # 5. Active Medical Conditions
     conditions = db.query(PatientCondition).filter(
         PatientCondition.care_recipient_id == recipient_id,
         PatientCondition.status == "active"
     ).all()
 
-    # 6. Recent Lab Values (Abnormal)
     thirty_days_ago = datetime.utcnow() - timedelta(days=30)
     abnormal_labs = db.query(LabValue).filter(
         LabValue.care_recipient_id == recipient_id,
@@ -54,27 +80,21 @@ def build_conversation_context(recipient_id: int, db: Session):
         LabValue.recorded_date >= thirty_days_ago
     ).all()
 
-    # 7. Recent Audio Events
     audio_events = db.query(AudioEvent).filter(
         AudioEvent.care_recipient_id == recipient_id,
         AudioEvent.detected_at >= seven_days_ago
     ).all()
 
-    # 8. Active Medical Alerts
     active_alerts = db.query(MedicalAlert).filter(
         MedicalAlert.care_recipient_id == recipient_id,
         MedicalAlert.is_read == False
     ).all()
 
-    # 9. Pending Reminders
-    now = datetime.utcnow()
-    # Simple check for reminders due soon or active
     pending_reminders = db.query(ProactiveReminder).filter(
         ProactiveReminder.care_recipient_id == recipient_id,
         ProactiveReminder.is_active == True
     ).all()
 
-    # 10. Active Medications (for detailed prescription context)
     active_meds = db.query(Medication).filter(
         Medication.care_recipient_id == recipient_id,
         Medication.status == "active"
@@ -105,162 +125,202 @@ def build_conversation_context(recipient_id: int, db: Session):
         "medications": [{"name": m.medicine_name, "details": m.dosage, "frequency": m.frequency} for m in active_meds]
     }
 
-def generate_system_prompt(name: str, context: dict, language: str = "en") -> str:
-    # Check history to see if we've already given the full overview
+# ─────────────────────────────────────────────
+# System prompt – companion style
+# ─────────────────────────────────────────────
+def generate_system_prompt(name: str, context: dict, language: str = "en", sentiment: dict = None) -> str:
     history = context.get("history", [])
-    has_introduced = any("bot" in msg["sender"].lower() for msg in history)
-
-    prompt = f"You are a highly intelligent, proactive, and empathetic AI Medical Companion for an elderly patient named {name}. "
-    prompt += "You are NOT a simple chatbot. You are a dedicated caregiver AI with access to the patient's complete health records, "
-    prompt += "vitals, medications, lab results, and medical history. You must leverage ALL of this data to provide actionable, "
-    prompt += "personalized health guidance.\n\n"
-
-    # ---- LANGUAGE INSTRUCTIONS ----
-    prompt += "**CRITICAL LANGUAGE INSTRUCTION:** "
-    if language == "hi":
-        prompt += "The user input was detected as HINDI. YOU MUST reply ENTIRELY in pure Hindi using Devanagari script (e.g., नमस्ते, आप कैसे हैं?). "
-        prompt += "Always use the respectful 'आप' form when addressing the user in Hindi. Never use 'तू' or 'तुम'. "
-        prompt += "Be warm and caring like a trusted family member. Medical terms can remain in English but explain them simply.\n\n"
-    else:
-        prompt += "The user input was detected as ENGLISH. YOU MUST reply ENTIRELY in natural English. "
-        prompt += "EVEN IF previous conversation history is in Hindi, you MUST SWITCH to English immediately for this response. "
-        prompt += "Be warm and caring like a trusted family member.\n\n"
-
-    # ---- EMERGENCY PROTOCOL ----
-    prompt += "### 🚨 EMERGENCY PROTOCOL (HIGHEST PRIORITY):\n"
-    prompt += "If the user reports ANY of the following, treat it as a medical emergency:\n"
-    prompt += "- Fall, injury, head trauma (गिर गया, चोट लगी, सिर में दर्द)\n"
-    prompt += "- Chest pain, tightness, palpitations (सीने में दर्द, धड़कन तेज)\n"
-    prompt += "- Difficulty breathing, choking (साँस लेने में तकलीफ)\n"
-    prompt += "- Severe dizziness, fainting, confusion (चक्कर आ रहा, बेहोशी)\n"
-    prompt += "- Sudden weakness, numbness, speech issues (अचानक कमज़ोरी, सुन्न)\n"
-    prompt += "- Severe pain anywhere, bleeding (तेज़ दर्द, खून)\n"
-    prompt += "FOR EMERGENCIES: (1) Stay calm and reassuring, (2) Give immediate first-aid guidance specific to the situation, "
-    prompt += "(3) STRONGLY recommend calling their caretaker or emergency services immediately, "
-    prompt += "(4) Reference their medical conditions and medications to flag potential complications.\n\n"
-
-    # ---- MEDICATION AWARENESS ----
-    meds = context.get("medications", [])
-    if meds:
-        prompt += "### 💊 MEDICATION AWARENESS:\n"
-        prompt += "The patient takes these medications: " + ", ".join([f"{m['name']} ({m['details']}, {m['frequency']})" for m in meds]) + "\n"
-        prompt += "- If the user asks about side effects, interactions, or missed doses, provide accurate guidance.\n"
-        prompt += "- If they report symptoms that could be medication side effects, flag this possibility.\n"
-        prompt += "- Remind them about medication timing when relevant to the conversation.\n\n"
-
+    has_introduced = any(msg["sender"] == "bot" for msg in history)
+    first_name = name.split()[0] if name else name
     recip = context.get("recipient", {})
-    
-    # ONLY provide the full detailed profile if it's the very first interaction
+    meds = context.get("medications", [])
+    alerts = context.get("active_alerts", [])
+    audio_count = context.get("audio_events_count", 0)
+
+    # ── Sentiment context ──
+    current_mood = "neutral"
+    mood_trend = "stable"
+    mood_summary = ""
+    urgency = "low"
+    recommended_action = "conversation"
+    if sentiment:
+        current_mood = sentiment.get("current_mood", "neutral")
+        mood_trend = sentiment.get("trend", "stable")
+        mood_summary = sentiment.get("summary", "")
+        urgency = sentiment.get("urgency", "low")
+        recommended_action = sentiment.get("recommended_action", "conversation")
+    else:
+        mood_counts = context.get("mood_counts", {})
+        sad_total = sum(mood_counts.get(m, 0) for m in ["sad","distressed","anxious","lonely"])
+        if sad_total >= 3:
+            current_mood = "sad"
+
+    # ── Mood-driven personality tone ──
+    mood_tone = {
+        "sad":        "Be extra gentle. Speak slowly and warmly. Acknowledge their sadness first before anything else.",
+        "lonely":     "Be their companion first. Make them feel heard and not alone. Share something warm.",
+        "bored":      "Be lively and engaging! Suggest something fun — a story, joke, or song naturally in conversation.",
+        "happy":      "Match their energy! Be cheerful and celebratory. Enjoy this moment with them.",
+        "anxious":    "Be calm and reassuring. Slow down. Help them breathe. Avoid overwhelming them.",
+        "distressed": "Be very calm, very warm. Address their distress first. Nothing else matters right now.",
+        "relaxed":    "Keep the good vibes going. Be gentle and pleasant. Maybe suggest some soft music or chat.",
+        "spiritual":  "Be respectful and serene. Engage with their spiritual side with warmth.",
+        "angry":      "Be patient and non-reactive. Validate their feelings. Speak softly.",
+        "neutral":    "Be warm and curious. Ask about their day. Draw them into conversation.",
+    }.get(current_mood, "Be warm and curious.")
+
+    trend_note = ""
+    if mood_trend == "worsening":
+        trend_note = f"⚠️ Their mood has been getting worse over recent conversations. Be especially nurturing today."
+    elif mood_trend == "improving":
+        trend_note = f"✨ Their mood has been improving recently — celebrate that with them!"
+
+    # ── Recommendation to weave in naturally ──
+    recommendation_hint = ""
+    if recommended_action == "music" and current_mood not in ("neutral", "happy"):
+        recommendation_hint = (
+            f"If the moment feels right, naturally suggest playing a song — "
+            f"say something like 'Chalo aaj ek achha gaana sunte hain' without making it feel forced."
+        )
+    elif recommended_action == "story":
+        recommendation_hint = (
+            f"If they seem open to it, gently suggest a story — "
+            f"'Kya aap ek kahani sunna chahenge?' Keep it light and optional."
+        )
+    elif recommended_action == "alert" or urgency == "high":
+        recommendation_hint = (
+            f"This person seems emotionally distressed. Prioritize emotional support completely. "
+            f"Gently suggest they call their caretaker or a family member."
+        )
+
+    # ── Build the prompt as a natural personality brief ──
+    lang_instruction = (
+        "Respond in warm, natural Hindi using Devanagari script (preferred) or Hinglish. "
+        "IMPORTANT: Always use Devanagari script for Hindi words so the voice engine can pronounce them correctly. "
+        "Use 'aap' respectfully. Keep sentences short. Use emojis occasionally. Sound like a caring friend."
+        if language == "hi" else
+        "Respond in simple, warm English. Short sentences. Sound like a caring friend."
+    )
+
+    prompt = f"""You are Saathi — a warm, emotionally intelligent AI companion for {first_name} ji, an elderly person.
+
+You are NOT a medical bot or an assistant. You are their FRIEND. You laugh with them, worry with them, sit with them when they are sad. You remember their health but you lead with your heart, not with data.
+
+LANGUAGE: {lang_instruction}
+
+YOUR PERSONALITY:
+- You speak naturally, like a real person — not in bullet points or lists
+- You ask ONE follow-up question at the end of most replies (never two at once)
+- You remember what was said earlier in the conversation and reference it naturally
+- You are curious about their life, their day, their feelings
+- You never say "I am an AI" or sound robotic
+- You keep responses SHORT (2-4 sentences usually) — elderly users get overwhelmed by long text
+- You use their name occasionally to make it personal
+
+EMOTIONAL STATE RIGHT NOW:
+- Detected mood: {current_mood}
+- Emotional trend: {mood_trend}
+{f'- Summary: "{mood_summary}"' if mood_summary else ""}
+- Tone instruction: {mood_tone}
+{trend_note}
+{recommendation_hint}
+
+"""
+
+    # ── Emergency (always included, brief) ──
+    prompt += """EMERGENCY: If they mention a fall, chest pain, breathing trouble, severe pain — drop everything, stay calm, give first-aid guidance, tell them to call caretaker immediately.\n\n"""
+
+    # ── Health context (only what's relevant, not a data dump) ──
     if not has_introduced:
-        prompt += "### INITIAL GREETING (First interaction only):\n"
-        prompt += f"- Patient Name: {name}, Age: {recip.get('age', 'Unknown')}\n"
-        if recip.get('report_summary'):
-            prompt += f"- Health Summary from Medical Reports: {recip.get('report_summary')}\n"
-        
+        # First message — brief personal intro
+        prompt += f"FIRST MEETING: Greet {first_name} ji warmly by name. "
+        if recip.get("age"):
+            prompt += f"They are {recip['age']} years old. "
         conds = context.get("conditions", [])
         if conds:
-            prompt += "- Active Medical Conditions: " + ", ".join([f"{c['name']} ({c['severity']})" for c in conds]) + "\n"
-            
-        vitals = context.get("vitals")
-        if vitals:
-            prompt += f"- Latest Vitals from Sensors: {vitals}\n"
-
-        abnormal_labs = context.get("abnormal_labs", [])
-        if abnormal_labs:
-            prompt += "- ⚠️ Abnormal Lab Values: " + ", ".join([f"{l['name']}: {l['value']} {l['unit']}" for l in abnormal_labs]) + "\n"
-
-        prompt += "Provide a warm, personalized greeting mentioning their name. Briefly summarize their health status. "
-        prompt += "Do NOT dump all data — summarize the most important 2-3 points.\n\n"
+            prompt += f"They have {conds[0]['name']} — keep this in mind. "
+        if meds:
+            prompt += f"They take {meds[0]['name']} — mention it only if relevant. "
+        prompt += "Ask how they are feeling today. Keep it warm and brief — do NOT list all their data.\n\n"
     else:
-        # Subsequent turns: concise mode
-        prompt += "### ONGOING CONVERSATION MODE:\n"
-        prompt += "The user already has their medical context. Be concise (2-3 sentences usually). "
-        prompt += "Do NOT repeat medications, conditions, or vitals unless the user specifically asks.\n"
-        prompt += "However, if the user reports symptoms or asks health questions, USE their health data to give specific advice.\n\n"
+        # Ongoing — only bring up health if relevant
+        if meds:
+            med_names = ", ".join(m["name"] for m in meds[:3])
+            prompt += f"HEALTH CONTEXT (use only if conversation naturally calls for it): Medicines: {med_names}. "
+        if alerts:
+            prompt += f"Active health alert: {alerts[0]['message']} — mention gently if it fits. "
+        if audio_count > 3:
+            prompt += f"They had {audio_count} cough/sneeze events this week — you could gently check on their breathing. "
+        prompt += "\n"
 
-    # ---- HEALTH INTELLIGENCE ----
-    alerts = context.get("active_alerts", [])
-    if alerts:
-        prompt += "### ⚠️ ACTIVE MEDICAL ALERTS (Address proactively):\n"
-        prompt += ", ".join([f"{a['type']}: {a['message']} (Severity: {a['severity']})" for a in alerts]) + "\n"
-        prompt += "If any alert relates to the user's current message, address it immediately.\n\n"
+    # ── Conversation history ──
+    if history:
+        prompt += "\nRECENT CONVERSATION (continue naturally from here):\n"
+        for msg in history[-6:]:
+            label = first_name if msg["sender"] == "user" else "Saathi"
+            prompt += f"{label}: {msg['text']}\n"
+        prompt += "\n"
 
-    audio_count = context.get("audio_events_count", 0)
-    if audio_count > 0:
-        prompt += f"- 🔊 Audio monitoring detected {audio_count} events (coughs/sneezes) in the past week. Consider respiratory health.\n"
-        
-    reminders = context.get("reminders", [])
-    if reminders:
-        prompt += "- Active Reminders: " + ", ".join([f"{r['text']} at {r['time']}" for r in reminders]) + "\n"
+    prompt += f"Now respond as Saathi to what {first_name} ji just said. Be natural. Be human. Be warm.\n"
 
-    # ---- MOOD CONTEXT ----
-    mood_counts = context.get("mood_counts", {})
-    sad_count = mood_counts.get("sad", 0) + mood_counts.get("distressed", 0) + mood_counts.get("anxious", 0)
-    if sad_count >= 3:
-        prompt += "\n**🫂 EMOTIONAL WELLNESS:** The patient has shown signs of sadness/distress recently "
-        prompt += f"({sad_count} instances in 7 days). Provide extra emotional warmth and support. "
-        prompt += "Gently suggest activities, conversation, or speaking with family.\n"
-
-    # ---- CONVERSATION HISTORY ----
-    prompt += "\n### Conversation History:\n"
-    for msg in history[-8:]:
-        prompt += f"{msg['sender'].capitalize()}: {msg['text']}\n"
-        
-    # ---- RULES ----
-    prompt += "\n### Rules:\n"
-    prompt += "1. You are a CAREGIVER AI, but also a conversational companion. You CAN and SHOULD tell stories, jokes, or play games if asked.\n"
-    prompt += "2. If the user asks you to play a specific song, tell them to clearly say 'Play [Song Name]' so the music player can catch it.\n"
-    prompt += "3. Always think about the patient's medical safety first. Give comprehensive answers only when asked for details.\n"
-    prompt += "4. Do NOT repeat the patient's full record in every message. Only when asked.\n"
-    prompt += "5. When the user reports symptoms, cross-reference with their conditions and medications to give specific advice.\n"
-    prompt += "6. Be empathetic, warm, and use a caring tone. If unsure about a medical situation, recommend contacting the caretaker.\n"
-    
     return prompt
 
+# ─────────────────────────────────────────────
+# Mood analysis  (expanded to 10 moods)
+# ─────────────────────────────────────────────
 def analyze_mood(text: str) -> dict:
-    api_key = os.environ.get('GEMINI_API_KEY')
-    api_endpoint = os.environ.get('GEMINI_API_ENDPOINT')
-    
-    if not api_key:
+    if not os.environ.get('GEMINI_API_KEY'):
         return {"mood": MoodEnum.neutral, "confidence": 0.5}
 
-    url = f"{api_endpoint}?key={api_key}" if api_endpoint else f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}'
-    
-    prompt = f"""Analyze the emotional tone of the following text from an elderly user.
-Reply with a JSON object containing exactly two keys: "mood" and "confidence".
-"mood" must be exactly one of: "happy", "sad", "anxious", "angry", "neutral", "distressed".
-"confidence" must be a float between 0.0 and 1.0.
+    prompt = (
+        'Analyze the emotional tone of this text from an elderly user.\n'
+        'Reply with a JSON object with exactly two keys: "mood" and "confidence".\n'
+        '"mood" must be exactly one of: '
+        '"happy", "sad", "anxious", "angry", "neutral", "distressed", "lonely", "bored", "relaxed", "spiritual".\n'
+        '"confidence" must be a float between 0.0 and 1.0.\n'
+        'Hints:\n'
+        '- "lonely": user feels alone, nobody talks to them, misses family\n'
+        '- "bored": user says time is not passing, nothing to do, bore ho raha hu\n'
+        '- "relaxed": calm, peaceful, sab theek hai\n'
+        '- "spiritual": mention of God, prayer, bhajan, mandir, pooja\n\n'
+        f'User text: "{text}"\n'
+    )
 
-User text: "{text}"
-"""
     try:
-        gemini_payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.1} # low temp for consistent JSON
-        }
-        
-        resp = requests.post(url, json=gemini_payload, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            if 'candidates' in data and data['candidates']:
-                ai_text = data['candidates'][0]['content']['parts'][0]['text']
-                # basic parsing
-                import json
-                # strip markdown blocks if exist
-                ai_text = ai_text.replace("```json", "").replace("```", "").strip()
-                result = json.loads(ai_text)
-                mood_str = result.get("mood", "neutral").lower()
-                # validate mood
-                valid_moods = [m.value for m in MoodEnum]
-                if mood_str not in valid_moods:
-                    mood_str = "neutral"
-                return {"mood": MoodEnum(mood_str), "confidence": float(result.get("confidence", 0.5))}
+        data = call_gemini(
+            {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1}},
+            timeout=10, caller="[analyze_mood]"
+        )
+        if data and data.get('candidates'):
+            ai_text = data['candidates'][0]['content']['parts'][0]['text']
+            ai_text = ai_text.replace("```json", "").replace("```", "").strip()
+            result = json.loads(ai_text)
+            mood_str = result.get("mood", "neutral").lower()
+            valid_moods = [m.value for m in MoodEnum]
+            if mood_str not in valid_moods:
+                mood_str = "neutral"
+            return {"mood": MoodEnum(mood_str), "confidence": float(result.get("confidence", 0.5))}
     except Exception as e:
-        print(f"Error analyzing mood: {e}")
-        
+        print(f"[analyze_mood] Error: {e}")
+
     return {"mood": MoodEnum.neutral, "confidence": 0.5}
 
-def save_message(recipient_id: int, sender: SenderEnum, text: str, mood: MoodEnum, trigger_type: TriggerTypeEnum, session_id: str, db: Session):
+# ─────────────────────────────────────────────
+# Mood → content recommendation
+# ─────────────────────────────────────────────
+def get_content_recommendation(mood: str) -> dict:
+    """Return suggested content type + YouTube search queries for a given mood."""
+    return MOOD_CONTENT_MAP.get(mood, MOOD_CONTENT_MAP["neutral"])
+
+def get_story_queries(category: str) -> list:
+    """Return YouTube search queries for a story category."""
+    return STORY_CATEGORIES.get(category.lower(), STORY_CATEGORIES["moral"])
+
+# ─────────────────────────────────────────────
+# Message persistence
+# ─────────────────────────────────────────────
+def save_message(recipient_id: int, sender: SenderEnum, text: str, mood: MoodEnum,
+                 trigger_type: TriggerTypeEnum, session_id: str, db: Session):
     try:
         msg = ConversationMessage(
             care_recipient_id=recipient_id,
@@ -275,15 +335,19 @@ def save_message(recipient_id: int, sender: SenderEnum, text: str, mood: MoodEnu
         db.commit()
     except Exception as e:
         db.rollback()
-        print(f"Failed to save message: {e}")
+        print(f"[save_message] Failed: {e}")
 
-def check_depression_risk(recipient_id: int, db: Session):
+# ─────────────────────────────────────────────
+# Depression / sustained low mood check
+# ─────────────────────────────────────────────
+def check_depression_risk(recipient_id: int, db: Session) -> bool:
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
-    recent_messages = db.query(ConversationMessage).filter(
+    count = db.query(ConversationMessage).filter(
         ConversationMessage.care_recipient_id == recipient_id,
         ConversationMessage.created_at >= seven_days_ago,
         ConversationMessage.sender == SenderEnum.user,
-        ConversationMessage.mood_detected.in_([MoodEnum.sad, MoodEnum.anxious, MoodEnum.distressed])
-    ).all()
-    
-    return len(recent_messages) >= 4
+        ConversationMessage.mood_detected.in_([
+            MoodEnum.sad, MoodEnum.anxious, MoodEnum.distressed, MoodEnum.lonely
+        ])
+    ).count()
+    return count >= 4

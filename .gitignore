@@ -1,3 +1,8 @@
+# Claude Code (AI assistant — never commit)
+.claude/
+*.claude
+CLAUDE.md
+
 # Python
 venv/
 .venv/
@@ -40,3 +45,6 @@ frontend/model/
 *.pt
 models/
 weights/
+
+# Google Cloud Credentials
+google_creds.json

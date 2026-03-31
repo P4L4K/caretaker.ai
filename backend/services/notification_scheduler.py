@@ -133,7 +133,7 @@ def check_medication_expiry():
                     medicine_name=med.medicine_name,
                     duration_days=(med.end_date - med.start_date).days if med.end_date and med.start_date else 0
                 )
-            print(f"[scheduler] ✅ Medication '{med.medicine_name}' auto-completed (expired {med.end_date})")
+            print(f"[scheduler] [OK] Medication '{med.medicine_name}' auto-completed (expired {med.end_date})")
 
         db.commit()
     except Exception as e:
@@ -288,9 +288,9 @@ def check_auto_reorder():
             med.last_auto_order_date = today
             db.flush()
 
-            status_str = "✅ email sent" if sent else "⚠️ email failed (link still generated)"
-            print(f"[scheduler] 🛒 Auto-reorder triggered: {med.medicine_name} "
-                  f"({days_remaining}d left) → Tata 1mg — {status_str}")
+            status_str = "[OK] email sent" if sent else "[WARN] email failed (link still generated)"
+            print(f"[scheduler] [REORDER] Auto-reorder triggered: {med.medicine_name} "
+                  f"({days_remaining}d left) -> Tata 1mg -- {status_str}")
 
         db.commit()
     except Exception as e:
@@ -302,7 +302,7 @@ def check_auto_reorder():
 
 def _scheduler_loop():
     """Main scheduler loop — runs every 60 seconds."""
-    print("[scheduler] 🚀 Background notification scheduler started")
+    print("[scheduler] [START] Background notification scheduler started")
 
     # Track which daily tasks last ran
     last_expiry_check = None
@@ -358,7 +358,7 @@ def _scheduler_loop():
                 break
             time.sleep(1)
 
-    print("[scheduler] 🛑 Notification scheduler stopped")
+    print("[scheduler] [STOP] Notification scheduler stopped")
 
 
 def start_scheduler():

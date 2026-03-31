@@ -753,9 +753,31 @@
         // RECOMMENDATION CARD (from DB sentiment)
         // ═══════════════════════════════════════════
         function showRecommendationCard(recommendation, mood) {
-            if (!recommendation || recommendation.type === 'choice') return;
+            if (!recommendation) return;
             const area = document.getElementById('rec-card-area');
             const isHindiLang = state.userLanguage === 'hi';
+            
+            // ── TYPE 1: MULTIPLE CHOICES (from Gemini) ──
+            if (recommendation.type === 'choice') {
+                const category = recommendation.category || 'music';
+                const choices = recommendation.choices || [];
+                area.innerHTML = `
+                <div class="rec-card p-3">
+                    <p class="text-xs font-bold text-blue-700 mb-2">${isHindiLang ? 'चुनें:' : 'Choose one:'}</p>
+                    <div class="flex gap-2 flex-wrap">
+                        ${choices.map(c => `
+                            <button onclick="handleUserMessage('${c.replace(/'/g,"\\'")}')"
+                                class="text-xs bg-blue-50 border border-blue-200 text-blue-700 px-3 py-1.5 rounded-full hover:bg-blue-100 transition-all cursor-pointer">
+                                ${c}
+                            </button>`).join('')}
+                    </div>
+                </div>`;
+                area.classList.remove('hidden');
+                lucide.createIcons();
+                return;
+            }
+
+            // ── TYPE 2: MOOD RECOMMENDATION (existing) ──
             const typeLabel = recommendation.type === 'music'
                 ? (isHindiLang ? '🎵 गाना' : '🎵 Music')
                 : (isHindiLang ? '📖 कहानी' : '📖 Story');
@@ -802,6 +824,7 @@
         // ═══════════════════════════════════════════
         async function handleUserMessage(text, triggerType = "user_initiated") {
             if (!text.trim()) return;
+            document.getElementById('rec-card-area').classList.add('hidden');
 
             const hindi = state.userLanguage === 'hi' || isHindi(text);
 
@@ -827,145 +850,114 @@
                                   'कहानी', 'किस्सा', 'चुटकुला', 'समाचार', 'कथा',
                                   'video', 'वीडियो', 'motivational', 'मोटिवेशनल'];
 
-            // ── STORY HANDLER (must run BEFORE music check) ──
             const storyTriggers  = ['कहानी', 'kahani', 'story', 'किस्सा', 'kissa', 'कथा', 'katha'];
             const storyPlayWords = ['सुनाओ', 'बताओ', 'सुनना', 'सुनो', 'sunao', 'batao', 'play', 'चलाओ', 'लगाओ', 'सुना दो'];
 
-            const wantsStory = storyTriggers.some(w => t.includes(w) || text.includes(w))
-                            && storyPlayWords.some(w => t.includes(w) || text.includes(w));
-
-            if (wantsStory) {
-                // Detect story category from user text
-                let storyQuery = 'moral stories hindi for adults prerak prasang';
-                let categoryLabel = 'moral';
-
-                if (t.includes('भूतिया') || t.includes('bhootiya') || t.includes('डरावनी') || t.includes('horror') || t.includes('darawni') || t.includes('bhoot')) {
-                    storyQuery = 'bhootiya kahani hindi horror story';
-                    categoryLabel = 'horror 👻';
-                } else if (t.includes('comedy') || t.includes('funny') || t.includes('मज़ेदार') || t.includes('mazedaar') || t.includes('हँसी') || t.includes('joke')) {
-                    storyQuery = 'funny hindi stories akbar birbal comedy';
-                    categoryLabel = 'funny 😄';
-                } else if (t.includes('spiritual') || t.includes('bhajan') || t.includes('dharmik') || t.includes('धार्मिक') || t.includes('ram') || t.includes('krishna')) {
-                    storyQuery = 'ramayan katha hindi pravachan';
-                    categoryLabel = 'spiritual 🙏';
-                } else if (t.includes('itihas') || t.includes('इतिहास') || t.includes('historical') || t.includes('maharana') || t.includes('shivaji')) {
-                    storyQuery = 'historical stories hindi maharana pratap';
-                    categoryLabel = 'historical 🏛️';
-                } else if (t.includes('adventure') || t.includes('jungle') || t.includes('रोमांच')) {
-                    storyQuery = 'adventure thriller kahani hindi';
-                    categoryLabel = 'adventure 🌿';
-                } else if (t.includes('bachon') || t.includes('बच्चों') || t.includes('panchtantra')) {
-                    storyQuery = 'panchtantra stories hindi moral';
-                    categoryLabel = 'Panchtantra 📚';
-                }
-
-                const searchMsg = hindi
-                    ? `📖 ${categoryLabel} कहानी खोज रहे हैं YouTube पर...`
-                    : `📖 Finding a ${categoryLabel} story on YouTube...`;
-                addUIMessage('bot', searchMsg);
-                speakHindi(hindi ? `${categoryLabel} कहानी खोज रहे हैं` : `Finding a story for you`);
-
-                const tracks = await searchYouTube(storyQuery, 300); // 5-min minimum for stories
-                if (tracks && tracks.length > 0) {
-                    const track = tracks[0];
-                    // Stop any music playing
-                    state.videoQueue = tracks;
-                    state.videoQueueIdx = 0;
-                    loadYouTubeTrack(0, '📖 Story');
-                    const doneMsg = hindi
-                        ? `📖 यह ${categoryLabel} कहानी सुनिए: ${tracks[0].name}`
-                        : `📖 Here's a ${categoryLabel} story: ${tracks[0].name}`;
-                    addUIMessage('bot', doneMsg);
-                    speakHindi(hindi ? `${categoryLabel} कहानी शुरू हो रही है` : `Starting story`);
-                } else {
-                    const failMsg = hindi
-                        ? '😔 अभी YouTube पर कहानी नहीं मिली। थोड़ी देर बाद फिर कोशिश करें।'
-                        : '😔 Could not find a story on YouTube right now. Try again shortly.';
-                    addUIMessage('bot', failMsg);
-                    speakHindi(failMsg);
-                }
-                return;
-            }
-
-            // ── VIDEO HANDLER (motivational, news, any "वीडियो" request) ──
-            const videoTriggers  = ['वीडियो', 'video'];
-            const videoPlayWords = ['चलाओ', 'play', 'दिखाओ', 'देखना', 'लगाओ', 'दिखा दो', 'दिखा'];
-            const wantsVideo = videoTriggers.some(w => t.includes(w) || text.includes(w))
-                            && videoPlayWords.some(w => t.includes(w) || text.includes(w));
-
-            if (wantsVideo) {
-                let videoQuery = text;
-                [...videoPlayWords, ...videoTriggers, 'please', 'कृपया', 'जरा', 'एक'].forEach(w => {
-                    videoQuery = videoQuery.replace(new RegExp(w, 'gi'), '').trim();
-                });
-                if (!videoQuery || videoQuery.length < 2) videoQuery = 'motivational hindi video';
-                videoQuery = videoQuery + ' hindi';
-
-                addUIMessage('bot', hindi ? `🔍 वीडियो खोज रहे हैं...` : `🔍 Searching for video...`);
-                const tracks = await searchYouTube(videoQuery);
-                if (tracks && tracks.length > 0) {
-                    state.videoQueue = tracks;
-                    state.videoQueueIdx = 0;
-                    loadYouTubeTrack(0, '▶ Video');
-                    const doneMsg = hindi ? `▶ चला रहे हैं: ${tracks[0].name}` : `▶ Playing: ${tracks[0].name}`;
-                    addUIMessage('bot', doneMsg);
-                    speakHindi(hindi ? `वीडियो शुरू हो रहा है` : `Starting video`);
-                } else {
-                    const failMsg = hindi ? '😔 वीडियो नहीं मिला। बाद में कोशिश करें।' : '😔 Video not found. Try again later.';
-                    addUIMessage('bot', failMsg); speakHindi(failMsg);
-                }
-                return;
-            }
-
             // ── PLAY MUSIC ──
-            const playWords = ['बजाओ', 'सुनाओ', 'लगाओ', 'play', 'चलाओ', 'बजा दो', 'सुना दो', 'प्ले'];
-            const favWords = ['पसंदीदा', 'favourite', 'favorite', 'my fav', 'manpasand'];
-            const genericPlay = ['कोई गाना', 'गाना बजाओ', 'संगीत बजाओ', 'a song', 'some music', 'कोई सुनाओ'];
+            const playWords = ['बजाओ', 'सुनाओ', 'लगाओ', 'play', 'चलाओ', 'बजा do', 'सुना do', 'प्ले', 'sunao', 'chalaiye'];
+            const genericPlay = ['कोई गाना', 'गाना बजाओ', 'संगीत बजाओ', 'a song', 'some music', 'कोई सुनाओ', 'play a song', 'play some songs'];
+            const storyGeneric = ['कोई कहानी', 'कहानी सुनाओ', 'tell a story', 'tell me a story', 'story sunao'];
 
-            if (playWords.some(w => t.includes(w)) && !excludeWords.some(w => t.includes(w))) {
-                // Favourites
-                if (favWords.some(w => t.includes(w))) {
-                    // Check DB favorites first
-                    if (state.favoriteSongs && state.favoriteSongs.length > 0) {
-                        const fav = state.favoriteSongs[0];
-                        await playYouTubeSong(fav.query || fav.title);
+            // If it's a generic request, let the backend AI handle it (to show options)
+            const isGenericRequest = genericPlay.some(w => t.includes(w)) || storyGeneric.some(w => t.includes(w));
+            
+            if (isGenericRequest) {
+                // Do nothing here, fall through to the backend AI chat logic
+            } else {
+                // ── EXISTING STORY HANDLER (for specific category requests like "horror story") ──
+                const wantsStory = storyTriggers.some(w => t.includes(w) || text.includes(w))
+                                && storyPlayWords.some(w => t.includes(w) || text.includes(w));
+
+                if (wantsStory) {
+                    // Detect story category from user text
+                    let storyQuery = 'moral stories hindi for adults prerak prasang';
+                    let categoryLabel = 'moral';
+                    let categoryDetected = false;
+
+                    const categories = {
+                        'bhootiya': ['भूतिया', 'bhootiya', 'डरावनी', 'horror', 'darawni', 'bhoot'],
+                        'comedy': ['comedy', 'funny', 'मज़ेदार', 'mazedaar', 'हँसी', 'joke'],
+                        'spiritual': ['spiritual', 'bhajan', 'dharmik', 'धार्मिक', 'ram', 'krishna'],
+                        'historical': ['itihas', 'इतिहास', 'historical', 'maharana', 'shivaji'],
+                        'adventure': ['adventure', 'jungle', 'रोमांच'],
+                        'panchtantra': ['bachon', 'बच्चों', 'panchtantra']
+                    };
+
+                    if (t.includes('भूतिया') || t.includes('bhootiya') || t.includes('डरावनी') || t.includes('horror') || t.includes('darawni') || t.includes('bhoot')) {
+                        storyQuery = 'bhootiya kahani hindi horror story';
+                        categoryLabel = 'horror 👻'; categoryDetected = true;
+                    } else if (t.includes('comedy') || t.includes('funny') || t.includes('मज़ेदार') || t.includes('mazedaar') || t.includes('हँसी') || t.includes('joke')) {
+                        storyQuery = 'funny hindi stories akbar birbal comedy';
+                        categoryLabel = 'funny 😄'; categoryDetected = true;
+                    } else if (t.includes('spiritual') || t.includes('bhajan') || t.includes('dharmik') || t.includes('धार्मिक') || t.includes('ram') || t.includes('krishna')) {
+                        storyQuery = 'ramayan katha hindi pravachan';
+                        categoryLabel = 'spiritual 🙏'; categoryDetected = true;
+                    } else if (t.includes('itihas') || t.includes('इतिहास') || t.includes('historical') || t.includes('maharana') || t.includes('shivaji')) {
+                        storyQuery = 'historical stories hindi maharana pratap';
+                        categoryLabel = 'historical 🏛️'; categoryDetected = true;
+                    } else if (t.includes('adventure') || t.includes('jungle') || t.includes('रोमांच')) {
+                        storyQuery = 'adventure thriller kahani hindi';
+                        categoryLabel = 'adventure 🌿'; categoryDetected = true;
+                    } else if (t.includes('bachon') || t.includes('बच्चों') || t.includes('panchtantra')) {
+                        storyQuery = 'panchtantra stories hindi moral';
+                        categoryLabel = 'Panchtantra 📚'; categoryDetected = true;
+                    }
+
+                    // Only handle here if a specific category was detected, otherwise let backend AI suggest
+                    if (categoryDetected) {
+                        const searchMsg = hindi
+                            ? `📖 ${categoryLabel} कहानी खोज रहे हैं YouTube पर...`
+                            : `📖 Finding a ${categoryLabel} story on YouTube...`;
+                        addUIMessage('bot', searchMsg);
+                        speakHindi(hindi ? `${categoryLabel} कहानी खोज रहे हैं` : `Finding a story for you`);
+
+                        const tracks = await searchYouTube(storyQuery, 300); // 5-min minimum for stories
+                        if (tracks && tracks.length > 0) {
+                            state.videoQueue = tracks;
+                            state.videoQueueIdx = 0;
+                            loadYouTubeTrack(0, '📖 Story');
+                            const doneMsg = hindi
+                                ? `📖 यह ${categoryLabel} कहानी सुनिए: ${tracks[0].name}`
+                                : `📖 Here's a ${categoryLabel} story: ${tracks[0].name}`;
+                            addUIMessage('bot', doneMsg);
+                        } else {
+                            const failMsg = hindi
+                                ? '😔 अभी YouTube पर कहानी नहीं मिली। थोड़ी देर बाद फिर कोशिश करें।'
+                                : '😔 Could not find a story on YouTube right now. Try again shortly.';
+                            addUIMessage('bot', failMsg);
+                            speakHindi(failMsg);
+                        }
                         return;
                     }
-                    playlist = [...localPlaylist]; state.youtubeMode = false;
-                    playSong(0);
-                    const msg = hindi ? 'आपका पसंदीदा गाना बजा रहा हूं। ❤️' : 'Playing your favourite song. ❤️';
-                    addUIMessage('bot', msg); speakHindi(msg);
-                    return;
                 }
 
-                // Check local playlist by name
-                for (let i = 0; i < localPlaylist.length; i++) {
-                    if (t.includes(localPlaylist[i].title.toLowerCase())) {
+                // ── PLAY MUSIC (specific search) ──
+                const favWords = ['पसंदीदा', 'favourite', 'favorite', 'my fav', 'manpasand'];
+                if (playWords.some(w => t.includes(w)) && !excludeWords.some(w => t.includes(w))) {
+                    // Favourites
+                    if (favWords.some(w => t.includes(w))) {
+                        if (state.favoriteSongs && state.favoriteSongs.length > 0) {
+                            const fav = state.favoriteSongs[0];
+                            await playYouTubeSong(fav.query || fav.title);
+                            return;
+                        }
                         playlist = [...localPlaylist]; state.youtubeMode = false;
-                        playSong(i);
-                        const msg = hindi ? `बजा रहा हूं: ${localPlaylist[i].title} 🎵` : `Playing ${localPlaylist[i].title}. 🎵`;
+                        playSong(0);
+                        const msg = hindi ? 'आपका पसंदीदा गाना बजा रहा हूं। ❤️' : 'Playing your favourite song. ❤️';
                         addUIMessage('bot', msg); speakHindi(msg);
                         return;
                     }
-                }
 
-                // Generic "play some music"
-                if (genericPlay.some(w => t.includes(w))) {
-                    playlist = [...localPlaylist]; state.youtubeMode = false;
-                    playSong(1);
-                    const msg = hindi ? 'शांत संगीत बजा रहा हूं। 🎵' : 'Playing some calming music. 🎵';
-                    addUIMessage('bot', msg); speakHindi(msg);
-                    return;
-                }
-
-                // Specific song — extract song name and search YouTube
-                let songQuery = text;
-                [...playWords, ...musicWords, 'the', 'a', 'an', 'please', 'कृपया'].forEach(w => {
-                    songQuery = songQuery.replace(new RegExp(w, 'gi'), '').trim();
-                });
-                if (songQuery.length > 1) {
-                    playYouTubeSong(songQuery);
-                    return;
+                    // Specific song — extract song name and search YouTube
+                    let songQuery = text;
+                    [...playWords, 'the', 'a', 'an', 'please', 'कृपया', 'गाना', 'music', 'song', 'संगीत'].forEach(w => {
+                        songQuery = songQuery.replace(new RegExp(w, 'gi'), '').trim();
+                    });
+                    
+                    if (songQuery.length > 2) {
+                        playYouTubeSong(songQuery);
+                        return;
+                    }
                 }
             }
 
@@ -1037,8 +1029,8 @@
                     addUIMessage('bot', data.result.reply);
                     speak(data.result.reply, data.result.audio_base64);
 
-                    // Show recommendation card if mood-driven suggestion exists
-                    if (data.result.recommendation && data.result.recommendation.type !== 'choice') {
+                    // Show recommendation card if mood-driven suggestion or choice exists
+                    if (data.result.recommendation) {
                         // Only show after a real user message (not proactive)
                         if (triggerType === 'user_initiated') {
                             showRecommendationCard(data.result.recommendation, mood);

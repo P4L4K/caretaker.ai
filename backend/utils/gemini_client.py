@@ -12,6 +12,7 @@ Available models (free tier): gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.
 
 import os
 import requests
+import time
 
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
@@ -76,6 +77,7 @@ def call_gemini(payload: dict, timeout: int = 30, caller: str = "") -> dict | No
             continue
         except Exception as e:
             print(f"{caller} [Gemini] Unexpected error with model '{model}': {e}")
+            time.sleep(2)  # Delay between retries
             continue
 
     print(f"{caller} [Gemini] All models failed. Please check your API key and quotas.")

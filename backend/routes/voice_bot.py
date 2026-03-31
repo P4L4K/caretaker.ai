@@ -104,18 +104,14 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
         else TriggerTypeEnum.user_initiated
     )
 
-    mood_result = {"mood": MoodEnum.neutral, "confidence": 0.5}
-    if trigger_enum == TriggerTypeEnum.user_initiated:
-        mood_result = analyze_mood(user_text)
-
-    save_message(payload.recipient_id, SenderEnum.user, user_text, mood_result["mood"], trigger_enum, payload.session_id, db)
-
     # Run sentiment analysis across history + current message
     sentiment = analyze_sentiment_with_history(user_text, payload.recipient_id, db)
-
-    # Override simple mood with history-aware mood if confidence is higher
-    if sentiment and sentiment["confidence"] >= mood_result["confidence"]:
-        mood_result["mood"] = MoodEnum(sentiment["current_mood"]) if sentiment["current_mood"] in [m.value for m in MoodEnum] else mood_result["mood"]
+    
+    # Extract mood from sentiment analysis
+    mood_str = sentiment.get("current_mood", "neutral")
+    mood_enum = MoodEnum(mood_str) if mood_str in [m.value for m in MoodEnum] else MoodEnum.neutral
+    
+    save_message(payload.recipient_id, SenderEnum.user, user_text, mood_enum, trigger_enum, payload.session_id, db)
 
     context = build_conversation_context(payload.recipient_id, db)
     system_prompt = generate_system_prompt(recipient.full_name, context, payload.language, sentiment)
@@ -136,10 +132,16 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
                 save_message(payload.recipient_id, SenderEnum.bot, ai_text, MoodEnum.neutral, trigger_enum, payload.session_id, db)
 
                 # Attach content recommendation when mood is actionable
-                mood_str = mood_result["mood"].value
                 recommendation = None
                 if mood_str not in ("neutral",):
                     recommendation = get_content_recommendation(mood_str)
+                
+                # Check for "choice" type to trigger frontend selection UI
+                if ai_text.lower().startswith("{") and '"type": "choice"' in ai_text.lower():
+                     try:
+                         recommendation = json.loads(ai_text)
+                         ai_text = recommendation.get("message", "Aap kya sunna chahenge?")
+                     except: pass
 
                 # ── ADD TTS GENERATION ──
                 audio_base64 = ""

@@ -457,7 +457,7 @@ app.include_router(weather_router, prefix="/api")
 async def startup_event():
     global weather_model
     try:
-        API_KEY = os.getenv("WEATHER_API_KEY", "628d4985109c4f6baa3182527250312")
+        API_KEY = os.getenv("WEATHER_API_KEY")
         DEFAULT_CITY = os.getenv("DEFAULT_CITY", "Jammu")
         weather_model = WeatherPredictionModel(API_KEY, DEFAULT_CITY)
         print("[OK] Weather service initialized successfully")

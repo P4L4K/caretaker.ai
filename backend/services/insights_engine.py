@@ -194,7 +194,7 @@ def _fetch_environment_data(recipient, db: Session) -> dict:
     try:
         from weather import WeatherPredictionModel
         # Use the same default API key and city as main.py
-        api_key = os.environ.get("WEATHER_API_KEY", "628d4985109c4f6baa3182527250312")
+        api_key = os.environ.get("WEATHER_API_KEY")
         default_city = os.environ.get("DEFAULT_CITY", "Jammu")
         
         if api_key:

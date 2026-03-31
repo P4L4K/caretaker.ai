@@ -9,6 +9,7 @@ T = TypeVar('T')
 class Login(BaseModel):
     username: str
     password: str
+    role: Optional[str] = "caretaker" # Hint for client, but backend will verify
 
 #Register
 # ---------- Gender Enum ----------
@@ -49,15 +50,17 @@ class CareRecipientCreate(BaseModel):
                     return member
         raise ValueError("Invalid gender; expected one of: Male, Female, Other")
 
-# ---------- CareTaker Registration Model ----------
+# ---------- Registration Model ----------
 class Register(BaseModel):
     email: EmailStr = Field(..., example="john@example.com")
     username: str = Field(..., example="john_doe")
     phone_number: str = Field(..., min_length=10, max_length=10, example="9999999999")
     password: str = Field(...,min_length=3, max_length=72,example="strongpassword123")
     full_name: str = Field(..., example="John Doe")
-    # Must provide at least 1 care recipient
-    care_recipients: List[CareRecipientCreate] = Field(..., min_items=1)
+    role: str = Field("caretaker", example="caretaker") # 'caretaker' or 'doctor'
+    specialization: Optional[str] = Field(None, example="Cardiologist")
+    # Optional for doctors, required for caretakers (checked in route logic)
+    care_recipients: Optional[List[CareRecipientCreate]] = Field(default=[], min_items=0)
 
 #response model
 class ResponseSchema(BaseModel):

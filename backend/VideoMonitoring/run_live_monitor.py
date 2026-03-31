@@ -1,197 +1,174 @@
-import sys
-import os
+"""
+Live webcam fall monitor using YOLO + LSTM pipeline.
+
+Usage:
+    python run_live_monitor.py [options]
+
+Options:
+    --session-id  Active monitoring session ID (for API alerts)
+    --token       JWT auth token
+    --camera      Camera index (default: 0)
+    --sensitivity low | medium | high  (default: medium)
+    --threshold   Inactivity threshold seconds (default: 30)
+"""
 import cv2
-import time
+import os
+import sys
 import argparse
-import requests
-import json
 import threading
+import time
 from datetime import datetime
 
-# Ensure backend directory is in the Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-backend_dir = os.path.dirname(current_dir)
-if backend_dir not in sys.path:
-    sys.path.append(backend_dir)
-    
-# Add BodyMovementDetection to path
-bmd_dir = os.path.join(current_dir, "BodyMovementDetection")
-if bmd_dir not in sys.path:
-    sys.path.append(bmd_dir)
+_here       = os.path.dirname(os.path.abspath(__file__))
+backend_dir = os.path.dirname(_here)
+sys.path.insert(0, _here)
+sys.path.insert(0, backend_dir)
 
-try:
-    from VideoMonitoring.united_monitor import UnitedMonitor, draw_united_interface
-    from VideoMonitoring.fall_detection import VideoCaptureThread
-except ImportError:
-    # Try alternate import if running from different location
-    try:
-        from united_monitor import UnitedMonitor, draw_united_interface
-        from fall_detection import VideoCaptureThread
-    except ImportError as e:
-        print(f"Error importing monitor modules: {e}")
-        print("Please make sure you are running this script from the correct directory.")
-        sys.exit(1)
+from united_monitor import UnitedMonitor, draw_united_interface
 
-# Default configuration
 API_URL = "http://127.0.0.1:8000/api"
 
+
 class LiveMonitorSession:
-    def __init__(self, session_id, token=None, camera_index=0, sensitivity="medium", threshold=30):
-        self.session_id = session_id
-        self.token = token
+    """Live webcam monitoring session with optional backend alert integration."""
+
+    def __init__(self, session_id=None, token=None,
+                 camera_index=0, sensitivity="medium", threshold=30):
+        self.session_id   = session_id
+        self.token        = token
         self.camera_index = camera_index
-        
-        # Initialize Monitor
+
         self.monitor = UnitedMonitor(
-            sensitivity=sensitivity, 
+            sensitivity=sensitivity,
             inactivity_threshold=threshold,
             is_live=True,
-            process_every_n_frames=2
+            process_every_n_frames=2,
         )
-        
-        # State
-        self.running = False
-        self.last_fall_alert_time = 0
+
+        self.running                  = False
+        self.last_fall_alert_time     = 0
         self.last_inactivity_alert_time = 0
-        self.alert_cooldown = 30  # Seconds between alerts
-        
-    def send_alert(self, alert_type, data):
-        """Send alert to backend API"""
+        self.alert_cooldown           = 30   # seconds between same-type alerts
+
+    def send_alert(self, alert_type: str, data: dict):
+        """POST alert to backend (non-blocking)."""
         if not self.session_id:
-            print(f"[Local Only] {alert_type.upper()} ALERT: {data}")
+            print(f"[Local] {alert_type.upper()} ALERT: {data}")
             return
-            
-        endpoint = f"{API_URL}/video-monitoring/alert/{self.session_id}"
-        
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
+
+        import requests
+
+        headers = {"Content-Type": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-            
-        payload = {
-            "alert_type": alert_type,
-            "alert_data": data
-        }
-        
+
+        payload  = {"alert_type": alert_type, "alert_data": data}
+        endpoint = f"{API_URL}/video-monitoring/alert/{self.session_id}"
+
         def _send():
             try:
-                print(f"Sending {alert_type} alert to backend...")
-                response = requests.post(endpoint, json=payload, headers=headers)
-                if response.status_code == 200:
-                    print(f"Alert sent successfully!")
-                else:
-                    print(f"Failed to send alert: {response.status_code} - {response.text}")
+                r = requests.post(endpoint, json=payload, headers=headers, timeout=5)
+                status = "OK" if r.status_code == 200 else f"HTTP {r.status_code}"
+                print(f"[Alert sent] {alert_type} → {status}")
             except Exception as e:
-                print(f"Error sending alert: {e}")
-                
-        # Send in background thread to not block video processing
+                print(f"[Alert failed] {e}")
+
         threading.Thread(target=_send, daemon=True).start()
 
     def run(self):
-        print(f"=== Starting Live Monitor (Session: {self.session_id or 'Local'}) ===")
-        print(f"Camera: {self.camera_index}")
-        print("Press 'q' to quit")
-        
-        # Start capture
-        cap_thread = VideoCaptureThread(self.camera_index)
-        cap_thread.start()
-        
-        # Wait for camera to warm up
-        time.sleep(1.0)
-        
+        print(f"=== Live Monitor Started  "
+              f"(session={self.session_id or 'local'}  camera={self.camera_index}) ===")
+        print("Press 'q' to quit.\n")
+
+        cap = cv2.VideoCapture(self.camera_index)
+        if not cap.isOpened():
+            print(f"[Error] Cannot open camera {self.camera_index}")
+            return
+
         self.running = True
-        frame_count = 0
-        
+
         try:
             while self.running:
-                # Read frame
-                frame, _ = cap_thread.read()
-                if frame is None:
-                    print("Waiting for frame...")
-                    time.sleep(0.1)
+                ret, frame = cap.read()
+                if not ret:
+                    print("[Warn] Failed to read frame, retrying…")
+                    time.sleep(0.05)
                     continue
-                
-                # Process frame
-                results = self.monitor.process_frame(frame)
-                
-                # Check for alerts
-                current_time = time.time()
-                global_state = results["global_state"]
-                
-                # 1. Fall Detection Alert
-                if global_state["fall_detected"]:
-                    # Check cooldown
-                    if current_time - self.last_fall_alert_time > self.alert_cooldown:
-                        self.last_fall_alert_time = current_time
-                        
-                        # Prepare alert data
-                        fall_data = {
-                            "timestamp": datetime.now().isoformat(),
-                            "message": "Fall detected by live monitor",
-                            "confidence": "High"
-                        }
-                        
-                        self.send_alert("fall", fall_data)
-                
-                # 2. Inactivity Alert
-                if global_state["inactivity_alert"]:
-                    # Check cooldown
-                    if current_time - self.last_inactivity_alert_time > self.alert_cooldown:
-                        self.last_inactivity_alert_time = current_time
-                        
-                        inactivity_res = results["inactivity"]
-                        alert_data = {
-                            "timestamp": datetime.now().isoformat(),
-                            "message": f"Inactivity detected ({inactivity_res.get('time_inactive_seconds', 0)}s)",
-                            "duration": inactivity_res.get('time_inactive_seconds', 0)
-                        }
-                        
-                        self.send_alert("inactivity", alert_data)
-                
-                # Visualize
-                display_frame = draw_united_interface(frame, results)
-                
-                if self.session_id:
-                     cv2.putText(display_frame, f"Session: {self.session_id[:8]}...", (10, 200), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-                cv2.imshow("Live Elderly Monitor", display_frame)
-                
-                # Handle inputs
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
-                    self.running = False
-                
-                frame_count += 1
-                
+                results = self.monitor.process_frame(frame)
+                gs      = results["global_state"]
+                now     = time.time()
+
+                # Fall alert
+                if gs["fall_detected"]:
+                    if now - self.last_fall_alert_time > self.alert_cooldown:
+                        self.last_fall_alert_time = now
+                        self.send_alert("fall", {
+                            "timestamp": datetime.now().isoformat(),
+                            "message":   "Fall detected by live monitor",
+                            "confidence": results["fall"].get("confidence", 0),
+                        })
+                        # Force fresh 30-frame evidence before next alert
+                        self.monitor.reset_fall()
+
+                # Inactivity alert
+                if gs["inactivity_alert"]:
+                    if now - self.last_inactivity_alert_time > self.alert_cooldown:
+                        self.last_inactivity_alert_time = now
+                        inactive_sec = results["inactivity"].get("time_inactive_seconds", 0)
+                        self.send_alert("inactivity", {
+                            "timestamp": datetime.now().isoformat(),
+                            "message":   f"Inactivity detected ({inactive_sec}s)",
+                            "duration":  inactive_sec,
+                        })
+
+                display_frame = draw_united_interface(frame, results)
+
+                if self.session_id:
+                    cv2.putText(display_frame,
+                                f"Session: {self.session_id[:8]}…",
+                                (10, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                                (200, 200, 200), 1)
+
+                try:
+                    cv2.imshow("Caretaker.ai — Live Monitor", display_frame)
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord("q"):
+                        self.running = False
+                except cv2.error:
+                    # Headless environment — no display, use sleep for rate control
+                    time.sleep(0.04)
+
         except KeyboardInterrupt:
-            print("Stopping...")
+            print("\nStopping…")
         finally:
-            cap_thread.stop()
-            cv2.destroyAllWindows()
+            cap.release()
+            try:
+                cv2.destroyAllWindows()
+            except cv2.error:
+                pass
             print("Monitor stopped.")
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Live Elderly Monitor Client")
-    parser.add_argument("--session-id", type=str, help="Active monitoring session ID")
-    parser.add_argument("--token", type=str, help="JWT Authentication token")
-    parser.add_argument("--camera", type=int, default=0, help="Camera index")
-    parser.add_argument("--sensitivity", type=str, default="medium", choices=["low", "medium", "high"])
-    parser.add_argument("--threshold", type=int, default=30, help="Inactivity threshold (seconds)")
-    
+    parser = argparse.ArgumentParser(description="Caretaker.ai Live Monitor")
+    parser.add_argument("--session-id",  type=str, default=None)
+    parser.add_argument("--token",       type=str, default=None)
+    parser.add_argument("--camera",      type=int, default=0)
+    parser.add_argument("--sensitivity", type=str, default="medium",
+                        choices=["low", "medium", "high"])
+    parser.add_argument("--threshold",   type=int, default=30)
     args = parser.parse_args()
-    
+
     session = LiveMonitorSession(
-        session_id=args.session_id,
-        token=args.token,
-        camera_index=args.camera,
-        sensitivity=args.sensitivity,
-        threshold=args.threshold
+        session_id   = args.session_id,
+        token        = args.token,
+        camera_index = args.camera,
+        sensitivity  = args.sensitivity,
+        threshold    = args.threshold,
     )
-    
     session.run()
+
 
 if __name__ == "__main__":
     main()

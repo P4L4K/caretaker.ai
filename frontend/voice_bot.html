@@ -447,29 +447,70 @@
         }
 
         function controlMusic(action) {
-            if (action === 'toggle') {
-                if (state.youtubeMode) return;
-                if (audioPlayer.paused) {
-                    audioPlayer.play();
-                    document.getElementById('play-pause-btn').textContent = '⏸ Pause';
+            const ytPlayer = document.getElementById('yt-player').contentWindow;
+            
+            if (action === 'toggle' || action === 'play' || action === 'pause') {
+                if (state.youtubeMode) {
+                    if (action === 'pause') {
+                        ytPlayer.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
+                        document.getElementById('play-pause-btn').innerHTML = '▶ Play';
+                    } else if (action === 'play') {
+                        ytPlayer.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+                        document.getElementById('play-pause-btn').innerHTML = '⏸ Pause';
+                    } else if (action === 'toggle') {
+                        // YouTube iframe toggle is tricky without state check, but we can blind guess based on button text
+                        const btnText = document.getElementById('play-pause-btn').textContent;
+                        if (btnText.includes('Pause')) {
+                            ytPlayer.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
+                            document.getElementById('play-pause-btn').innerHTML = '▶ Play';
+                        } else {
+                            ytPlayer.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+                            document.getElementById('play-pause-btn').innerHTML = '⏸ Pause';
+                        }
+                    }
+                } else {
+                    if (action === 'pause' || (action === 'toggle' && !audioPlayer.paused)) {
+                        audioPlayer.pause();
+                        document.getElementById('play-pause-btn').innerHTML = '▶ Play';
+                    } else if (action === 'play' || (action === 'toggle' && audioPlayer.paused)) {
+                        audioPlayer.play();
+                        document.getElementById('play-pause-btn').innerHTML = '⏸ Pause';
+                    }
+                }
+            } else if (action === 'next') {
+                if (state.youtubeMode) {
+                    const next = state.videoQueueIdx + 1;
+                    if (next < state.videoQueue.length) {
+                        loadYouTubeTrack(next);
+                    } else {
+                        // try to grab next related video if we ever implement it, or just stop
+                        controlMusic('stop');
+                    }
+                } else {
+                    state.musicIndex = (state.musicIndex + 1) % playlist.length;
+                    playSong();
+                }
+            } else if (action === 'prev') {
+                if (state.youtubeMode) {
+                    const prev = state.videoQueueIdx - 1;
+                    if (prev >= 0) loadYouTubeTrack(prev);
+                } else {
+                    state.musicIndex = (state.musicIndex - 1 + playlist.length) % playlist.length;
+                    playSong();
+                }
+            } else if (action === 'stop') {
+                if (state.youtubeMode) {
+                    ytPlayer.postMessage('{"event":"command","func":"stopVideo","args":""}', '*');
+                    document.getElementById('yt-player').src = "";
                 } else {
                     audioPlayer.pause();
-                    document.getElementById('play-pause-btn').textContent = '▶ Play';
+                    audioPlayer.currentTime = 0;
                 }
-            } else if (action === 'next' && !state.youtubeMode) {
-                state.musicIndex = (state.musicIndex + 1) % playlist.length;
-                playSong();
-            } else if (action === 'prev' && !state.youtubeMode) {
-                state.musicIndex = (state.musicIndex - 1 + playlist.length) % playlist.length;
-                playSong();
-            } else if (action === 'stop') {
-                audioPlayer.pause();
-                audioPlayer.currentTime = 0;
                 state.musicPlaying = false;
-                document.getElementById('yt-player').src = "";
                 document.getElementById('music-widget').classList.add('hidden');
                 playlist = [...localPlaylist];
                 state.youtubeMode = false;
+                document.getElementById('play-pause-btn').innerHTML = '▶ Play';
             }
         }
 
@@ -800,7 +841,7 @@
         // ═══════════════════════════════════════════
         // MAIN CHAT HANDLER
         // ═══════════════════════════════════════════
-        async function handleUserMessage(text, triggerType = "user_initiated") {
+                async function handleUserMessage(text, triggerType = "user_initiated") {
             if (!text.trim()) return;
 
             const hindi = state.userLanguage === 'hi' || isHindi(text);
@@ -809,193 +850,7 @@
                 addUIMessage('user', text);
             }
 
-            const t = text.toLowerCase();
-
-            // ── STOP MUSIC ──
-            const stopWords = ['बंद', 'रोको', 'stop', 'band karo', 'ruko'];
-            const musicWords = ['गाना', 'संगीत', 'music', 'song', 'गीत'];
-            if (stopWords.some(w => t.includes(w))) {
-                if (state.musicPlaying || musicWords.some(w => t.includes(w))) {
-                    controlMusic('stop');
-                    const msg = hindi ? 'संगीत बंद कर दिया। 🎵' : 'Music stopped. 🎵';
-                    addUIMessage('bot', msg); speakHindi(msg);
-                    return;
-                }
-            }
-
-            const excludeWords = ['story', 'kahani', 'joke', 'chutkula', 'news', 'samachar',
-                                  'कहानी', 'किस्सा', 'चुटकुला', 'समाचार', 'कथा',
-                                  'video', 'वीडियो', 'motivational', 'मोटिवेशनल'];
-
-            // ── STORY HANDLER (must run BEFORE music check) ──
-            const storyTriggers  = ['कहानी', 'kahani', 'story', 'किस्सा', 'kissa', 'कथा', 'katha'];
-            const storyPlayWords = ['सुनाओ', 'बताओ', 'सुनना', 'सुनो', 'sunao', 'batao', 'play', 'चलाओ', 'लगाओ', 'सुना दो'];
-
-            const wantsStory = storyTriggers.some(w => t.includes(w) || text.includes(w))
-                            && storyPlayWords.some(w => t.includes(w) || text.includes(w));
-
-            if (wantsStory) {
-                // Detect story category from user text
-                let storyQuery = 'moral stories hindi for adults prerak prasang';
-                let categoryLabel = 'moral';
-
-                if (t.includes('भूतिया') || t.includes('bhootiya') || t.includes('डरावनी') || t.includes('horror') || t.includes('darawni') || t.includes('bhoot')) {
-                    storyQuery = 'bhootiya kahani hindi horror story';
-                    categoryLabel = 'horror 👻';
-                } else if (t.includes('comedy') || t.includes('funny') || t.includes('मज़ेदार') || t.includes('mazedaar') || t.includes('हँसी') || t.includes('joke')) {
-                    storyQuery = 'funny hindi stories akbar birbal comedy';
-                    categoryLabel = 'funny 😄';
-                } else if (t.includes('spiritual') || t.includes('bhajan') || t.includes('dharmik') || t.includes('धार्मिक') || t.includes('ram') || t.includes('krishna')) {
-                    storyQuery = 'ramayan katha hindi pravachan';
-                    categoryLabel = 'spiritual 🙏';
-                } else if (t.includes('itihas') || t.includes('इतिहास') || t.includes('historical') || t.includes('maharana') || t.includes('shivaji')) {
-                    storyQuery = 'historical stories hindi maharana pratap';
-                    categoryLabel = 'historical 🏛️';
-                } else if (t.includes('adventure') || t.includes('jungle') || t.includes('रोमांच')) {
-                    storyQuery = 'adventure thriller kahani hindi';
-                    categoryLabel = 'adventure 🌿';
-                } else if (t.includes('bachon') || t.includes('बच्चों') || t.includes('panchtantra')) {
-                    storyQuery = 'panchtantra stories hindi moral';
-                    categoryLabel = 'Panchtantra 📚';
-                }
-
-                const searchMsg = hindi
-                    ? `📖 ${categoryLabel} कहानी खोज रहे हैं YouTube पर...`
-                    : `📖 Finding a ${categoryLabel} story on YouTube...`;
-                addUIMessage('bot', searchMsg);
-                speakHindi(hindi ? `${categoryLabel} कहानी खोज रहे हैं` : `Finding a story for you`);
-
-                const tracks = await searchYouTube(storyQuery, 300); // 5-min minimum for stories
-                if (tracks && tracks.length > 0) {
-                    const track = tracks[0];
-                    // Stop any music playing
-                    state.videoQueue = tracks;
-                    state.videoQueueIdx = 0;
-                    loadYouTubeTrack(0, '📖 Story');
-                    const doneMsg = hindi
-                        ? `📖 यह ${categoryLabel} कहानी सुनिए: ${tracks[0].name}`
-                        : `📖 Here's a ${categoryLabel} story: ${tracks[0].name}`;
-                    addUIMessage('bot', doneMsg);
-                    speakHindi(hindi ? `${categoryLabel} कहानी शुरू हो रही है` : `Starting story`);
-                } else {
-                    const failMsg = hindi
-                        ? '😔 अभी YouTube पर कहानी नहीं मिली। थोड़ी देर बाद फिर कोशिश करें।'
-                        : '😔 Could not find a story on YouTube right now. Try again shortly.';
-                    addUIMessage('bot', failMsg);
-                    speakHindi(failMsg);
-                }
-                return;
-            }
-
-            // ── VIDEO HANDLER (motivational, news, any "वीडियो" request) ──
-            const videoTriggers  = ['वीडियो', 'video'];
-            const videoPlayWords = ['चलाओ', 'play', 'दिखाओ', 'देखना', 'लगाओ', 'दिखा दो', 'दिखा'];
-            const wantsVideo = videoTriggers.some(w => t.includes(w) || text.includes(w))
-                            && videoPlayWords.some(w => t.includes(w) || text.includes(w));
-
-            if (wantsVideo) {
-                let videoQuery = text;
-                [...videoPlayWords, ...videoTriggers, 'please', 'कृपया', 'जरा', 'एक'].forEach(w => {
-                    videoQuery = videoQuery.replace(new RegExp(w, 'gi'), '').trim();
-                });
-                if (!videoQuery || videoQuery.length < 2) videoQuery = 'motivational hindi video';
-                videoQuery = videoQuery + ' hindi';
-
-                addUIMessage('bot', hindi ? `🔍 वीडियो खोज रहे हैं...` : `🔍 Searching for video...`);
-                const tracks = await searchYouTube(videoQuery);
-                if (tracks && tracks.length > 0) {
-                    state.videoQueue = tracks;
-                    state.videoQueueIdx = 0;
-                    loadYouTubeTrack(0, '▶ Video');
-                    const doneMsg = hindi ? `▶ चला रहे हैं: ${tracks[0].name}` : `▶ Playing: ${tracks[0].name}`;
-                    addUIMessage('bot', doneMsg);
-                    speakHindi(hindi ? `वीडियो शुरू हो रहा है` : `Starting video`);
-                } else {
-                    const failMsg = hindi ? '😔 वीडियो नहीं मिला। बाद में कोशिश करें।' : '😔 Video not found. Try again later.';
-                    addUIMessage('bot', failMsg); speakHindi(failMsg);
-                }
-                return;
-            }
-
-            // ── PLAY MUSIC ──
-            const playWords = ['बजाओ', 'सुनाओ', 'लगाओ', 'play', 'चलाओ', 'बजा दो', 'सुना दो', 'प्ले'];
-            const favWords = ['पसंदीदा', 'favourite', 'favorite', 'my fav', 'manpasand'];
-            const genericPlay = ['कोई गाना', 'गाना बजाओ', 'संगीत बजाओ', 'a song', 'some music', 'कोई सुनाओ'];
-
-            if (playWords.some(w => t.includes(w)) && !excludeWords.some(w => t.includes(w))) {
-                // Favourites
-                if (favWords.some(w => t.includes(w))) {
-                    // Check DB favorites first
-                    if (state.favoriteSongs && state.favoriteSongs.length > 0) {
-                        const fav = state.favoriteSongs[0];
-                        await playYouTubeSong(fav.query || fav.title);
-                        return;
-                    }
-                    playlist = [...localPlaylist]; state.youtubeMode = false;
-                    playSong(0);
-                    const msg = hindi ? 'आपका पसंदीदा गाना बजा रहा हूं। ❤️' : 'Playing your favourite song. ❤️';
-                    addUIMessage('bot', msg); speakHindi(msg);
-                    return;
-                }
-
-                // Check local playlist by name
-                for (let i = 0; i < localPlaylist.length; i++) {
-                    if (t.includes(localPlaylist[i].title.toLowerCase())) {
-                        playlist = [...localPlaylist]; state.youtubeMode = false;
-                        playSong(i);
-                        const msg = hindi ? `बजा रहा हूं: ${localPlaylist[i].title} 🎵` : `Playing ${localPlaylist[i].title}. 🎵`;
-                        addUIMessage('bot', msg); speakHindi(msg);
-                        return;
-                    }
-                }
-
-                // Generic "play some music"
-                if (genericPlay.some(w => t.includes(w))) {
-                    playlist = [...localPlaylist]; state.youtubeMode = false;
-                    playSong(1);
-                    const msg = hindi ? 'शांत संगीत बजा रहा हूं। 🎵' : 'Playing some calming music. 🎵';
-                    addUIMessage('bot', msg); speakHindi(msg);
-                    return;
-                }
-
-                // Specific song — extract song name and search YouTube
-                let songQuery = text;
-                [...playWords, ...musicWords, 'the', 'a', 'an', 'please', 'कृपया'].forEach(w => {
-                    songQuery = songQuery.replace(new RegExp(w, 'gi'), '').trim();
-                });
-                if (songQuery.length > 1) {
-                    playYouTubeSong(songQuery);
-                    return;
-                }
-            }
-
-            // ── MEDICINE QUERY ──
-            const medWords = ['दवाई', 'दवा', 'medicine', 'dawai', 'tablet', 'गोली', 'दवाइयां'];
-            if (medWords.some(w => t.includes(w)) && state.activeMeds && state.activeMeds.length > 0) {
-                const medList = state.activeMeds.map(m =>
-                    `${m.medicine_name || m.name}${m.dosage ? ' (' + m.dosage + ')' : ''}${m.frequency ? ' — ' + m.frequency : ''}`
-                ).join(', ');
-                const msg = hindi
-                    ? `आपकी सक्रिय दवाइयां हैं: ${medList}। कृपया समय पर लें। 💊`
-                    : `Your active medicines are: ${medList}. Please take them on time. 💊`;
-                addUIMessage('bot', msg);
-                speakHindi(msg);
-                return;
-            }
-
-            // ── EMERGENCY ──
-            const emergencyWords = ['emergency', '911', 'आपातकाल', 'मदद', 'help me', 'bachao', 'बचाओ'];
-            if (emergencyWords.some(w => t.includes(w))) {
-                toggleEmergencyMode(true);
-                const msg = hindi
-                    ? "🚨 आपातकालीन अलर्ट! देखभालकर्ता को तुरंत सूचित कर रहे हैं।"
-                    : "🚨 EMERGENCY ALERT TRIGGERED. Notifying caretaker immediately.";
-                addUIMessage('bot', msg);
-                speakHindi(msg);
-                return;
-            }
-
-            // ── BACKEND AI CHAT ──
+            // ── BACKEND AI CHAT WITH INTENT CLASSIFICATION ──
             try {
                 const token = localStorage.getItem('token');
                 const rid = localStorage.getItem('selectedRecipientId') || "1";
@@ -1019,6 +874,8 @@
                 if (data.code === 200 && data.result.reply) {
                     const mood = data.result.mood_detected;
                     state.currentMood = mood;
+                    const intent = data.result.intent || "chat";
+                    let query = data.result.search_query || "";
 
                     // Update mood badge on last user message
                     if (triggerType === "user_initiated" && state.messages.length > 0) {
@@ -1037,10 +894,55 @@
                     addUIMessage('bot', data.result.reply);
                     speak(data.result.reply, data.result.audio_base64);
 
+                    // ── EXECUTE ACTION BASED ON INTENT ──
+                    if (intent === "stop") {
+                        controlMusic('stop');
+                    } else if (intent === "pause") {
+                        controlMusic('pause');
+                    } else if (intent === "resume") {
+                        controlMusic('play');
+                    } else if (intent === "next") {
+                        controlMusic('next');
+                    } else if (intent === "previous") {
+                        controlMusic('prev');
+                    } else if (intent === "play_music") {
+                        playYouTubeSong(query || (hindi ? "relaxing hindi music hits" : "relaxing music calming"));
+                    } else if (intent === "play_video") {
+                        const tracks = await searchYouTube(query || (hindi ? "motivational video hindi" : "motivational video"));
+                        if (tracks && tracks.length > 0) {
+                            state.videoQueue = tracks;
+                            state.videoQueueIdx = 0;
+                            loadYouTubeTrack(0, '▶ Video');
+                        } else {
+                            addUIMessage('bot', hindi ? '😔 वीडियो नहीं मिला।' : '😔 Video not found.');
+                        }
+                    } else if (intent === "tell_story") {
+                        const tracks = await searchYouTube(query || (hindi ? "moral story hindi" : "moral story english"), 300);
+                        if (tracks && tracks.length > 0) {
+                            state.videoQueue = tracks;
+                            state.videoQueueIdx = 0;
+                            loadYouTubeTrack(0, '📖 Story');
+                        } else {
+                            addUIMessage('bot', hindi ? '😔 कहानी नहीं मिली।' : '😔 Story not found.');
+                        }
+                    } else if (intent === "emergency") {
+                        toggleEmergencyMode(true);
+                    } else if (intent === "medicine_query") {
+                        if (state.activeMeds && state.activeMeds.length > 0) {
+                            const medList = state.activeMeds.map(m =>
+                                `${m.medicine_name || m.name}${m.dosage ? ' (' + m.dosage + ')' : ''}${m.frequency ? ' — ' + m.frequency : ''}`
+                            ).join(', ');
+                            const msg = hindi
+                                ? `Reminder: आपकी सक्रिय दवाइयां हैं: ${medList}। 💊`
+                                : `Reminder: Your active medicines are: ${medList}. 💊`;
+                            setTimeout(() => { addUIMessage('bot', msg); speakHindi(msg); }, 3000);
+                        }
+                    }
+
                     // Show recommendation card if mood-driven suggestion exists
                     if (data.result.recommendation && data.result.recommendation.type !== 'choice') {
-                        // Only show after a real user message (not proactive)
-                        if (triggerType === 'user_initiated') {
+                        // Only show after a real user message, and not if we just handled a media intent
+                        if (triggerType === 'user_initiated' && !['play_music', 'play_video', 'tell_story'].includes(intent)) {
                             showRecommendationCard(data.result.recommendation, mood);
                         }
                     }
@@ -1055,15 +957,16 @@
                     throw new Error("API Error");
                 }
             } catch (e) {
+                console.error("Chat Error:", e);
                 const fallback = hindi
-                    ? "अभी मुझे जवाब देने में थोड़ी दिक्कत हो रही है। क्या आप कोई संगीत सुनना चाहेंगे? 🎵"
+                    ? "अभी मुझे जवाब देने में थोड़ी दिक्कत हो रही है। क्या आप कुछ और सुनना चाहेंगे? 🎵"
                     : "I'm having a little trouble right now. Would you like to hear some music instead? 🎵";
                 addUIMessage('bot', fallback);
                 speakHindi(fallback);
             }
         }
 
-        // ═══════════════════════════════════════════
+// ═══════════════════════════════════════════
         // UI HELPERS
         // ═══════════════════════════════════════════
         function updateMoodBadge(mood) {

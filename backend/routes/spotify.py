@@ -68,7 +68,7 @@ def _enrich_with_details(video_ids: list, api_key: str) -> dict:
 # ─────────────────────────────────────────────
 # YouTube Data API v3 — primary
 # ─────────────────────────────────────────────
-def _youtube_api_search(query: str, max_results: int = 3, min_duration: int = 180) -> list[dict]:
+def _youtube_api_search(query: str, max_results: int = 3, min_duration: int = 60) -> list[dict]:
     """
     Full quality-ranked search:
       - Fetches 10 candidates from Search API
@@ -91,11 +91,12 @@ def _youtube_api_search(query: str, max_results: int = 3, min_duration: int = 18
             "part": "snippet",
             "q": query,
             "type": "video",
-            "maxResults": 10,          # fetch more candidates so filter has room
+            "maxResults": 10,
             "key": api_key,
             "relevanceLanguage": "hi",
             "regionCode": "IN",
-            "order": "relevance"       # relevance first, re-rank by views after filter
+            "order": "relevance",
+            "videoEmbeddable": "true"
         })
         req = urllib.request.Request(
             "https://www.googleapis.com/youtube/v3/search?" + params,
@@ -199,7 +200,7 @@ def _youtube_scrape(query: str, suffix: str = "") -> dict | None:
 # ─────────────────────────────────────────────
 # Unified search: API → scrape fallback
 # ─────────────────────────────────────────────
-def _youtube_search(query: str, min_duration: int = 180) -> dict | None:
+def _youtube_search(query: str, min_duration: int = 60) -> dict | None:
     """Single best result. API first, scrape fallback."""
     results = _youtube_api_search(query, max_results=1, min_duration=min_duration)
     if results:
@@ -207,7 +208,7 @@ def _youtube_search(query: str, min_duration: int = 180) -> dict | None:
     return _youtube_scrape(query)
 
 
-def _youtube_search_many(query: str, max_results: int = 3, min_duration: int = 180) -> list[dict]:
+def _youtube_search_many(query: str, max_results: int = 3, min_duration: int = 60) -> list[dict]:
     """Up to max_results quality results. API first, scrape fallback (1 result)."""
     results = _youtube_api_search(query, max_results=max_results, min_duration=min_duration)
     if results:
@@ -222,7 +223,7 @@ def _youtube_search_many(query: str, max_results: int = 3, min_duration: int = 1
 @router.get("/music/youtube")
 def search_youtube_track(
     q: str = Query(..., min_length=1),
-    min_duration: int = Query(180, description="Minimum video duration in seconds (default 180 = 3 min)")
+    min_duration: int = Query(60, description="Minimum video duration in seconds (default 60 = 1 min)")
 ):
     """Search YouTube — filters short clips, returns top 3 ranked by view count."""
     results = _youtube_search_many(q, max_results=3, min_duration=min_duration)
@@ -238,7 +239,7 @@ def search_by_mood(mood: str = Query(...)):
     rec = get_content_recommendation(mood)
     tracks = []
     for query in rec.get("queries", []):
-        result = _youtube_search(query, min_duration=180)
+        result = _youtube_search(query, min_duration=60)
         if result:
             result["name"] = query.title()
             tracks.append(result)
@@ -256,7 +257,7 @@ def search_story(category: str = Query("moral")):
     queries = get_story_queries(category)
     tracks = []
     for query in queries:
-        result = _youtube_search(query, min_duration=300)   # 5 minutes minimum for stories
+        result = _youtube_search(query, min_duration=60)   # 1 minute minimum for stories
         if result:
             result["name"] = query.title()
             result["category"] = category

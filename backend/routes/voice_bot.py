@@ -126,14 +126,30 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
 
     gemini_payload = {
         "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser says: {user_text}"}]}],
-        "generationConfig": {"maxOutputTokens": 1000, "temperature": 0.7}
+        "generationConfig": {
+            "maxOutputTokens": 1000, 
+            "temperature": 0.7,
+            "responseMimeType": "application/json"
+        }
     }
 
     try:
         data = call_gemini(gemini_payload, timeout=20, caller="[voice_bot/chat]")
         if data and data.get('candidates'):
                 ai_text = data['candidates'][0]['content']['parts'][0]['text'].strip()
-                save_message(payload.recipient_id, SenderEnum.bot, ai_text, MoodEnum.neutral, trigger_enum, payload.session_id, db)
+                import json
+                try:
+                    ai_json = json.loads(ai_text)
+                    reply_text = ai_json.get("reply", ai_text)
+                    intent = ai_json.get("intent", "chat")
+                    search_query = ai_json.get("search_query", "")
+                except Exception as ex:
+                    print(f"Failed to parse Gemini JSON: {ex}")
+                    reply_text = ai_text
+                    intent = "chat"
+                    search_query = ""
+
+                save_message(payload.recipient_id, SenderEnum.bot, reply_text, MoodEnum.neutral, trigger_enum, payload.session_id, db)
 
                 # Attach content recommendation when mood is actionable
                 mood_str = mood_result["mood"].value
@@ -145,13 +161,15 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
                 audio_base64 = ""
                 if payload.use_tts:
                     # Detect if response is Hindi for correct voice selection
-                    lang_hi = "hi-IN" if is_hindi(ai_text) else "en-US"
-                    audio_base64 = generate_speech_base64(ai_text, lang_hi)
+                    lang_hi = "hi-IN" if is_hindi(reply_text) else "en-US"
+                    audio_base64 = generate_speech_base64(reply_text, lang_hi)
 
                 return ResponseSchema(
                     code=200, status="success", message="AI response generated",
                     result={
-                        "reply": ai_text,
+                        "reply": reply_text,
+                        "intent": intent,
+                        "search_query": search_query,
                         "audio_base64": audio_base64,
                         "mood_detected": mood_str,
                         "depression_risk": is_at_risk,

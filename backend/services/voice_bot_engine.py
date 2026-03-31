@@ -261,8 +261,15 @@ EMOTIONAL STATE RIGHT NOW:
             prompt += f"{label}: {msg['text']}\n"
         prompt += "\n"
 
-    prompt += f"Now respond as Saathi to what {first_name} ji just said. Be natural. Be human. Be warm.\n"
+    prompt += f"Now respond as Saathi to what {first_name} ji just said. Be natural. Be human. Be warm.\n\n"
 
+    prompt += """OUTPUT FORMAT REQUIREMENT:
+You MUST return your response as a valid JSON object. Do NOT wrap it in markdown block quotes (like ```json), just raw JSON.
+The structured JSON must contain these exact keys:
+1. "reply": Your conversational response as Saathi.
+2. "intent": Analyze the user's intent based on their text. Must be exactly one of: "play_music", "play_video", "tell_story", "stop", "pause", "resume", "next", "previous", "emergency", "medicine_query", or "chat". Default to "chat".
+3. "search_query": If the intent is play_music, play_video, or tell_story, construct a clean YouTube search query in English based on what they asked (e.g., 'Kishore Kumar old romantic songs'). If they did not specify, choose a fitting query based on their mood. If intent is NOT media, leave this empty "".
+"""
     return prompt
 
 # ─────────────────────────────────────────────

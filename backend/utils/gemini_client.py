@@ -17,10 +17,6 @@ BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 # List of working models to try if the primary one fails
 FALLBACK_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-flash-latest",
-    "gemini-2.5-pro",
     "gemini-3.1-flash-lite-preview"
 ]
 

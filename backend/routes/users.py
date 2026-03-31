@@ -7,6 +7,7 @@ from typing import Optional, List, Dict
 from models.users import ResponseSchema, Register, Login, CaretakerUpdate
 from tables.users import CareTaker, CareRecipient
 from tables.vital_signs import VitalSign
+from tables.medications import Medication, MedicationStatus
 from sqlalchemy import desc
 from config import get_db, ACCESS_TOKEN_EXPIRE_MINUTES
 from repository.users import UsersRepo, JWTRepo
@@ -80,6 +81,21 @@ async def profile(authorization: Optional[str] = Header(None), db: Session = Dep
                     'recorded_at': latest_vital.recorded_at.isoformat() if latest_vital.recorded_at else None
                 }
 
+            # Fetch active medications for voice bot medicine reminders
+            active_meds = db.query(Medication).filter(
+                Medication.care_recipient_id == r.id,
+                Medication.status == MedicationStatus.active
+            ).all()
+            meds_data = [
+                {
+                    'medicine_name': m.medicine_name,
+                    'dosage': m.dosage,
+                    'frequency': m.frequency,
+                    'schedule_time': m.schedule_time
+                }
+                for m in active_meds
+            ]
+
             recipients.append({
                 'id': r.id,
                 'full_name': r.full_name,
@@ -93,7 +109,8 @@ async def profile(authorization: Optional[str] = Header(None), db: Session = Dep
                 'height': r.height,
                 'weight': r.weight,
                 'blood_group': r.blood_group,
-                'emergency_contact': r.emergency_contact
+                'emergency_contact': r.emergency_contact,
+                'medications': meds_data
             })
 
         return {

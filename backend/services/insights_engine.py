@@ -20,6 +20,7 @@ import os
 import json
 import datetime
 import requests
+from utils.gemini_client import call_gemini
 from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
@@ -594,19 +595,16 @@ Return a JSON object with EXACTLY these keys:
 Return ONLY valid JSON. No markdown, no code fences, no extra text."""
 
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-        resp = requests.post(url, json={
+        result_data = call_gemini({
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
                 "maxOutputTokens": 8192,
                 "temperature": 0.2,
                 "thinkingConfig": {"thinkingBudget": 1024}
             }
-        }, headers={"Content-Type": "application/json"}, timeout=90)
+        }, timeout=90, caller="[insights_engine]")
 
-        if resp.status_code == 200:
-            result_data = resp.json()
-            if "candidates" in result_data and result_data["candidates"]:
+        if result_data and "candidates" in result_data and result_data["candidates"]:
                 parts = result_data["candidates"][0]["content"]["parts"]
                 # Gemini 2.5 Flash with thinking: the actual text is in the LAST non-thought part
                 raw = ""
@@ -636,7 +634,6 @@ Return ONLY valid JSON. No markdown, no code fences, no extra text."""
                             pass
                     print(f"[insights_engine] Failed to parse Gemini response")
 
-        print(f"[insights_engine] Gemini returned status {resp.status_code}")
     except Exception as e:
         print(f"[insights_engine] Gemini call failed: {e}")
 

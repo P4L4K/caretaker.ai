@@ -71,7 +71,7 @@
     <header id="header" class="bg-[#4A90E2] text-white p-4 shadow-lg transition-colors duration-500 sticky top-0 z-10">
         <div class="max-w-6xl mx-auto flex justify-between items-center">
             <div class="flex items-center space-x-4">
-                <a href="profile.html" class="flex items-center text-white hover:text-blue-200 transition-colors" title="Back to Dashboard">
+                <a href="dashboard.html" class="flex items-center text-white hover:text-blue-200 transition-colors" title="Back to Dashboard">
                     <i data-lucide="arrow-left" class="h-5 w-5 mr-1"></i>
                     <span class="hidden sm:inline">Dashboard</span>
                 </a>
@@ -784,6 +784,13 @@
                 return;
             }
 
+            // ── TYPE 1.5: DIRECT PLAY (from Gemini) ──
+            if (recommendation.type === 'play' && recommendation.query) {
+                console.log("[AI] Direct play triggered:", recommendation.query);
+                playYouTubeSong(recommendation.query);
+                return;
+            }
+
             // ── TYPE 2: MOOD RECOMMENDATION (existing) ──
             const typeLabel = recommendation.type === 'music'
                 ? (isHindiLang ? '🎵 गाना' : '🎵 Music')
@@ -814,16 +821,8 @@
 
         async function handleRecommendationPlay(query, type) {
             document.getElementById('rec-card-area').classList.add('hidden');
-            if (type === 'music') {
-                await playYouTubeSong(query);
-            } else {
-                // Story — open YouTube search
-                const msg = state.userLanguage === 'hi'
-                    ? `यह कहानी सुनने के लिए YouTube पर खोजें: "${query}"`
-                    : `Search YouTube for: "${query}"`;
-                addUIMessage('bot', msg);
-                speakHindi(msg);
-            }
+            const title = type === 'music' ? '🎵 Music' : '📖 Story';
+            await playYouTubeSong(query, title);
         }
 
         // ═══════════════════════════════════════════
@@ -862,8 +861,8 @@
 
             // ── PLAY MUSIC ──
             const playWords = ['बजाओ', 'सुनाओ', 'लगाओ', 'play', 'चलाओ', 'बजा do', 'सुना do', 'प्ले', 'sunao', 'chalaiye'];
-            const genericPlay = ['कोई गाना', 'गाना बजाओ', 'संगीत बजाओ', 'a song', 'some music', 'कोई सुनाओ', 'play a song', 'play some songs'];
-            const storyGeneric = ['कोई कहानी', 'कहानी सुनाओ', 'tell a story', 'tell me a story', 'story sunao'];
+            const genericPlay = ['कोई गाना', 'गाना बजाओ', 'संगीत बजाओ', 'a song', 'some music', 'कोई सुनाओ', 'play a song', 'play some songs', 'sangit bajao', 'gaana sunao', 'kuch bajao'];
+            const storyGeneric = ['कोई कहानी', 'कहानी सुनाओ', 'tell a story', 'tell me a story', 'story sunao', 'kahani sunao', 'kuch sunao'];
 
             // If it's a generic request, let the backend AI handle it (to show options)
             const isGenericRequest = genericPlay.some(w => t.includes(w)) || storyGeneric.some(w => t.includes(w));
@@ -1245,10 +1244,10 @@
 
             if (localStorage.getItem('healthBotEmergency') === 'true') toggleEmergencyMode(true);
 
-            // Proactive greeting — backend decides language based on context
+            // Proactive greeting — backend decides language and time-appropriate tone
             setTimeout(() => {
                 handleUserMessage(
-                    "Provide a gentle morning/evening contextual greeting directly based on my name and latest health info. If appropriate, greet in Hindi.",
+                    "Greet me warmly and check on me appropriately for this time of day, using my name and latest health info context.",
                     "proactive_checkin"
                 );
             }, 1000);

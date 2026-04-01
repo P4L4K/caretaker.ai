@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, status
+import json
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from typing import Optional, List
@@ -6,7 +7,7 @@ from pydantic import BaseModel
 import os
 import requests
 from config import get_db
-from utils.gemini_client import call_gemini
+from utils.gemini_client import call_gemini, safe_json_parse
 from models.users import ResponseSchema
 from tables.users import CareRecipient, CareTaker
 from repository.users import UsersRepo
@@ -136,12 +137,12 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
                 if mood_str not in ("neutral",):
                     recommendation = get_content_recommendation(mood_str)
                 
-                # Check for "choice" type to trigger frontend selection UI
-                if ai_text.lower().startswith("{") and '"type": "choice"' in ai_text.lower():
-                     try:
-                         recommendation = json.loads(ai_text)
-                         ai_text = recommendation.get("message", "Aap kya sunna chahenge?")
-                     except: pass
+                # Check for AI-driven JSON triggers (choices or direct playback)
+                if ai_text.strip().startswith("{") and ("type" in ai_text.lower()):
+                     parsed = safe_json_parse(ai_text)
+                     if parsed:
+                         recommendation = parsed
+                         ai_text = recommendation.get("message", "Theek hai!")
 
                 # ── ADD TTS GENERATION ──
                 audio_base64 = ""

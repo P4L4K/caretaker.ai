@@ -21,7 +21,7 @@ import os
 import json
 import requests
 from datetime import datetime, timedelta
-from utils.gemini_client import call_gemini
+from utils.gemini_client import call_gemini, safe_json_parse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -148,35 +148,36 @@ Recent conversation history (chronological, user messages only):
 
 Current message (just now): "{current_text}"
 
-Analyze the full emotional arc and respond with a JSON object with EXACTLY these keys:
+Analyze the full emotional arc and respond with EXACTLY ONE JSON object and NO OTHER TEXT.
+
+### JSON FORMAT:
 {{
-  "current_mood": <one of: happy|sad|anxious|angry|neutral|distressed|lonely|bored|relaxed|spiritual>,
-  "dominant_mood": <most frequent mood over history, same options>,
-  "trend": <"improving"|"worsening"|"stable">,
-  "stability_score": <float 0.0-1.0, 1.0=very stable mood, 0.0=very volatile>,
-  "recommended_action": <"music"|"story"|"conversation"|"reminder"|"alert">,
-  "urgency": <"low"|"medium"|"high">,
-  "summary": <one short Hinglish sentence describing user's emotional state, max 12 words>,
-  "confidence": <float 0.0-1.0>
+  "current_mood": "happy|sad|anxious|angry|neutral|distressed|lonely|bored|relaxed|spiritual",
+  "dominant_mood": "same options as above",
+  "trend": "improving|worsening|stable",
+  "stability_score": 0.0-1.0,
+  "recommended_action": "music|story|conversation|reminder|alert",
+  "urgency": "low|medium|high",
+  "summary": "Short Hinglish summary, max 12 words",
+  "confidence": 0.0-1.0
 }}
 
-Rules:
-- urgency="high" only if user seems in crisis or very distressed repeatedly
-- recommended_action="alert" only for high urgency
-- recommended_action="conversation" if user needs emotional support more than content
+RULES:
+- Return ONLY the JSON object. No explanation, no prefix.
+- Ensure all quotes are closed.
 - summary should be warm and human, e.g. "Thoda udaas hain, par stable hain" or "Aaj bahut khush lag rahe hain!"
-- Respond with ONLY the JSON object, no markdown, no explanation.
 """
 
         try:
             data = call_gemini(
-                {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1, "maxOutputTokens": 300}},
+                {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1, "maxOutputTokens": 400}},
                 timeout=12, caller="[sentiment_engine]"
             )
             if data and data.get("candidates"):
-                raw = data["candidates"][0]["content"]["parts"][0]["text"]
-                raw = raw.replace("```json", "").replace("```", "").strip()
-                gemini_result = json.loads(raw)
+                raw = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                gemini_result = safe_json_parse(raw)
+                if not gemini_result:
+                    print(f"[sentiment_engine] JSON Parse Failed for raw: {raw}")
         except Exception as e:
             print(f"[sentiment_engine] Gemini error: {e}")
 

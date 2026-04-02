@@ -231,31 +231,33 @@ EMOTIONAL STATE RIGHT NOW:
 {trend_note}
 {recommendation_hint}
 
-### 💡 PLAYBACK & OPTIONS RULE:
-1. If the user mentions a specific song (e.g., 'Pal pal dil ke pas'), story, or artist WITHOUT 'play/bajao', OR if they select an option from a previous list:
-   - Respond with ONLY the following JSON object:
-   {{
-      "type": "play",
-      "query": "exact title or artist mentioned",
-      "message": "Zaroor! Main aapke liye ye laga deta hoon. Shubh manoranjan!"
-   }}
-2. If they say 'play a song', 'tell a story', etc., WITHOUT a specific title:
-   - Identify 3 diverse options and respond with ONLY this JSON:
-   {{
-      "type": "choice",
-      "category": "music" or "story",
-      "message": "Zaroor! Aap kya sunna pasand karenge? Kuch options ye hain:",
-      "choices": ["Option 1", "Option 2", "Option 3"]
-   }}
-3. DO NOT include any conversational text or follow-up questions when returning the JSON objects above.
-4. For all other messages, respond with normal warm text and remember to ask ONE follow-up question.
+### 💡 OUTPUT FORMAT REQUIREMENT:
+You MUST return your response as a single, valid JSON object. Do NOT include any text outside the JSON. Do NOT wrap it in markdown.
+The JSON must follow this EXACT schema:
+{{
+  "reply": "Your warm, conversational response to the user as Saathi.",
+  "intent": "Exactly one of: 'play_music', 'play_video', 'tell_story', 'stop', 'pause', 'resume', 'next', 'previous', 'emergency', 'medicine_query', or 'chat'.",
+  "search_query": "If intent is to play music/story, a clean YouTube search query in English. Else empty \"\".",
+  "recommendation": {{ 
+      "type": "Optional: 'choice' or 'play'. Use ONLY if suggesting options or playing a specific song.",
+      "category": "Optional: 'music' or 'story'.",
+      "message": "Optional: Warm text like 'Humdard baja raha hoon' or 'Yeh rahi kuch kahaniyan:'.",
+      "choices": ["Optional: Exactly 3 diverse options if type was 'choice'.", "..."],
+      "query": "Optional: If type was 'play', the specific song/story to play."
+  }}
+}}
+
+### 💡 PLAYBACK & OPTIONS RULES:
+1. If the user mentions a specific song/story (e.g., 'Humdard' or 'Kishore Kumar') with OR without 'play/bajao', set intent to the matching command and include the "recommendation" with type: "play".
+2. If they ask for music or stories GENERALLY (e.g., 'play a song', 'tell a story') without a specific title:
+   - Identify 3 diverse options and include them in the "recommendation" with type: "choice".
+3. For normal conversation, leave "recommendation" as null or omit it.
 
 ### 🚫 CLINICAL ACCURACY:
 - Only discuss health info provided in the HEALTH CONTEXT above. 
-- If asked about something NOT in the data, say "Iske baare mein mujhe abhi jaankari nahi hai." 
+- If asked about something NOT in the data, your "reply" must be "Iske baare mein mujhe abhi jaankari nahi hai." 
 - DO NOT hallucinate medication dosages or lab values.
-- For all other messages, respond with normal warm text.
-
+ 
 """
 
     # ── Emergency (always included, brief) ──
@@ -294,13 +296,6 @@ EMOTIONAL STATE RIGHT NOW:
 
     prompt += f"Now respond as Saathi to what {first_name} ji just said. Be natural. Be human. Be warm.\n\n"
 
-    prompt += """OUTPUT FORMAT REQUIREMENT:
-You MUST return your response as a valid JSON object. Do NOT wrap it in markdown block quotes (like ```json), just raw JSON.
-The structured JSON must contain these exact keys:
-1. "reply": Your conversational response as Saathi.
-2. "intent": Analyze the user's intent based on their text. Must be exactly one of: "play_music", "play_video", "tell_story", "stop", "pause", "resume", "next", "previous", "emergency", "medicine_query", or "chat". Default to "chat".
-3. "search_query": If the intent is play_music, play_video, or tell_story, construct a clean YouTube search query in English based on what they asked (e.g., 'Kishore Kumar old romantic songs'). If they did not specify, choose a fitting query based on their mood. If intent is NOT media, leave this empty "".
-"""
     return prompt
 
 # ─────────────────────────────────────────────

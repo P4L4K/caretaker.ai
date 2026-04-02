@@ -18,6 +18,7 @@ import urllib.error
 import re
 import os
 import json
+import webbrowser
 
 from services.voice_bot_engine import get_content_recommendation, get_story_queries, STORY_CATEGORIES
 
@@ -174,8 +175,8 @@ def _youtube_api_search(query: str, max_results: int = 3, min_duration: int = 60
 # ─────────────────────────────────────────────
 # HTML scrape fallback
 # ─────────────────────────────────────────────
-def _youtube_scrape(query: str, suffix: str = "") -> dict | None:
-    """Fallback: scrape YouTube results page. No duration filtering (no API)."""
+def _youtube_scrape_many(query: str, suffix: str = "", max_results: int = 3) -> list[dict]:
+    """Fallback: scrape YouTube results page. Returns multiple candidates."""
     try:
         q = urllib.parse.urlencode({"search_query": f"{query} {suffix}".strip()})
         req = urllib.request.Request(
@@ -183,18 +184,24 @@ def _youtube_scrape(query: str, suffix: str = "") -> dict | None:
             headers={"User-Agent": "Mozilla/5.0"}
         )
         html = urllib.request.urlopen(req, timeout=10).read().decode()
-        ids = re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', html)
+        # Find unique video IDs to avoid duplicates
+        ids = list(dict.fromkeys(re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', html)))
+        
         if ids:
-            print(f"[YouTube Scrape] Fallback result for: {query!r}")
-            return {
-                "name": query.title(), "artist": "YouTube",
-                "youtube_id": ids[0],
-                "url": f"https://www.youtube.com/embed/{ids[0]}?autoplay=1",
-                "duration_sec": 0, "views": 0
-            }
+            print(f"[YouTube Scrape] Found {len(ids)} candidates for: {query!r}")
+            results = []
+            for vid_id in ids[:max_results]:
+                results.append({
+                    "name": query.title() if len(results) == 0 else f"{query.title()} (Option {len(results)+1})",
+                    "artist": "YouTube",
+                    "youtube_id": vid_id,
+                    "url": f"https://www.youtube.com/embed/{vid_id}?autoplay=1",
+                    "duration_sec": 0, "views": 0
+                })
+            return results
     except Exception as e:
         print(f"[YouTube Scrape] Error for {query!r}: {e}")
-    return None
+    return []
 
 
 # ─────────────────────────────────────────────
@@ -205,16 +212,16 @@ def _youtube_search(query: str, min_duration: int = 60) -> dict | None:
     results = _youtube_api_search(query, max_results=1, min_duration=min_duration)
     if results:
         return results[0]
-    return _youtube_scrape(query)
+    scrape_results = _youtube_scrape_many(query, max_results=1)
+    return scrape_results[0] if scrape_results else None
 
 
 def _youtube_search_many(query: str, max_results: int = 3, min_duration: int = 60) -> list[dict]:
-    """Up to max_results quality results. API first, scrape fallback (1 result)."""
+    """Up to max_results quality results. API first, scrape fallback."""
     results = _youtube_api_search(query, max_results=max_results, min_duration=min_duration)
     if results:
         return results
-    single = _youtube_scrape(query)
-    return [single] if single else []
+    return _youtube_scrape_many(query, max_results=max_results)
 
 
 # ─────────────────────────────────────────────
@@ -273,6 +280,29 @@ def search_story(category: str = Query("moral")):
 def list_story_categories():
     return {"categories": list(STORY_CATEGORIES.keys())}
 
+
+@router.get("/music/open-external")
+def open_external_youtube(youtube_id: str = Query(...)):
+    """Opens a video in a minimized window that doesn't steal focus (Windows only)."""
+    try:
+        url = f"https://www.youtube.com/watch?v={youtube_id}&autoplay=1"
+        print(f"[Music] Opening external video (minimized): {url}")
+        
+        if os.name == 'nt': # Windows
+            # Style 7 = Minimized, the active window remains active.
+            # This allows the Voice Bot to stay in focus while the music plays.
+            ps_cmd = f"$wshell = New-Object -ComObject WScript.Shell; $wshell.Run('{url}', 7)"
+            import subprocess
+            subprocess.Popen(["powershell", "-Command", ps_cmd], shell=True)
+        else:
+            # Fallback for other OS
+            import webbrowser
+            webbrowser.open(url)
+            
+        return {"status": "success", "message": "Browser opened minimized", "url": url}
+    except Exception as e:
+        print(f"[Music] Error opening browser: {e}")
+        return {"status": "error", "message": str(e)}
 
 @router.get("/spotify/search")
 def search_tracks(q: str = Query(...)):

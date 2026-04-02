@@ -7,6 +7,7 @@
     <title>CareTaker Voice Assistant</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://www.youtube.com/iframe_api"></script>
     <style>
         :root {
             --bg: #FDFBF7;
@@ -133,9 +134,7 @@
                     </button>
                 </div>
                 <div id="yt-container" class="w-full rounded-xl overflow-hidden shadow-sm hidden mb-3">
-                    <iframe id="yt-player" width="100%" height="80" src="" frameborder="0"
-                        allow="autoplay; encrypted-media" allowfullscreen
-                        enablejsapi="1"></iframe>
+                    <div id="yt-player"></div>
                 </div>
                 <div id="local-music-info" class="flex gap-3 items-center mb-3">
                     <div class="flex-1 min-w-0">
@@ -315,7 +314,9 @@
             activeMeds: [],          // loaded from profile API
             currentMood: "neutral",
             sentimentSummary: "",
-            favoriteSongs: []        // loaded from DB
+            favoriteSongs: [],        // loaded from DB
+            lastSearchQuery: "",      // tracks query for custom error messaging
+            isSpecificSongRequest: false 
         };
 
         // ═══════════════════════════════════════════
@@ -349,6 +350,12 @@
             playSong();
         });
 
+        let ytPlayer = null;
+        function onYouTubeIframeAPIReady() {
+            // Player will be initialized when first track loads
+            console.log("[YouTube] API Ready");
+        }
+
         async function searchYouTube(query, minDuration = 180) {
             try {
                 const url = `http://127.0.0.1:8000/api/music/youtube?q=${encodeURIComponent(query)}&min_duration=${minDuration}`;
@@ -363,20 +370,52 @@
 
         // Load a specific track index from the queue into the YouTube iframe
         function loadYouTubeTrack(idx, widgetTitle) {
+            if (typeof YT === 'undefined' || !YT.Player) {
+                console.warn("[YouTube] API not ready, retrying in 500ms...");
+                setTimeout(() => loadYouTubeTrack(idx, widgetTitle), 500);
+                return false;
+            }
+            
             const track = state.videoQueue[idx];
             if (!track) return false;
-            audioPlayer.pause(); audioPlayer.currentTime = 0;
+            
+            audioPlayer.pause(); 
+            audioPlayer.currentTime = 0;
             state.youtubeMode = true;
             state.musicPlaying = true;
             state.videoQueueIdx = idx;
+
             document.getElementById('music-widget').classList.remove('hidden');
             if (widgetTitle) document.getElementById('music-widget-title').textContent = widgetTitle;
             document.getElementById('yt-container').classList.remove('hidden');
             document.getElementById('local-music-info').classList.add('hidden');
-            // enablejsapi=1 lets us receive postMessage errors from YouTube
-            const base = track.url.split('?')[0];
-            document.getElementById('yt-player').src = base + '?autoplay=1&enablejsapi=1';
             document.getElementById('play-pause-btn').textContent = '⏹ Stop';
+
+            if (ytPlayer && ytPlayer.loadVideoById) {
+                ytPlayer.loadVideoById(track.youtube_id);
+            } else {
+                ytPlayer = new YT.Player('yt-player', {
+                    height: '80',
+                    width: '100%',
+                    videoId: track.youtube_id,
+                    playerVars: {
+                        'autoplay': 1,
+                        'playsinline': 1,
+                        'enablejsapi': 1,
+                        'origin': window.location.origin
+                    },
+                    events: {
+                        'onReady': (event) => event.target.playVideo(),
+                        'onError': (event) => {
+                            console.warn(`[YouTube] Player error: ${event.data}`);
+                            // Error 100=Deleted/Private, 101/150=Not embeddable, 2=Invalid, 5=HTML5
+                            if ([100, 101, 150].includes(event.data)) {
+                                tryNextVideo();
+                            }
+                        }
+                    }
+                });
+            }
             return true;
         }
 
@@ -387,22 +426,43 @@
                 console.log(`[YouTube] Video ${state.videoQueueIdx} not embeddable, trying index ${next}`);
                 loadYouTubeTrack(next);
             } else {
-                console.log('[YouTube] All queued videos unembeddable, falling back to local music');
+                console.warn('[YouTube] All queued videos unembeddable — opening in server browser as requested');
                 controlMusic('stop');
                 const hindi = state.userLanguage === 'hi';
-                const msg = hindi
-                    ? '😔 यह वीडियो यहाँ नहीं चल सकता। स्थानीय संगीत बजा रहे हैं। 🎵'
-                    : '😔 These videos cannot be embedded here. Playing local music instead. 🎵';
+                
+                // Usually the FIRST video in our queue is the best match. 
+                // We try to open that one in the backend instead of the last failed one.
+                const bestVideo = state.videoQueue[0] || {};
+                const bestVidId = bestVideo.youtube_id;
+
+                let msg = hindi
+                    ? `😔 आईफ्रेम में पाबंदी है। मैं आपके लिए ब्राउज़र विंडो में "${bestVideo.name || 'संगीत'}" शुरू कर रही हूं। 🎵`
+                    : `😔 Direct playback is restricted. I'm opening "${bestVideo.name || 'music'}" in a separate window for you. 🎵`;
+                
                 addUIMessage('bot', msg);
                 speakHindi(msg);
-                playlist = [...localPlaylist]; state.youtubeMode = false;
-                playSong(1);
+
+                // Call the backend to trigger browser open
+                if (bestVidId) {
+                    fetch(`http://127.0.0.1:8000/api/music/open-external?youtube_id=${bestVidId}`).catch(e => console.error(e));
+                }
+                
+                if (!state.isSpecificSongRequest) {
+                    playlist = [...localPlaylist]; 
+                    state.youtubeMode = false;
+                    // Optionally play local music as "background filler" or just stop. 
+                    // Let's just stop since the browser is opening.
+                }
             }
         }
 
-        async function playYouTubeSong(query, widgetTitle) {
+        async function playYouTubeSong(query, widgetTitle, isSpecific = true) {
             const hindi = state.userLanguage === 'hi' || isHindi(query);
             const wt = widgetTitle || '🎵 Now Playing';
+            
+            state.lastSearchQuery = query;
+            state.isSpecificSongRequest = isSpecific;
+
             addUIMessage('bot', hindi ? "🔍 गाना खोज रहे हैं..." : "🔍 Searching for your song...");
 
             const tracks = await searchYouTube(query);
@@ -417,12 +477,17 @@
                 return true;
             }
 
-            const fallback = hindi
-                ? "यह गाना इंटरनेट पर नहीं मिला। स्थानीय लाइब्रेरी से बजा रहा हूं। 🎵"
-                : "Couldn't find that song online. Playing from local library. 🎵";
-            addUIMessage('bot', fallback);
-            playlist = [...localPlaylist]; state.youtubeMode = false;
-            playSong(1);
+            const failMsg = isSpecific
+                ? (hindi ? `😔 क्षमा करें, मुझे "${query}" ऑनलाइन नहीं मिला।` : `😔 Sorry, I couldn't find "${query}" online.`)
+                : (hindi ? "यह गाना इंटरनेट पर नहीं मिला। स्थानीय लाइब्रेरी से बजा रहा हूं। 🎵" : "Couldn't find that online. Playing from local library. 🎵");
+
+            addUIMessage('bot', failMsg);
+            speakHindi(failMsg);
+
+            if (!isSpecific) {
+                playlist = [...localPlaylist]; state.youtubeMode = false;
+                playSong(1);
+            }
             return false;
         }
 
@@ -463,10 +528,11 @@
                 state.musicIndex = (state.musicIndex - 1 + playlist.length) % playlist.length;
                 playSong();
             } else if (action === 'stop') {
+                if (ytPlayer && ytPlayer.stopVideo) ytPlayer.stopVideo();
                 audioPlayer.pause();
                 audioPlayer.currentTime = 0;
                 state.musicPlaying = false;
-                document.getElementById('yt-player').src = "";
+                document.getElementById('yt-container').classList.add('hidden');
                 document.getElementById('music-widget').classList.add('hidden');
                 playlist = [...localPlaylist];
                 state.youtubeMode = false;
@@ -822,7 +888,7 @@
         async function handleRecommendationPlay(query, type) {
             document.getElementById('rec-card-area').classList.add('hidden');
             const title = type === 'music' ? '🎵 Music' : '📖 Story';
-            await playYouTubeSong(query, title);
+            await playYouTubeSong(query, title, false);
         }
 
         // ═══════════════════════════════════════════
@@ -917,16 +983,8 @@
                         addUIMessage('bot', searchMsg);
                         speakHindi(hindi ? `${categoryLabel} कहानी खोज रहे हैं` : `Finding a story for you`);
 
-                        const tracks = await searchYouTube(storyQuery, 300); // 5-min minimum for stories
-                        if (tracks && tracks.length > 0) {
-                            state.videoQueue = tracks;
-                            state.videoQueueIdx = 0;
-                            loadYouTubeTrack(0, '📖 Story');
-                            const doneMsg = hindi
-                                ? `📖 यह ${categoryLabel} कहानी सुनिए: ${tracks[0].name}`
-                                : `📖 Here's a ${categoryLabel} story: ${tracks[0].name}`;
-                            addUIMessage('bot', doneMsg);
-                        } else {
+                        const searchResult = await playYouTubeSong(storyQuery, '📖 Story', false);
+                        if (!searchResult) {
                             const failMsg = hindi
                                 ? '😔 अभी YouTube पर कहानी नहीं मिली। थोड़ी देर बाद फिर कोशिश करें।'
                                 : '😔 Could not find a story on YouTube right now. Try again shortly.';
@@ -1256,19 +1314,7 @@
             setInterval(pollTriggers, 60000);
         }
 
-        // ── YouTube IFrame API error listener ──
-        // YouTube sends postMessage when a video can't be embedded (error 101 / 150)
-        window.addEventListener('message', (event) => {
-            if (event.origin !== 'https://www.youtube.com') return;
-            try {
-                const data = JSON.parse(event.data);
-                // info=101 or info=150 = "video not embeddable on this domain"
-                if (data.event === 'onError' && (data.info === 101 || data.info === 150)) {
-                    console.warn(`[YouTube] Embed error ${data.info} — trying next video`);
-                    tryNextVideo();
-                }
-            } catch (e) { /* not a JSON message, ignore */ }
-        });
+        // ── Obsolete: IFrame API covers this via events now ──
 
         window.onload = init;
     </script>

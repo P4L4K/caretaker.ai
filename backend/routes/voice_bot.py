@@ -137,7 +137,20 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
                 import json
                 try:
                     ai_json = json.loads(ai_text)
-                    reply_text = ai_json.get("reply", ai_text)
+                    # Prioritize "reply", fallback to "message", then "message" inside "recommendation"
+                    reply_text = ai_json.get("reply")
+                    if not reply_text:
+                        # Fallback for old schema or nested recommendation
+                        rec = ai_json.get("recommendation", {})
+                        if isinstance(rec, dict):
+                            reply_text = rec.get("message")
+                        if not reply_text:
+                            reply_text = ai_json.get("message")
+                    
+                    # Absolute fallback: if still empty/none, use the raw text but this shouldn't happen
+                    if not reply_text:
+                        reply_text = ai_text
+                        
                     intent = ai_json.get("intent", "chat")
                     search_query = ai_json.get("search_query", "")
                 except Exception as ex:
@@ -147,18 +160,17 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
                     search_query = ""
 
                 save_message(payload.recipient_id, SenderEnum.bot, reply_text, MoodEnum.neutral, trigger_enum, payload.session_id, db)
-
-                # Attach content recommendation when mood is actionable
-                recommendation = None
-                if mood_str not in ("neutral",):
+ 
+                # Attach content recommendation (prioritize AI's merged recommendation field)
+                recommendation = ai_json.get("recommendation")
+                 
+                # Fallback: if AI didn't provide one but mood is actionable, use default map
+                if not recommendation and mood_str not in ("neutral",):
                     recommendation = get_content_recommendation(mood_str)
-                
-                # Check for AI-driven JSON triggers (choices or direct playback)
-                if ai_text.strip().startswith("{") and ("type" in ai_text.lower()):
-                     parsed = safe_json_parse(ai_text)
-                     if parsed:
-                         recommendation = parsed
-                         ai_text = recommendation.get("message", "Theek hai!")
+ 
+                # If we have a recommendation, ensure reply_text reflects its message if present
+                if recommendation and recommendation.get("message"):
+                    reply_text = recommendation.get("message", reply_text)
 
                 # ── ADD TTS GENERATION ──
                 audio_base64 = ""

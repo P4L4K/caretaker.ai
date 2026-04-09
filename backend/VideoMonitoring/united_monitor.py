@@ -307,7 +307,9 @@ def draw_united_interface(frame, results, draw_skeleton=True):
     fall_res = results["fall"]
     gs = results["global_state"]
     all_persons = fall_res.get("all_persons", [])
+    h, w = frame_copy.shape[:2]
 
+    # ── Draw bounding boxes and labels for each detected person ──
     for p in all_persons:
         box, is_mon = p["box"], p["is_monitored"]
         # Use plain ASCII text — OpenCV cannot render Unicode/emoji
@@ -329,7 +331,7 @@ def draw_united_interface(frame, results, draw_skeleton=True):
         thickness = 3 if is_mon else 2
         cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, thickness)
 
-        # Draw label background for readability
+        # Draw label with background
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
         cv2.rectangle(frame_copy, (x1, y1 - th - 12), (x1 + tw + 6, y1), color, -1)
         cv2.putText(frame_copy, label, (x1 + 3, y1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
@@ -340,4 +342,36 @@ def draw_united_interface(frame, results, draw_skeleton=True):
             for s, e in conn:
                 if s < len(kps) and e < len(kps):
                     cv2.line(frame_copy, (int(kps[s][0]), int(kps[s][1])), (int(kps[e][0]), int(kps[e][1])), color, 2)
+
+    # ── Status bar at top of frame ── always visible even with no detections ──
+    bar_h = 30
+    cv2.rectangle(frame_copy, (0, 0), (w, bar_h), (20, 20, 20), -1)
+
+    fps_val = gs.get("fps", 0.0)
+    n_persons = len(all_persons)
+    monitored_found = any(p["is_monitored"] for p in all_persons)
+
+    # Build status string
+    if n_persons == 0:
+        status_txt = "Scanning... (step back so full body is visible)"
+        status_color = (100, 100, 100)
+    elif monitored_found:
+        if gs["fall_detected"]:
+            status_txt = "FALL DETECTED"
+            status_color = (0, 0, 255)
+        elif gs["inactivity_alert"]:
+            status_txt = "INACTIVITY ALERT"
+            status_color = (0, 128, 255)
+        else:
+            status_txt = "Monitoring active"
+            status_color = (0, 200, 0)
+    else:
+        status_txt = f"Visitors in frame: {n_persons}"
+        status_color = (0, 200, 255)
+
+    fps_txt = f"FPS:{fps_val:.1f}"
+    cv2.putText(frame_copy, status_txt, (8, 21), cv2.FONT_HERSHEY_SIMPLEX, 0.58, status_color, 2)
+    cv2.putText(frame_copy, fps_txt, (w - 80, 21), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
+
     return frame_copy
+

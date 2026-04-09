@@ -67,8 +67,9 @@ class UnitedMonitor:
         self._last_event_frame = -999
         self._EVENT_FRAME_COOLDOWN = 300 # 10 seconds at 30fps
 
-        # Tracking state
+        # Tracking state — once the monitored_id is locked it never auto-switches
         self._monitored_id = None
+        self._monitored_id_locked = False   # True after first person is chosen
         self._monitored_centroid = None
         self._fps_start = time.time()
         self._fps_frames = 0
@@ -150,28 +151,42 @@ class UnitedMonitor:
                     })
 
             if possible_humans:
-                # Sticky ID Tracking
+                # ── Sticky ID Tracking ──────────────────────────────────────
+                # Rule: once a person is locked as monitored, they stay monitored.
+                # We only ever switch to centroid-proximity tracking if the YOLO
+                # ID is reassigned (camera glitch), never to a different person.
                 target = None
+
                 if self._monitored_id is not None:
+                    # 1. Try to find by exact YOLO ID
                     matches = [p for p in possible_humans if p["id"] == self._monitored_id]
-                    if matches: target = matches[0]
-                
+                    if matches:
+                        target = matches[0]
+
                 if target is None and self._monitored_centroid is not None:
+                    # 2. YOLO may have re-issued the ID — find closest person by centroid
                     best_dist = 1e6
                     for p in possible_humans:
                         dist = math.sqrt((p["cx"]-self._monitored_centroid[0])**2 + (p["cy"]-self._monitored_centroid[1])**2)
                         if dist < best_dist and dist < 250:
                             best_dist = dist
                             target = p
-                
-                if target is None:
-                    # Initial/Lost selection: Pick the "realest" human (highest h_score)
+
+                if target is None and not self._monitored_id_locked:
+                    # 3. First time only — pick the person with the highest pose score
+                    #    After this we NEVER pick a different person automatically.
                     target = max(possible_humans, key=lambda p: p["h_score"])
-                
-                monitored_idx = target["id"]
-                self._monitored_id = monitored_idx
-                self._monitored_centroid = (target["cx"], target["cy"])
-                
+                    self._monitored_id_locked = True
+
+                if target is not None:
+                    monitored_idx = target["id"]
+                    self._monitored_id = monitored_idx
+                    self._monitored_centroid = (target["cx"], target["cy"])
+                else:
+                    # Monitored person is temporarily out of frame — keep last ID,
+                    # every current detection is a visitor
+                    monitored_idx = -1
+
                 for p in possible_humans:
                     is_mon = (p["id"] == monitored_idx)
                     all_persons.append({
@@ -179,7 +194,8 @@ class UnitedMonitor:
                         "label": "MONITORED" if is_mon else "VISITOR"
                     })
             else:
-                self._monitored_id = None
+                # No humans at all — keep the ID locked for when they return,
+                # but clear the centroid so we don't do bad proximity matches
                 self._monitored_centroid = None
         else:
             self._monitored_id = None
@@ -201,6 +217,11 @@ class UnitedMonitor:
             mid_hip = (monitored_xy[11] + monitored_xy[12]) / 2.0
             torso_angle = self._get_angle(neck, mid_hip, vertical=True)
             is_upright = torso_angle < 35
+
+            # Compute bbox aspect ratio — horizontal bbox = person is lying down
+            bw = monitored_box[2] - monitored_box[0]
+            bh = monitored_box[3] - monitored_box[1]
+            bbox_is_horizontal = (bw > bh * 1.2) if bh > 0 else False
 
             if is_upright:
                 self._standing_duration += dt
@@ -289,18 +310,29 @@ def draw_united_interface(frame, results, draw_skeleton=True):
 
     for p in all_persons:
         box, is_mon = p["box"], p["is_monitored"]
-        color = (0, 255, 0) if is_mon else (0, 255, 255)
-        label = "👤 MONITORED" if is_mon else "👋 VISITOR"
-        
+        # Use plain ASCII text — OpenCV cannot render Unicode/emoji
         if is_mon:
             if gs["fall_detected"]:
-                color, label = (0, 0, 255), "⚠️ FALL DETECTED"
+                color = (0, 0, 255)       # Red — fall
+                label = "! FALL DETECTED"
             elif gs["inactivity_alert"]:
-                color, label = (255, 128, 0), "⏰ INACTIVITY ALERT"
+                color = (0, 128, 255)     # Orange — inactivity
+                label = ">> INACTIVITY ALERT"
+            else:
+                color = (0, 200, 0)       # Green — monitored OK
+                label = ">> MONITORED"
+        else:
+            color = (0, 200, 255)         # Yellow — visitor
+            label = "VISITOR"
 
         x1, y1, x2, y2 = map(int, box)
-        cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 4 if is_mon else 2)
-        cv2.putText(frame_copy, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        thickness = 3 if is_mon else 2
+        cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, thickness)
+
+        # Draw label background for readability
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
+        cv2.rectangle(frame_copy, (x1, y1 - th - 12), (x1 + tw + 6, y1), color, -1)
+        cv2.putText(frame_copy, label, (x1 + 3, y1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
 
         if draw_skeleton and is_mon and p["xy"] is not None:
             kps = p["xy"]

@@ -33,9 +33,12 @@ _YOLO_MODEL_PATH = os.path.join(_here, "..", "yolov8n-pose.pt")
 _LSTM_MODEL_PATH = os.path.join(_here, "fall_lstm.pth")
 
 _SENSITIVITY_PRESETS = {
+    # Live monitoring — tuned for speed, camera may be at odd angles
     "low":    {"lstm_thresh": 0.88, "confirm_frames": 6, "confirm_decay": 1},
     "medium": {"lstm_thresh": 0.82, "confirm_frames": 4, "confirm_decay": 1},
     "high":   {"lstm_thresh": 0.75, "confirm_frames": 3, "confirm_decay": 1},
+    # Video analysis — stricter to avoid false positives on uploaded footage
+    "video":  {"lstm_thresh": 0.90, "confirm_frames": 7, "confirm_decay": 1},
 }
 
 class UnitedMonitor:

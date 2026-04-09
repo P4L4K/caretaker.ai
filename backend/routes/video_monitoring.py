@@ -266,7 +266,7 @@ def process_video_direct(process_id: str, input_path: str, output_path: str, use
         
         # Initialize Monitor
         monitor = UnitedMonitor(
-            sensitivity="medium",
+            sensitivity="video",      # strict preset — independent from live monitoring tuning
             inactivity_threshold=30,
             is_live=False,
             process_every_n_frames=1

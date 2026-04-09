@@ -38,6 +38,7 @@ import tables.conversation_history as conversation_history_tables
 import tables.environment as environment_tables
 import tables.medications as medications_tables
 import tables.allergies as allergies_tables
+import tables.admin as admin_tables
 
 # Import routes
 import routes.users as user_routes
@@ -60,6 +61,7 @@ conversation_history_tables.Base.metadata.create_all(bind=engine)
 environment_tables.Base.metadata.create_all(bind=engine)
 medications_tables.Base.metadata.create_all(bind=engine)
 allergies_tables.Base.metadata.create_all(bind=engine)
+admin_tables.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="CareTaker AI Backend")
 
@@ -155,6 +157,9 @@ app.include_router(doctor_routes.router, prefix="/api")
 
 from routes import spotify as spotify_routes
 app.include_router(spotify_routes.router, prefix="/api")
+
+from routes import admin as admin_routes
+app.include_router(admin_routes.router)
 
 # Debug: Print all registered routes
 print("\n=== Registered Routes ===")

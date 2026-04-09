@@ -505,11 +505,18 @@ async def login(request: Login, db: Session = Depends(get_db)):
             user_data["face_registered"] = user.face_descriptor is not None
         else:
             user_data["specialization"] = user.specialization
+            # Soft verification flag — doctor can still log in but frontend can show a banner
+            user_data["is_verified"] = getattr(user, "is_verified", False)
+            user_data["verification_pending"] = not getattr(user, "is_verified", False)
+
+        login_message = "Login successful"
+        if role == 'doctor' and not getattr(user, "is_verified", False):
+            login_message = "Login successful — your account is pending admin verification"
 
         return ResponseSchema(
             code=200,
             status="success",
-            message="Login successful",
+            message=login_message,
             result={
                 "access_token": token, 
                 "token_type": "bearer",

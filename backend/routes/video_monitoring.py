@@ -32,6 +32,9 @@ from dotenv import load_dotenv
 sys.path.append(str(Path(__file__).parent.parent / "VideoMonitoring"))
 from stream_manager import stream_manager
 from united_monitor import UnitedMonitor, draw_united_interface
+from camera_registry import (
+    list_cameras, get_camera, add_camera, remove_camera, build_stream_url
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -70,8 +73,25 @@ inactivity_thresholds = {}  # username -> threshold_seconds
 
 # Models
 class StartLiveRequest(BaseModel):
-    camera_index: int = 0
-    sensitivity: str = "medium"
+    """
+    Start a live monitoring session.
+    Supply ONE of:
+      - camera_index : int   0 / 1 / 2 …  (local webcam)
+      - camera_url   : str  RTSP/HTTP URL for a CCTV / IP camera
+      - camera_id    : str  ID of a saved camera from the registry
+    """
+    camera_index: int    = 0
+    camera_url:   str    = ""    # RTSP / HTTP URL
+    camera_id:    str    = ""    # Saved camera registry ID
+    sensitivity:  str    = "medium"
+
+class AddCameraRequest(BaseModel):
+    name:     str
+    url:      str          # RTSP / HTTP URL, or integer string for webcam
+    cam_type: str = "ip"  # "webcam" | "ip" | "rtsp"
+    location: str = ""
+    username: str = ""
+    password: str = ""
 
 class InactivityThresholdRequest(BaseModel):
     threshold_seconds: int
@@ -547,30 +567,64 @@ async def start_live_monitoring(
                 "message": "You already have an active session"
             }
     
+    # Determine the camera source
+    camera_source = None
+    camera_name   = ""
+
+    if request.camera_id:
+        # Use a saved camera from the registry
+        cam_url = build_stream_url(request.camera_id)
+        if cam_url is None:
+            raise HTTPException(status_code=404, detail=f"Camera '{request.camera_id}' not found in registry")
+        cam_meta = get_camera(request.camera_id)
+        camera_source = cam_url
+        camera_name   = cam_meta.get("name", request.camera_id) if cam_meta else request.camera_id
+
+    elif request.camera_url:
+        # Direct URL (RTSP / HTTP) provided by user
+        url = request.camera_url.strip()
+        if not (url.startswith("rtsp://") or url.startswith("http://") or url.startswith("https://")):
+            raise HTTPException(status_code=400, detail="camera_url must start with rtsp://, http://, or https://")
+        camera_source = url
+        camera_name   = url  # use URL as name if not from registry
+
+    else:
+        # Fall back to local webcam index
+        camera_source = request.camera_index
+        camera_name   = f"Webcam #{request.camera_index}"
+
     # Create new session
     session_id = str(uuid.uuid4())
     inactivity_threshold = inactivity_thresholds.get(username, 30)
     
     success = stream_manager.create_session(
         session_id=session_id,
-        camera_index=request.camera_index,
+        camera_source=camera_source,
         sensitivity=request.sensitivity,
-        inactivity_threshold=inactivity_threshold
+        inactivity_threshold=inactivity_threshold,
+        camera_name=camera_name,
     )
     
     if not success:
-        raise HTTPException(status_code=500, detail="Failed to start camera session. Camera might be busy.")
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Failed to start camera session. "
+                "Check that the camera is reachable and the URL/index is correct."
+            )
+        )
     
     # Assign ownership
     session = stream_manager.get_session(session_id)
     if session:
-        session.username = username
+        session.username  = username
         session.user_email = user.email
     
     return {
         "status": "success",
         "session_id": session_id,
         "stream_url": f"/api/video-monitoring/stream/{session_id}",
+        "camera_name": camera_name,
         "message": "Live monitoring started successfully"
     }
 
@@ -798,3 +852,174 @@ async def get_recipient_video_stats(
         "avg_mobility_score": round(avg_mobility, 1),
         "history": history
     }
+
+
+# ============================================================================
+# CAMERA REGISTRY ENDPOINTS  (CCTV / IP Camera management)
+# ============================================================================
+
+@router.get("/cameras")
+async def get_cameras(authorization: Optional[str] = Header(None)):
+    """
+    List all saved cameras (webcam indexes, RTSP / HTTP CCTV feeds).
+    """
+    username = _get_username_from_auth(authorization)
+    if not username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token")
+
+    cameras = list_cameras()
+    return {"cameras": cameras, "total": len(cameras)}
+
+
+@router.post("/cameras")
+async def create_camera(
+    request: AddCameraRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Add a new camera to the registry.
+
+    Supports:
+      - Local webcam : url="0" or url="1"  ,  cam_type="webcam"
+      - IP camera    : url="rtsp://..."    ,  cam_type="rtsp"
+      - HTTP MJPEG   : url="http://..."    ,  cam_type="ip"
+
+    Credentials (username/password) are stored encrypted-at-rest only in
+    the local JSON file; passwords are never returned in GET responses.
+    """
+    username = _get_username_from_auth(authorization)
+    if not username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token")
+
+    cam_id = str(uuid.uuid4())[:8]   # short readable ID
+
+    saved = add_camera(
+        cam_id   = cam_id,
+        name     = request.name.strip(),
+        url      = request.url.strip(),
+        cam_type = request.cam_type,
+        location = request.location.strip(),
+        username = request.username.strip(),
+        password = request.password,
+    )
+
+    logger.info(f"User {username} added camera: {saved['name']} ({saved['url']})")
+    return {"status": "success", "camera": saved}
+
+
+@router.delete("/cameras/{cam_id}")
+async def delete_camera(
+    cam_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Remove a camera from the registry."""
+    username = _get_username_from_auth(authorization)
+    if not username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token")
+
+    deleted = remove_camera(cam_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Camera '{cam_id}' not found")
+
+    logger.info(f"User {username} removed camera: {cam_id}")
+    return {"status": "success", "message": f"Camera {cam_id} removed"}
+
+
+@router.post("/cameras/{cam_id}/test")
+async def test_camera_connection(
+    cam_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Quick connectivity test — tries to open the camera and grab one frame.
+    Returns within ~5 seconds.
+    """
+    username = _get_username_from_auth(authorization)
+    if not username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token")
+
+    stream_source = build_stream_url(cam_id)
+    if stream_source is None:
+        raise HTTPException(status_code=404, detail=f"Camera '{cam_id}' not found")
+
+    def _test():
+        if isinstance(stream_source, str) and (
+            stream_source.startswith("rtsp") or stream_source.startswith("http")
+        ):
+            cap = cv2.VideoCapture(stream_source, cv2.CAP_FFMPEG)
+        else:
+            cap = cv2.VideoCapture(stream_source)
+
+        if not cap.isOpened():
+            return False, "Could not open camera stream"
+
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        ret, frame = cap.read()
+        cap.release()
+
+        if not ret or frame is None:
+            return False, "Camera opened but no frame received"
+
+        h, w = frame.shape[:2]
+        return True, f"OK — got {w}×{h} frame"
+
+    try:
+        ok, message = await asyncio.get_event_loop().run_in_executor(None, _test)
+        return {
+            "status": "online" if ok else "unreachable",
+            "message": message,
+            "cam_id": cam_id,
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e), "cam_id": cam_id}
+
+
+@router.post("/cameras/test-url")
+async def test_camera_url(
+    request: AddCameraRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Test an arbitrary URL/index before saving it.
+    Same as /cameras/{id}/test but accepts a raw URL in the request body.
+    """
+    username = _get_username_from_auth(authorization)
+    if not username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token")
+
+    url = request.url.strip()
+
+    # Embed credentials if provided (for RTSP)
+    if request.username and request.password and url.startswith("rtsp://"):
+        url = url.replace("rtsp://", f"rtsp://{request.username}:{request.password}@", 1)
+
+    # Determine source
+    if url.isdigit():
+        source = int(url)
+    else:
+        source = url
+
+    def _test():
+        if isinstance(source, str) and (source.startswith("rtsp") or source.startswith("http")):
+            cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+        else:
+            cap = cv2.VideoCapture(source)
+
+        if not cap.isOpened():
+            return False, "Could not connect to camera"
+
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        ret, frame = cap.read()
+        cap.release()
+
+        if not ret or frame is None:
+            return False, "Connected but no frame received. Check stream path/credentials."
+
+        h, w = frame.shape[:2]
+        return True, f"Connection successful — got {w}×{h} frame"
+
+    try:
+        ok, message = await asyncio.get_event_loop().run_in_executor(None, _test)
+        return {"status": "online" if ok else "unreachable", "message": message}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

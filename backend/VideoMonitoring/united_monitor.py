@@ -72,11 +72,19 @@ class UnitedMonitor:
         self._monitored_id_locked = False   # True after first person is chosen
         self._monitored_centroid = None
 
-        # Sudden-disappearance tracking (fall below camera FoV detection)
-        self._monitored_last_seen = None      # timestamp when monitored was last in frame
-        self._monitored_was_present = False   # was monitored in frame last processed frame?
-        self._DISAPPEAR_FALL_WINDOW = 1.5     # seconds — if gone within this time, flag as potential fall
-        self._disappear_fall_fired = False    # one-shot per disappearance event
+        # Pre-disappearance pose state tracking
+        # We record what the body was doing just BEFORE it left the frame.
+        # If the body was tilting/falling and then vanished →  real fall.
+        # If the body was upright and walked out → NOT a fall.
+        self._monitored_last_seen = None       # timestamp when monitored was last seen
+        self._monitored_was_present = False    # True if monitored was in last processed frame
+        self._disappear_fall_fired = False     # one-shot guard per disappearance event
+        self._DISAPPEAR_FALL_WINDOW = 2.0      # seconds: how long after disappear to still check
+        # Rolling history (last N readings while monitored was visible)
+        self._pre_disappear_torso_angles = []  # recent torso angles
+        self._pre_disappear_lstm_probs   = []  # recent LSTM fall probabilities
+        self._pre_disappear_bbox_horiz   = []  # recent bbox horizontality flags
+        self._PRE_HISTORY_LEN = 10             # keep last 10 readings (~0.3–0.4 s at 25fps)
 
         self._fps_start = time.time()
         self._fps_frames = 0
@@ -226,7 +234,7 @@ class UnitedMonitor:
         if monitored_idx != -1:
             p = [p for p in possible_humans if p["id"] == monitored_idx][0]
             monitored_xy, monitored_box, conf_kps = p["xy"], p["box"], p["conf"]
-            
+
             neck = (monitored_xy[5] + monitored_xy[6]) / 2.0
             mid_hip = (monitored_xy[11] + monitored_xy[12]) / 2.0
             torso_angle = self._get_angle(neck, mid_hip, vertical=True)
@@ -248,6 +256,15 @@ class UnitedMonitor:
                 with torch.no_grad():
                     logits = self._lstm(self._seq_buf.get_tensor(device=self._device))
                     lstm_prob = float(torch.softmax(logits, dim=1)[0, 1])
+
+            # ── Record pose state for pre-disappearance analysis ──
+            self._pre_disappear_torso_angles.append(torso_angle)
+            self._pre_disappear_lstm_probs.append(lstm_prob)
+            self._pre_disappear_bbox_horiz.append(bbox_is_horizontal)
+            # Keep only last N readings
+            self._pre_disappear_torso_angles = self._pre_disappear_torso_angles[-self._PRE_HISTORY_LEN:]
+            self._pre_disappear_lstm_probs   = self._pre_disappear_lstm_probs[-self._PRE_HISTORY_LEN:]
+            self._pre_disappear_bbox_horiz   = self._pre_disappear_bbox_horiz[-self._PRE_HISTORY_LEN:]
 
             features = {"lstm_prob": lstm_prob, "is_upright": is_upright, "standing_duration": self._standing_duration}
             
@@ -278,9 +295,10 @@ class UnitedMonitor:
                         self._is_currently_falling = False
                         self._confirm_count = 0
 
-        # ── Sudden Disappearance Check ───────────────────────────────────────
-        # If the monitored person was present and abruptly vanishes (faster than
-        # DISAPPEAR_FALL_WINDOW seconds), treat it as a possible fall below camera FoV.
+        # ── Pose-Aware Disappearance Check ───────────────────────────────────
+        # Only fires if the body was ALREADY showing fall characteristics
+        # (tilting torso, rising LSTM score, or horizontal bbox) before vanishing.
+        # Walking out of frame = body stays upright throughout → will NOT trigger.
         self._fall_event_just_fired = False
         if (
             self._monitored_was_present and
@@ -292,15 +310,31 @@ class UnitedMonitor:
             (self._frame_counter - self._last_event_frame) > self._EVENT_FRAME_COOLDOWN
         ):
             time_since_seen = now - self._monitored_last_seen
-            if time_since_seen < self._DISAPPEAR_FALL_WINDOW:
-                # Abrupt disappearance after being tracked while upright → possible fall
-                self._fall_event_just_fired = True
-                self._fall_detected = True
-                self._is_currently_falling = True
-                self._last_fall_event_time = now
-                self._last_event_frame = self._frame_counter
-                self._disappear_fall_fired = True
-                print(f"[UnitedMonitor] Sudden disappearance fall trigger at frame {self._frame_counter}")
+            if time_since_seen < self._DISAPPEAR_FALL_WINDOW and self._pre_disappear_torso_angles:
+                # Analyse the last readings BEFORE the person left frame
+                avg_torso  = sum(self._pre_disappear_torso_angles) / len(self._pre_disappear_torso_angles)
+                max_torso  = max(self._pre_disappear_torso_angles)
+                avg_lstm   = sum(self._pre_disappear_lstm_probs)   / len(self._pre_disappear_lstm_probs) if self._pre_disappear_lstm_probs else 0.0
+                any_horiz  = any(self._pre_disappear_bbox_horiz)
+
+                # Fall signal present before disappearing:
+                #   a) Torso was seriously tilted (>50°) just before vanishing
+                #   b) LSTM was elevated (>0.40) suggesting fall-like motion
+                #   c) BBox was already horizontal (lying down) before vanishing
+                was_falling_before = (
+                    max_torso > 50 or        # body tilting sharply
+                    avg_lstm  > 0.40 or      # LSTM raising fall probability
+                    any_horiz                # bbox already horizontal = lying
+                )
+
+                if was_falling_before:
+                    self._fall_event_just_fired = True
+                    self._fall_detected = True
+                    self._is_currently_falling = True
+                    self._last_fall_event_time = now
+                    self._last_event_frame = self._frame_counter
+                    self._disappear_fall_fired = True
+                    print(f"[UnitedMonitor] Pose-aware disappearance fall: torso={avg_torso:.1f}° lstm={avg_lstm:.2f} horiz={any_horiz}")
 
         # Inactivity
         inactivity_res = self._inactivity.update([monitored_box.tolist()] if monitored_box is not None else [], now)

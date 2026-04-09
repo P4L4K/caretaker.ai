@@ -12,17 +12,45 @@ Available models (free tier): gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.
 
 import os
 import requests
+import time
+import json
+import re
 
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
-# List of working models to try if the primary one fails
+# Optimized model order: Stable models first, slower preview models last.
 FALLBACK_MODELS = [
     "gemini-2.5-flash",
     "gemini-2.0-flash",
-    "gemini-flash-latest",
-    "gemini-2.5-pro",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
     "gemini-3.1-flash-lite-preview"
 ]
+
+def safe_json_parse(text: str) -> dict | None:
+    """
+    Tries to parse text as JSON. If it fails, uses regex to extract 
+    the first JSON block { ... } and parses that.
+    """
+    if not text: return None
+    
+    # 1. Direct parse
+    try:
+        # Clean up common LLM artifacts
+        clean_text = text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean_text)
+    except:
+        pass
+        
+    # 2. Regex extraction (for when LLM adds markdown or chat text)
+    try:
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+    except:
+        pass
+        
+    return None
 
 def get_gemini_url(model: str, api_key: str) -> str:
     """Build the Gemini URL for a specific model."""
@@ -32,7 +60,10 @@ def get_gemini_url(model: str, api_key: str) -> str:
     return f"{BASE_URL}/{model}:generateContent?key={api_key}"
 
 def call_gemini(payload: dict, timeout: int = 30, caller: str = "") -> dict | None:
-    """Make a Gemini API call with automatic model switching on failure."""
+    """
+    Make a Gemini API call with automatic model switching on failure.
+    Includes retry logic for transient network issues.
+    """
     api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
         print(f"{caller} [Gemini] ERROR: GEMINI_API_KEY is not set in .env")
@@ -50,33 +81,41 @@ def call_gemini(payload: dict, timeout: int = 30, caller: str = "") -> dict | No
     for i, model in enumerate(models_to_try):
         url = get_gemini_url(model, api_key)
         
-        try:
-            resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=timeout)
+        # Internal retries for the SAME model in case of temporary 5xx or connection error
+        for attempt in range(2):
+            try:
+                resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=timeout)
 
-            if resp.status_code == 200:
-                if i > 0:
-                    print(f"{caller} [Gemini] Success using fallback model: {model}")
-                return resp.json()
+                if resp.status_code == 200:
+                    if i > 0:
+                        print(f"{caller} [Gemini] Success using fallback model: {model}")
+                    return resp.json()
 
-            # Quota, server errors, or Not Found (deprecated models) trigger a switch
-            if resp.status_code in [404, 429, 503, 500]:
-                print(f"{caller} [Gemini] Model '{model}' failed (HTTP {resp.status_code}). Trying next model...")
-                continue
-            
-            # For 400 (Invalid/Expired Key), switching models won't help, but we show the error
-            if resp.status_code == 400:
-                print(f"{caller} [Gemini] HTTP 400 (Bad Request/Expired Key): {resp.text[:200]}")
-                return None
+                # Quota errors (429) or Server Busy (503) -> Try next model immediately
+                if resp.status_code in [429, 503]:
+                    print(f"{caller} [Gemini] Model '{model}' overloaded (HTTP {resp.status_code}). Trying next...")
+                    break 
 
-            print(f"{caller} [Gemini] HTTP {resp.status_code}: {resp.text[:300]}")
-            return None
+                # Deprecated model (404) -> Try next
+                if resp.status_code == 404:
+                    print(f"{caller} [Gemini] Model '{model}' not found. Skipping...")
+                    break
 
-        except requests.exceptions.Timeout:
-            print(f"{caller} [Gemini] Timeout for model '{model}'. Trying next...")
-            continue
-        except Exception as e:
-            print(f"{caller} [Gemini] Unexpected error with model '{model}': {e}")
-            continue
+                # Internal Error (500) -> Wait 1s and retry ONCE before switching
+                if resp.status_code == 500 and attempt == 0:
+                    time.sleep(1)
+                    continue
+
+                print(f"{caller} [Gemini] HTTP {resp.status_code}: {resp.text[:300]}")
+                break # Non-recoverable or already retried
+
+            except requests.exceptions.Timeout:
+                print(f"{caller} [Gemini] Timeout for model '{model}'. Trying next...")
+                break # Switch model on timeout
+            except Exception as e:
+                print(f"{caller} [Gemini] Connection error with model '{model}': {e}")
+                time.sleep(1)
+                continue # Try second attempt for the same model
 
     print(f"{caller} [Gemini] All models failed. Please check your API key and quotas.")
     return None

@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 class CameraSession:
     """Manages a single camera monitoring session with MJPEG streaming.
     
+<<<<<<< HEAD
     camera_source can be:
       - int  : local webcam index (0, 1, …)
       - str  : RTSP URL  rtsp://user:pass@192.168.1.100:554/stream
@@ -37,6 +38,13 @@ class CameraSession:
         # Accept legacy camera_index kwarg as well
         self.camera_source = camera_source
         self.camera_name   = camera_name or str(camera_source)
+=======
+    def __init__(self, session_id: str, camera_source=0,
+                 sensitivity: str = "medium", inactivity_threshold: int = 30):
+        self.session_id = session_id
+        # camera_source can be int (USB index) or str (RTSP/HTTP URL)
+        self.camera_source = camera_source
+>>>>>>> e11c513fa23f453464ec6cdbae30e148d6e8f11c
         self.sensitivity = sensitivity
         self.inactivity_threshold = inactivity_threshold
         
@@ -105,7 +113,14 @@ class CameraSession:
     def start(self) -> bool:
         """Start the camera session"""
         try:
+<<<<<<< HEAD
             if not self._open_capture():
+=======
+            # Initialize camera — works with both int index and URL string
+            self.cap = cv2.VideoCapture(self.camera_source)
+            if not self.cap.isOpened():
+                logger.error(f"Failed to open camera source: {self.camera_source}")
+>>>>>>> e11c513fa23f453464ec6cdbae30e148d6e8f11c
                 return False
             
             # Initialize unified monitor
@@ -295,6 +310,7 @@ class StreamManager:
         self.sessions: Dict[str, CameraSession] = {}
         self.lock = threading.Lock()
     
+<<<<<<< HEAD
     def create_session(self, session_id: str,
                       camera_source = 0,      # int | str (RTSP/HTTP URL)
                       camera_index: int = 0,  # legacy kwarg — ignored if camera_source supplied
@@ -302,6 +318,16 @@ class StreamManager:
                       inactivity_threshold: int = 30,
                       camera_name: str = "") -> bool:
         """Create and start a new camera session.
+=======
+    def create_session(self, session_id: str, camera_source=0,
+                      sensitivity: str = "medium", 
+                      inactivity_threshold: int = 30) -> bool:
+        """Create and start a new camera session.
+        
+        Args:
+            camera_source: int for USB webcam index, or str for RTSP/HTTP IP camera URL.
+        """
+>>>>>>> e11c513fa23f453464ec6cdbae30e148d6e8f11c
         
         camera_source accepts:
           - int  : local webcam index

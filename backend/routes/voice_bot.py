@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, status
+import json
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from typing import Optional, List
@@ -6,7 +7,7 @@ from pydantic import BaseModel
 import os
 import requests
 from config import get_db
-from utils.gemini_client import call_gemini
+from utils.gemini_client import call_gemini, safe_json_parse
 from models.users import ResponseSchema
 from tables.users import CareRecipient, CareTaker
 from repository.users import UsersRepo
@@ -104,18 +105,14 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
         else TriggerTypeEnum.user_initiated
     )
 
-    mood_result = {"mood": MoodEnum.neutral, "confidence": 0.5}
-    if trigger_enum == TriggerTypeEnum.user_initiated:
-        mood_result = analyze_mood(user_text)
-
-    save_message(payload.recipient_id, SenderEnum.user, user_text, mood_result["mood"], trigger_enum, payload.session_id, db)
-
     # Run sentiment analysis across history + current message
     sentiment = analyze_sentiment_with_history(user_text, payload.recipient_id, db)
-
-    # Override simple mood with history-aware mood if confidence is higher
-    if sentiment and sentiment["confidence"] >= mood_result["confidence"]:
-        mood_result["mood"] = MoodEnum(sentiment["current_mood"]) if sentiment["current_mood"] in [m.value for m in MoodEnum] else mood_result["mood"]
+    
+    # Extract mood from sentiment analysis
+    mood_str = sentiment.get("current_mood", "neutral")
+    mood_enum = MoodEnum(mood_str) if mood_str in [m.value for m in MoodEnum] else MoodEnum.neutral
+    
+    save_message(payload.recipient_id, SenderEnum.user, user_text, mood_enum, trigger_enum, payload.session_id, db)
 
     context = build_conversation_context(payload.recipient_id, db)
     system_prompt = generate_system_prompt(recipient.full_name, context, payload.language, sentiment)
@@ -126,32 +123,68 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
 
     gemini_payload = {
         "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser says: {user_text}"}]}],
-        "generationConfig": {"maxOutputTokens": 1000, "temperature": 0.7}
+        "generationConfig": {
+            "maxOutputTokens": 1000, 
+            "temperature": 0.7,
+            "responseMimeType": "application/json"
+        }
     }
 
     try:
         data = call_gemini(gemini_payload, timeout=20, caller="[voice_bot/chat]")
         if data and data.get('candidates'):
                 ai_text = data['candidates'][0]['content']['parts'][0]['text'].strip()
-                save_message(payload.recipient_id, SenderEnum.bot, ai_text, MoodEnum.neutral, trigger_enum, payload.session_id, db)
+                import json
+                try:
+                    ai_json = json.loads(ai_text)
+                    # Prioritize "reply", fallback to "message", then "message" inside "recommendation"
+                    reply_text = ai_json.get("reply")
+                    if not reply_text:
+                        # Fallback for old schema or nested recommendation
+                        rec = ai_json.get("recommendation", {})
+                        if isinstance(rec, dict):
+                            reply_text = rec.get("message")
+                        if not reply_text:
+                            reply_text = ai_json.get("message")
+                    
+                    # Absolute fallback: if still empty/none, use the raw text but this shouldn't happen
+                    if not reply_text:
+                        reply_text = ai_text
+                        
+                    intent = ai_json.get("intent", "chat")
+                    search_query = ai_json.get("search_query", "")
+                except Exception as ex:
+                    print(f"Failed to parse Gemini JSON: {ex}")
+                    reply_text = ai_text
+                    intent = "chat"
+                    search_query = ""
 
-                # Attach content recommendation when mood is actionable
-                mood_str = mood_result["mood"].value
-                recommendation = None
-                if mood_str not in ("neutral",):
+                save_message(payload.recipient_id, SenderEnum.bot, reply_text, MoodEnum.neutral, trigger_enum, payload.session_id, db)
+ 
+                # Attach content recommendation (prioritize AI's merged recommendation field)
+                recommendation = ai_json.get("recommendation")
+                 
+                # Fallback: if AI didn't provide one but mood is actionable, use default map
+                if not recommendation and mood_str not in ("neutral",):
                     recommendation = get_content_recommendation(mood_str)
+ 
+                # If we have a recommendation, ensure reply_text reflects its message if present
+                if recommendation and recommendation.get("message"):
+                    reply_text = recommendation.get("message", reply_text)
 
                 # ── ADD TTS GENERATION ──
                 audio_base64 = ""
                 if payload.use_tts:
                     # Detect if response is Hindi for correct voice selection
-                    lang_hi = "hi-IN" if is_hindi(ai_text) else "en-US"
-                    audio_base64 = generate_speech_base64(ai_text, lang_hi)
+                    lang_hi = "hi-IN" if is_hindi(reply_text) else "en-US"
+                    audio_base64 = generate_speech_base64(reply_text, lang_hi)
 
                 return ResponseSchema(
                     code=200, status="success", message="AI response generated",
                     result={
-                        "reply": ai_text,
+                        "reply": reply_text,
+                        "intent": intent,
+                        "search_query": search_query,
                         "audio_base64": audio_base64,
                         "mood_detected": mood_str,
                         "depression_risk": is_at_risk,

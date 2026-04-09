@@ -1170,6 +1170,7 @@
         "has_falls": true,
         "completed_at": "2026-03-20T23:35:19.790039"
     },
+<<<<<<< HEAD
     "9bb4fa91-0cc7-4487-9e69-143eee93ef9a": {
         "status": "completed",
         "progress": 100,
@@ -1185,5 +1186,160 @@
         "falls_detected": [],
         "has_falls": false,
         "completed_at": "2026-03-25T15:00:43.701533"
+=======
+    "4785fee2-8883-4420-9dab-304e262bec2f": {
+        "status": "completed",
+        "progress": 100,
+        "user_email": "2022a6r031@mietjammu.in",
+        "username": "TEST",
+        "caretaker_id": 45,
+        "recipient_id": 45,
+        "input_file": "temp_uploads\\8c9f5b43-5bc5-4475-994e-3de36bba4d9f.mp4",
+        "output_file": "processed_videos\\analyzed_8c9f5b43-5bc5-4475-994e-3de36bba4d9f.mp4",
+        "output_filename": "analyzed_8c9f5b43-5bc5-4475-994e-3de36bba4d9f.mp4",
+        "start_time": 1775115349.0555134,
+        "error": null,
+        "falls_detected": [],
+        "has_falls": false,
+        "completed_at": "2026-04-02T13:06:31.252971"
+    },
+    "6f6cd8db-ada4-46a8-ba56-cf3ceb07c205": {
+        "status": "completed",
+        "progress": 100,
+        "user_email": "2022a6r031@mietjammu.in",
+        "username": "TEST",
+        "caretaker_id": 45,
+        "recipient_id": 45,
+        "input_file": "temp_uploads\\f89ae05d-9566-4a81-8777-9f92eeac2be6.mp4",
+        "output_file": "processed_videos\\analyzed_f89ae05d-9566-4a81-8777-9f92eeac2be6.mp4",
+        "output_filename": "analyzed_f89ae05d-9566-4a81-8777-9f92eeac2be6.mp4",
+        "start_time": 1775115659.362086,
+        "error": null,
+        "falls_detected": [
+            {
+                "timestamp": "2026-04-02 13:11:13",
+                "message": "Fall Detected",
+                "frame": 39
+            }
+        ],
+        "has_falls": true,
+        "completed_at": "2026-04-02T13:11:17.555960"
+    },
+    "4637fc1c-2f16-4efa-90fe-841d418be9e7": {
+        "status": "completed",
+        "progress": 100,
+        "user_email": "2022a6r031@mietjammu.in",
+        "username": "TEST",
+        "caretaker_id": 45,
+        "recipient_id": 45,
+        "input_file": "temp_uploads\\9980143a-9f6b-4dd5-ada7-9731e348dcb6.mp4",
+        "output_file": "processed_videos\\analyzed_9980143a-9f6b-4dd5-ada7-9731e348dcb6.mp4",
+        "output_filename": "analyzed_9980143a-9f6b-4dd5-ada7-9731e348dcb6.mp4",
+        "start_time": 1775115697.6122665,
+        "error": null,
+        "falls_detected": [
+            {
+                "timestamp": "2026-04-02 13:11:42",
+                "message": "Fall Detected",
+                "frame": 11
+            },
+            {
+                "timestamp": "2026-04-02 13:11:47",
+                "message": "Fall Detected",
+                "frame": 34
+            },
+            {
+                "timestamp": "2026-04-02 13:11:59",
+                "message": "Fall Detected",
+                "frame": 83
+            },
+            {
+                "timestamp": "2026-04-02 13:12:04",
+                "message": "Fall Detected",
+                "frame": 99
+            }
+        ],
+        "has_falls": true,
+        "completed_at": "2026-04-02T13:12:16.803492"
+    },
+    "00b7d1fb-6bd8-4eb5-873e-6249d941d68f": {
+        "status": "completed",
+        "progress": 100,
+        "user_email": "2022a6r031@mietjammu.in",
+        "username": "TEST",
+        "caretaker_id": 45,
+        "recipient_id": 45,
+        "input_file": "temp_uploads\\0126a9bd-ded0-494b-833f-a7014b04072e.mp4",
+        "output_file": "processed_videos\\analyzed_0126a9bd-ded0-494b-833f-a7014b04072e.mp4",
+        "output_filename": "analyzed_0126a9bd-ded0-494b-833f-a7014b04072e.mp4",
+        "start_time": 1775155419.2966046,
+        "error": null,
+        "falls_detected": [
+            {
+                "timestamp": "2026-04-03 00:14:05",
+                "message": "Fall Detected",
+                "frame": 43
+            },
+            {
+                "timestamp": "2026-04-03 00:14:10",
+                "message": "Fall Detected",
+                "frame": 63
+            },
+            {
+                "timestamp": "2026-04-03 00:14:15",
+                "message": "Fall Detected",
+                "frame": 77
+            },
+            {
+                "timestamp": "2026-04-03 00:14:20",
+                "message": "Fall Detected",
+                "frame": 92
+            },
+            {
+                "timestamp": "2026-04-03 00:14:26",
+                "message": "Fall Detected",
+                "frame": 110
+            }
+        ],
+        "has_falls": true,
+        "completed_at": "2026-04-03T00:14:56.346579"
+    },
+    "f9366885-ca50-4c5c-a1e9-e41edb4950fc": {
+        "status": "completed",
+        "progress": 100,
+        "user_email": "2022a6r031@mietjammu.in",
+        "username": "TEST",
+        "caretaker_id": 45,
+        "recipient_id": 45,
+        "input_file": "temp_uploads\\935d4fab-294c-4310-9393-8fd194c907d0.mp4",
+        "output_file": "processed_videos\\analyzed_935d4fab-294c-4310-9393-8fd194c907d0.mp4",
+        "output_filename": "analyzed_935d4fab-294c-4310-9393-8fd194c907d0.mp4",
+        "start_time": 1775191670.3998063,
+        "error": null,
+        "falls_detected": [
+            {
+                "timestamp": "2026-04-03 10:18:04",
+                "message": "Fall Detected",
+                "frame": 8
+            },
+            {
+                "timestamp": "2026-04-03 10:18:12",
+                "message": "Fall Detected",
+                "frame": 37
+            },
+            {
+                "timestamp": "2026-04-03 10:18:21",
+                "message": "Fall Detected",
+                "frame": 70
+            },
+            {
+                "timestamp": "2026-04-03 10:18:29",
+                "message": "Fall Detected",
+                "frame": 101
+            }
+        ],
+        "has_falls": true,
+        "completed_at": "2026-04-03T10:18:52.966708"
+>>>>>>> e11c513fa23f453464ec6cdbae30e148d6e8f11c
     }
 }

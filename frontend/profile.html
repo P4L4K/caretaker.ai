@@ -1101,13 +1101,32 @@
             const items = profileData.alerts || [];
             if (!items.length) { el.innerHTML = '<div class="empty-state">No recent clinical alerts.</div>'; return; }
 
-            el.innerHTML = items.map(a => `
+            el.innerHTML = items.map(a => {
+                const msg = a.message || '';
+                const testMatch = msg.match(/(?:ordered|prescribed|new) lab test:?\s*([^.]+)/i);
+                let bookingBtn = '';
+                
+                if (testMatch) {
+                    const testName = testMatch[1].trim();
+                    // Direct search URL on Lal PathLabs as per user preference
+                    const bookingURL = `https://www.lalpathlabs.com/book-a-test/delhi?search=${encodeURIComponent(testName.toLowerCase())}`;
+                    bookingBtn = `
+                    <div style="margin-top:10px;">
+                        <a href="${bookingURL}" target="_blank" class="btn btn-sm" 
+                            style="background:#f15a22; color:white; border:none; font-weight:600; display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:8px;">
+                            <i class="fas fa-flask"></i> Book ${testName} with Lal PathLabs
+                        </a>
+                    </div>`;
+                }
+
+                return `
                 <div class="alert-item ${a.severity ? a.severity.toLowerCase() : ''}">
                     <div style="font-weight:600; font-size:0.9rem; margin-bottom:4px;">${(a.severity || 'Alert').toUpperCase()}</div>
-                    <div style="font-size:0.85rem;">${a.message}</div>
-                    <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">${new Date(a.created_at).toLocaleString()}</div>
+                    <div style="font-size:0.85rem;">${msg}</div>
+                    ${bookingBtn}
+                    <div style="font-size:0.75rem; color:var(--text-muted); margin-top:6px;">${new Date(a.created_at).toLocaleString()}</div>
                 </div>
-            `).join('');
+            `}).join('');
         }
 
         // ============================================

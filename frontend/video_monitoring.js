@@ -4,6 +4,7 @@ let currentProcessId = null;
 let currentSessionId = null;
 let checkStatusInterval = null;
 let checkAlertsInterval = null;
+let selectedCameraIndex = 0; // Tracks selected camera index for live monitoring
 
 // Authentication check
 const token = localStorage.getItem('token');
@@ -299,8 +300,202 @@ function showResults(results) {
     updateCharts(results);
 }
 
-// Live Monitoring Functions
+// ── Camera Selector Logic ──────────────────────────────────────────────────
+
+/**
+ * Enumerate connected video devices using the browser MediaDevices API.
+ * Prompts for camera permission if labels are empty (first run).
+ */
+async function refreshCameraList() {
+    const select = document.getElementById('cameraSelect');
+    const statusEl = document.getElementById('cameraStatus');
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+        statusEl.innerHTML = '<i class="fas fa-exclamation-triangle me-1 text-warning"></i>Camera enumeration not supported in this browser.';
+        return;
+    }
+
+    statusEl.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Detecting cameras...';
+
+    try {
+        // Request permission first so device labels are populated
+        let stream = null;
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        } catch (permErr) {
+            // If permission denied, we can still list devices (but labels may be empty)
+            console.warn('[Camera] Permission error:', permErr.message);
+        }
+
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(d => d.kind === 'videoinput');
+
+        // Stop the temporary permission stream
+        if (stream) stream.getTracks().forEach(t => t.stop());
+
+        if (videoDevices.length === 0) {
+            statusEl.innerHTML = '<i class="fas fa-times-circle me-1 text-danger"></i>No cameras detected.';
+            select.innerHTML = '<option value="0">No cameras found</option>';
+            return;
+        }
+
+        // Re-populate dropdown
+        const prevIndex = parseInt(select.value) || 0;
+        select.innerHTML = '';
+        videoDevices.forEach((device, idx) => {
+            const label = device.label || `Camera ${idx} (index ${idx})`;
+            const opt = document.createElement('option');
+            opt.value = idx;
+            opt.textContent = label;
+            if (idx === prevIndex) opt.selected = true;
+            select.appendChild(opt);
+        });
+
+        selectedCameraIndex = parseInt(select.value);
+        statusEl.innerHTML = `<i class="fas fa-check-circle me-1 text-success"></i>${videoDevices.length} camera(s) detected.`;
+
+    } catch (err) {
+        console.error('[Camera] Enumeration error:', err);
+        statusEl.innerHTML = '<i class="fas fa-exclamation-triangle me-1 text-danger"></i>Failed to enumerate cameras: ' + err.message;
+    }
+}
+
+// Camera dropdown change handler — called from DOMContentLoaded below
+function setupCameraSelector() {
+    // USB camera dropdown change
+    const select = document.getElementById('cameraSelect');
+    if (select) {
+        select.addEventListener('change', function () {
+            selectedCameraIndex = parseInt(this.value);
+            console.log('[Camera] Selected camera index:', selectedCameraIndex);
+        });
+    }
+
+    // USB / IP Camera toggle
+    document.querySelectorAll('input[name="cameraType"]').forEach(radio => {
+        radio.addEventListener('change', function () {
+            const isIP = this.value === 'ip';
+            document.getElementById('usbCameraRow').classList.toggle('d-none', isIP);
+            document.getElementById('ipCameraRow').classList.toggle('d-none', !isIP);
+
+            const statusEl = document.getElementById('cameraStatus');
+            if (isIP) {
+                statusEl.innerHTML = '<i class="fas fa-network-wired me-1 text-primary"></i>Enter the RTSP or HTTP stream URL of your IP camera, then click Start Monitoring.';
+            } else {
+                statusEl.innerHTML = '<i class="fas fa-info-circle me-1"></i>Click Refresh to detect all connected cameras.';
+                // Auto-refresh USB camera list when switching back
+                refreshCameraList();
+            }
+        });
+    });
+
+    // Auto-refresh camera list when user switches to Live tab
+    const liveTabBtn = document.getElementById('live-tab');
+    if (liveTabBtn) {
+        liveTabBtn.addEventListener('shown.bs.tab', function () {
+            // Only auto-refresh if USB mode is active
+            const selectedType = document.querySelector('input[name="cameraType"]:checked')?.value;
+            if (selectedType !== 'ip') refreshCameraList();
+        });
+    }
+
+    // ── Hot-plug detection ──────────────────────────────────────────────────
+    // Fires instantly whenever a camera/USB device is connected or removed
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+        navigator.mediaDevices.addEventListener('devicechange', async () => {
+            console.log('[Camera] Device change detected — refreshing list...');
+
+            // Only auto-refresh if the Live tab is currently the active one
+            const livePane = document.getElementById('live');
+            const selectedType = document.querySelector('input[name="cameraType"]:checked')?.value;
+            if (livePane && livePane.classList.contains('active') && selectedType !== 'ip') {
+                await refreshCameraList();
+
+                // Flash the status briefly to inform the user
+                const statusEl = document.getElementById('cameraStatus');
+                if (statusEl) {
+                    const prev = statusEl.innerHTML;
+                    statusEl.innerHTML = '<i class="fas fa-plug me-1 text-primary"></i><strong>Camera list updated</strong> — a device was connected or removed.';
+                    setTimeout(() => { statusEl.innerHTML = prev; }, 3000);
+                }
+            }
+        });
+        console.log('[Camera] Hot-plug detection active.');
+    }
+}
+
+// ── IP Camera Test ──────────────────────────────────────────────────────────
+async function testIpCamera() {
+    const urlInput = document.getElementById('ipCameraUrl');
+    const statusEl = document.getElementById('cameraStatus');
+    const url = urlInput?.value?.trim();
+
+    if (!url) {
+        statusEl.innerHTML = '<i class="fas fa-exclamation-triangle me-1 text-warning"></i>Please enter a stream URL first.';
+        return;
+    }
+
+    // Validate format
+    if (!url.startsWith('rtsp://') && !url.startsWith('http://') && !url.startsWith('https://')) {
+        statusEl.innerHTML = '<i class="fas fa-times-circle me-1 text-danger"></i>URL must start with <code>rtsp://</code>, <code>http://</code>, or <code>https://</code>';
+        return;
+    }
+
+    statusEl.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Testing connection via backend...';
+
+    try {
+        // Ask the backend to validate the URL (it tries cv2.VideoCapture briefly)
+        const response = await fetch(`${API_BASE}/video-monitoring/test-ip-camera`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ camera_url: url })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.reachable) {
+            statusEl.innerHTML = '<i class="fas fa-check-circle me-1 text-success"></i><strong>Connected!</strong> Camera is reachable. Click Start Monitoring.';
+        } else {
+            statusEl.innerHTML = `<i class="fas fa-times-circle me-1 text-danger"></i><strong>Unreachable:</strong> ${data.detail || 'Could not connect to the camera URL.'}`;
+        }
+    } catch (err) {
+        // Backend endpoint may not exist yet — just do a format check
+        statusEl.innerHTML = '<i class="fas fa-check-circle me-1 text-success"></i>URL format looks valid. Click Start Monitoring to connect.';
+    }
+}
+
+// ── Live Monitoring Functions ───────────────────────────────────────────────
+
 async function startLiveMonitoring() {
+    // Determine camera source based on selected type
+    const selectedType = document.querySelector('input[name="cameraType"]:checked')?.value;
+    const statusEl = document.getElementById('cameraStatus');
+
+    let payload = { sensitivity: 'medium' };
+
+    if (selectedType === 'ip') {
+        const url = document.getElementById('ipCameraUrl')?.value?.trim();
+        if (!url) {
+            showAlert('Please enter an IP camera URL before starting.', 'warning');
+            return;
+        }
+        if (!url.startsWith('rtsp://') && !url.startsWith('http://') && !url.startsWith('https://')) {
+            showAlert('IP camera URL must start with rtsp://, http://, or https://', 'warning');
+            return;
+        }
+        payload.camera_url = url;
+        payload.camera_index = 0; // ignored by backend when camera_url is set
+        console.log('[Live] Starting with IP camera URL:', url);
+    } else {
+        // USB/webcam mode
+        const cameraSelect = document.getElementById('cameraSelect');
+        selectedCameraIndex = cameraSelect ? parseInt(cameraSelect.value) : 0;
+        payload.camera_index = selectedCameraIndex;
+        console.log('[Live] Starting with USB camera index:', selectedCameraIndex);
+    }
+
     try {
         const response = await fetch(`${API_BASE}/video-monitoring/start`, {
             method: 'POST',
@@ -308,10 +503,7 @@ async function startLiveMonitoring() {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                camera_index: 0,
-                sensitivity: "medium"
-            })
+            body: JSON.stringify(payload)
         });
 
         if (!response.ok) {
@@ -325,9 +517,7 @@ async function startLiveMonitoring() {
         console.log('[Live Monitoring] Session started:', currentSessionId);
         console.log('[Live Monitoring] Relative stream URL:', streamUrl);
 
-        // IMPORTANT: Convert relative URL to absolute URL pointing to backend
-        // The backend returns: /api/video-monitoring/stream/{id}
-        // We need: http://127.0.0.1:8000/api/video-monitoring/stream/{id}
+        // Convert relative URL to absolute URL pointing to backend
         const absoluteStreamUrl = `${API_BASE.replace('/api', '')}${streamUrl}`;
         console.log('[Live Monitoring] Absolute stream URL:', absoluteStreamUrl);
 
@@ -336,7 +526,6 @@ async function startLiveMonitoring() {
         document.getElementById('stopLiveBtn').classList.remove('d-none');
         document.getElementById('liveSessionInfo').classList.remove('d-none');
 
-        // Safely update session info if elements exist
         const sessionIdEl = document.getElementById('sessionId');
         if (sessionIdEl) sessionIdEl.textContent = currentSessionId;
 
@@ -346,7 +535,7 @@ async function startLiveMonitoring() {
         const liveIndicatorEl = document.getElementById('liveIndicator');
         if (liveIndicatorEl) liveIndicatorEl.innerHTML = '<span class="live-indicator"></span>';
 
-        // Display the video stream with ABSOLUTE URL
+        // Display the video stream
         const liveVideoContainer = document.getElementById('liveVideoContainer');
         liveVideoContainer.innerHTML = `
             <div class="card">
@@ -759,13 +948,14 @@ function updateCharts(results) {
 }
 
 
-// Add loadHistory to initialization
+// ── Initialisation ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
     loadUserInfo();
     setupUploadZone();
     loadStats();
     loadHistory();
     loadInactivitySettings();
+    setupCameraSelector();  // Wire up camera dropdown + live-tab auto-detect
 
     // Refresh stats/history periodically
     setInterval(loadStats, 30000);

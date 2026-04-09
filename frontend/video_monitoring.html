@@ -277,6 +277,67 @@
                 transform: rotate(360deg);
             }
         }
+
+        /* Camera Selector */
+        .camera-selector-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: rgba(74, 144, 226, 0.08);
+            border: 1px solid rgba(74, 144, 226, 0.25);
+            border-radius: 12px;
+            padding: 0.75rem 1.25rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .camera-selector-bar label {
+            font-weight: 600;
+            color: var(--primary);
+            white-space: nowrap;
+            margin-bottom: 0;
+        }
+
+        .camera-selector-bar select {
+            flex: 1;
+            min-width: 200px;
+            border-radius: 8px;
+            border: 1px solid rgba(74, 144, 226, 0.4);
+            padding: 0.4rem 0.75rem;
+            font-size: 0.9rem;
+            background: white;
+            transition: border-color 0.2s;
+        }
+
+        .camera-selector-bar select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.15);
+        }
+
+        .camera-selector-bar .btn-refresh-cam {
+            padding: 0.4rem 0.9rem;
+            border-radius: 8px;
+            border: 1px solid var(--primary);
+            background: white;
+            color: var(--primary);
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .camera-selector-bar .btn-refresh-cam:hover {
+            background: var(--primary);
+            color: white;
+        }
+
+        #cameraStatus {
+            font-size: 0.8rem;
+            color: #6c757d;
+            width: 100%;
+        }
     </style>
 </head>
 
@@ -413,11 +474,64 @@
                                 </div>
                             </div>
 
+                            <!-- Camera Selector -->
+                            <div class="camera-selector-bar" id="cameraSelectorBar">
+                                <!-- Source Type Toggle -->
+                                <div class="d-flex align-items-center gap-2 w-100 mb-2">
+                                    <label class="mb-0"><i class="fas fa-camera me-1"></i>Camera Type:</label>
+                                    <div class="btn-group btn-group-sm" role="group" id="cameraTypeGroup">
+                                        <input type="radio" class="btn-check" name="cameraType" id="typeUSB" value="usb" checked autocomplete="off">
+                                        <label class="btn btn-outline-primary" for="typeUSB">
+                                            <i class="fas fa-usb me-1"></i>USB / Webcam
+                                        </label>
+                                        <input type="radio" class="btn-check" name="cameraType" id="typeIP" value="ip" autocomplete="off">
+                                        <label class="btn btn-outline-primary" for="typeIP">
+                                            <i class="fas fa-network-wired me-1"></i>IP Camera
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <!-- USB Camera Row -->
+                                <div id="usbCameraRow" class="d-flex align-items-center gap-2 w-100">
+                                    <label for="cameraSelect" class="mb-0" style="white-space:nowrap;">
+                                        <i class="fas fa-list me-1"></i>Select Device:
+                                    </label>
+                                    <select id="cameraSelect" title="Select a camera device">
+                                        <option value="0">Default Camera (index 0)</option>
+                                    </select>
+                                    <button class="btn-refresh-cam" onclick="refreshCameraList()" title="Refresh camera list">
+                                        <i class="fas fa-sync-alt me-1"></i>Refresh
+                                    </button>
+                                </div>
+
+                                <!-- IP Camera Row -->
+                                <div id="ipCameraRow" class="d-none w-100">
+                                    <label for="ipCameraUrl" class="mb-1" style="font-weight:600; color:var(--primary);">
+                                        <i class="fas fa-link me-1"></i>Stream URL:
+                                    </label>
+                                    <div class="d-flex gap-2 align-items-center">
+                                        <input type="text" id="ipCameraUrl" class="form-control form-control-sm"
+                                               placeholder="e.g. rtsp://admin:pass@192.168.1.100:554/stream"
+                                               style="border-radius:8px; border:1px solid rgba(74,144,226,0.4); font-size:0.88rem;">
+                                        <button class="btn-refresh-cam" onclick="testIpCamera()" title="Test connection">
+                                            <i class="fas fa-plug me-1"></i>Test
+                                        </button>
+                                    </div>
+                                    <div class="mt-1" style="font-size:0.78rem; color:#6c757d;">
+                                        <strong>Formats:</strong>
+                                        <code>rtsp://user:pass@IP:554/stream</code> &nbsp;|&nbsp;
+                                        <code>http://IP:8080/video</code> &nbsp;|&nbsp;
+                                        <code>http://IP/mjpgstream</code>
+                                    </div>
+                                </div>
+
+                                <span id="cameraStatus" class="w-100"><i class="fas fa-info-circle me-1"></i>Click Refresh to detect all connected cameras.</span>
+                            </div>
+
                             <div class="alert alert-info">
                                 <i class="fas fa-video me-2"></i>
-                                <strong>Ready to Monitor:</strong> Clicking "Start Monitoring" will automatically
-                                launch the camera window on the server.
-                                Ensure the server machine has a webcam connected.
+                                <strong>Ready to Monitor:</strong> Select your camera above, then click "Start Monitoring".
+                                The selected feed will be streamed with real-time fall &amp; inactivity detection.
                             </div>
 
                             <div id="liveSessionInfo" class="d-none">

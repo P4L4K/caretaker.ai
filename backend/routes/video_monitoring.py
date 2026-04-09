@@ -80,10 +80,10 @@ class StartLiveRequest(BaseModel):
       - camera_url   : str  RTSP/HTTP URL for a CCTV / IP camera
       - camera_id    : str  ID of a saved camera from the registry
     """
-    camera_index: int    = 0
-    camera_url:   str    = ""    # RTSP / HTTP URL
-    camera_id:    str    = ""    # Saved camera registry ID
-    sensitivity:  str    = "medium"
+    camera_index: int              = 0
+    camera_url:   Optional[str]    = None
+    camera_id:    Optional[str]    = None
+    sensitivity:  str              = "medium"
 
 class AddCameraRequest(BaseModel):
     name:     str
@@ -567,7 +567,7 @@ async def start_live_monitoring(
                 "message": "You already have an active session"
             }
     
-    # Determine the camera source
+    # Determine the camera source: Registry > URL > Local
     camera_source = None
     camera_name   = ""
 
@@ -579,6 +579,7 @@ async def start_live_monitoring(
         cam_meta = get_camera(request.camera_id)
         camera_source = cam_url
         camera_name   = cam_meta.get("name", request.camera_id) if cam_meta else request.camera_id
+        logger.info(f"[Live] Using Registered camera: {camera_name}")
 
     elif request.camera_url:
         # Direct URL (RTSP / HTTP) provided by user
@@ -586,12 +587,14 @@ async def start_live_monitoring(
         if not (url.startswith("rtsp://") or url.startswith("http://") or url.startswith("https://")):
             raise HTTPException(status_code=400, detail="camera_url must start with rtsp://, http://, or https://")
         camera_source = url
-        camera_name   = url  # use URL as name if not from registry
+        camera_name   = url
+        logger.info(f"[Live] Using IP camera URL: {camera_source}")
 
     else:
         # Fall back to local webcam index
         camera_source = request.camera_index
         camera_name   = f"Webcam #{request.camera_index}"
+        logger.info(f"[Live] Using USB camera index: {camera_source}")
 
     # Create new session
     session_id = str(uuid.uuid4())
@@ -794,6 +797,55 @@ async def get_inactivity_threshold(authorization: Optional[str] = Header(None)):
     
     threshold = inactivity_thresholds.get(username, 30)
     return {"threshold_seconds": threshold}
+
+
+# ── IP Camera Test Endpoint ─────────────────────────────────────────────────
+
+class TestIPCameraRequest(BaseModel):
+    camera_url: str
+
+@router.post("/test-ip-camera")
+async def test_ip_camera(
+    request: TestIPCameraRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Test whether an IP camera URL is reachable by briefly opening it with OpenCV.
+    Returns {reachable: true/false} within ~5 seconds.
+    """
+    username = _get_username_from_auth(authorization)
+    if not username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token")
+
+    url = request.camera_url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="camera_url is required")
+
+    def _check():
+        cap = cv2.VideoCapture(url)
+        # Give it up to 5 seconds to open
+        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
+        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
+        opened = cap.isOpened()
+        if opened:
+            ret, _ = cap.read()
+            opened = ret
+        cap.release()
+        return opened
+
+    try:
+        # Run the blocking OpenCV call in a thread pool so we don't block the event loop
+        loop = asyncio.get_event_loop()
+        reachable = await asyncio.wait_for(
+            loop.run_in_executor(None, _check),
+            timeout=8.0
+        )
+        return {"reachable": reachable, "url": url}
+    except asyncio.TimeoutError:
+        return {"reachable": False, "detail": "Connection timed out after 8 seconds"}
+    except Exception as e:
+        logger.error(f"[test-ip-camera] Error testing {url}: {e}")
+        return {"reachable": False, "detail": str(e)}
 
 
 @router.get("/recipient/{recipient_id}/stats")

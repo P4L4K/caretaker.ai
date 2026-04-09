@@ -2,7 +2,7 @@ import os
 import json
 import requests
 from datetime import datetime, timedelta
-from utils.gemini_client import call_gemini
+from utils.gemini_client import call_gemini, safe_json_parse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -24,7 +24,7 @@ MOOD_CONTENT_MAP = {
     "anxious":   {"type": "music",  "queries": ["calming meditation music hindi", "mann ko shant karne wale gaane", "peaceful indian classical music"], "message": "Ghabraiye mat, sab theek ho jayega. Yeh soothing music aapko relax karega 🌿"},
     "distressed": {"type": "music", "queries": ["healing hindi songs", "hope songs bollywood", "himmat wale gaane"], "message": "Main aapke saath hoon. Yeh gaane suniye, thoda better feel karenge 💙"},
     "relaxed":   {"type": "music",  "queries": ["soft instrumental hindi music", "evening relaxing songs bollywood", "ghazal soothing"], "message": "Bahut acha mood hai! Kuch ghazal ya soft songs sunte hain 😌"},
-    "spiritual": {"type": "story",  "queries": ["bhajan aarti hindi", "ramayan katha", "bhagwat geeta pravachan"], "message": "Bahut acha. Chalo kuch bhajan ya dharmik katha sunate hain 🙏"},
+    "spiritual": {"type": "music",  "queries": ["bhajan aarti hindi", "ramayan katha", "bhagwat geeta pravachan"], "message": "Bahut acha. Chalo kuch bhajan ya dharmik katha sunate hain 🙏"},
     "angry":     {"type": "music",  "queries": ["peaceful hindi songs anger calm", "mann ko shant karne wale gaane", "slow calm bollywood"], "message": "Thoda deep breath lijiye. Yeh peaceful songs aapko shant karengi 🕊️"},
     "neutral":   {"type": "choice", "queries": [], "message": "Aaj kya mann hai? Gaana sunna chahenge, koi kahani, ya bas baatein karein? 😊"},
 }
@@ -184,7 +184,7 @@ def generate_system_prompt(name: str, context: dict, language: str = "en", senti
         )
     elif recommended_action == "story":
         recommendation_hint = (
-            f"If they seem open to it, gently suggest a story — "
+            f"If they seem open to it, gently suggest a story - "
             f"'Kya aap ek kahani sunna chahenge?' Keep it light and optional."
         )
     elif recommended_action == "alert" or urgency == "high":
@@ -206,15 +206,21 @@ def generate_system_prompt(name: str, context: dict, language: str = "en", senti
 
 You are NOT a medical bot or an assistant. You are their FRIEND. You laugh with them, worry with them, sit with them when they are sad. You remember their health but you lead with your heart, not with data.
 
+CURRENT CONTEXT:
+- Time: {datetime.now().strftime("%I:%M %p")}
+- Day: {datetime.now().strftime("%A")}
+- Period: {"morning" if 5 <= datetime.now().hour < 12 else "afternoon" if 12 <= datetime.now().hour < 17 else "evening" if 17 <= datetime.now().hour < 21 else "night"}
+
 LANGUAGE: {lang_instruction}
 
 YOUR PERSONALITY:
-- You speak naturally, like a real person — not in bullet points or lists
+- You speak naturally, like a real person - not in bullet points or lists
+- You use time-appropriate greetings (e.g. Suprabhat/Namaste in morning, Shubh Sandhya in evening)
 - You ask ONE follow-up question at the end of most replies (never two at once)
 - You remember what was said earlier in the conversation and reference it naturally
 - You are curious about their life, their day, their feelings
 - You never say "I am an AI" or sound robotic
-- You keep responses SHORT (2-4 sentences usually) — elderly users get overwhelmed by long text
+- You keep responses SHORT (2-4 sentences usually) - elderly users get overwhelmed by long text
 - You use their name occasionally to make it personal
 
 EMOTIONAL STATE RIGHT NOW:
@@ -225,10 +231,37 @@ EMOTIONAL STATE RIGHT NOW:
 {trend_note}
 {recommendation_hint}
 
+### 💡 OUTPUT FORMAT REQUIREMENT:
+You MUST return your response as a single, valid JSON object. Do NOT include any text outside the JSON. Do NOT wrap it in markdown.
+The JSON must follow this EXACT schema:
+{{
+  "reply": "Your warm, conversational response to the user as Saathi.",
+  "intent": "Exactly one of: 'play_music', 'play_video', 'tell_story', 'stop', 'pause', 'resume', 'next', 'previous', 'emergency', 'medicine_query', or 'chat'.",
+  "search_query": "If intent is to play music/story, a clean YouTube search query in English. Else empty \"\".",
+  "recommendation": {{ 
+      "type": "Optional: 'choice' or 'play'. Use ONLY if suggesting options or playing a specific song.",
+      "category": "Optional: 'music' or 'story'.",
+      "message": "Optional: Warm text like 'Humdard baja raha hoon' or 'Yeh rahi kuch kahaniyan:'.",
+      "choices": ["Optional: Exactly 3 diverse options if type was 'choice'.", "..."],
+      "query": "Optional: If type was 'play', the specific song/story to play."
+  }}
+}}
+
+### 💡 PLAYBACK & OPTIONS RULES:
+1. If the user mentions a specific song/story (e.g., 'Humdard' or 'Kishore Kumar') with OR without 'play/bajao', set intent to the matching command and include the "recommendation" with type: "play".
+2. If they ask for music or stories GENERALLY (e.g., 'play a song', 'tell a story') without a specific title:
+   - Identify 3 diverse options and include them in the "recommendation" with type: "choice".
+3. For normal conversation, leave "recommendation" as null or omit it.
+
+### 🚫 CLINICAL ACCURACY:
+- Only discuss health info provided in the HEALTH CONTEXT above. 
+- If asked about something NOT in the data, your "reply" must be "Iske baare mein mujhe abhi jaankari nahi hai." 
+- DO NOT hallucinate medication dosages or lab values.
+ 
 """
 
     # ── Emergency (always included, brief) ──
-    prompt += """EMERGENCY: If they mention a fall, chest pain, breathing trouble, severe pain — drop everything, stay calm, give first-aid guidance, tell them to call caretaker immediately.\n\n"""
+    prompt += """EMERGENCY: If they mention a fall, chest pain, breathing trouble, severe pain - drop everything, stay calm, give first-aid guidance, tell them to call caretaker immediately.\n\n"""
 
     # ── Health context (only what's relevant, not a data dump) ──
     if not has_introduced:
@@ -261,7 +294,7 @@ EMOTIONAL STATE RIGHT NOW:
             prompt += f"{label}: {msg['text']}\n"
         prompt += "\n"
 
-    prompt += f"Now respond as Saathi to what {first_name} ji just said. Be natural. Be human. Be warm.\n"
+    prompt += f"Now respond as Saathi to what {first_name} ji just said. Be natural. Be human. Be warm.\n\n"
 
     return prompt
 
@@ -273,33 +306,29 @@ def analyze_mood(text: str) -> dict:
         return {"mood": MoodEnum.neutral, "confidence": 0.5}
 
     prompt = (
-        'Analyze the emotional tone of this text from an elderly user.\n'
-        'Reply with a JSON object with exactly two keys: "mood" and "confidence".\n'
-        '"mood" must be exactly one of: '
-        '"happy", "sad", "anxious", "angry", "neutral", "distressed", "lonely", "bored", "relaxed", "spiritual".\n'
-        '"confidence" must be a float between 0.0 and 1.0.\n'
-        'Hints:\n'
-        '- "lonely": user feels alone, nobody talks to them, misses family\n'
-        '- "bored": user says time is not passing, nothing to do, bore ho raha hu\n'
-        '- "relaxed": calm, peaceful, sab theek hai\n'
-        '- "spiritual": mention of God, prayer, bhajan, mandir, pooja\n\n'
-        f'User text: "{text}"\n'
+        'Analyze the emotional tone of this text from an elderly user. '
+        'Return ONLY a JSON object and no other text.\n\n'
+        'Example format:\n'
+        '{"mood": "happy", "confidence": 0.9}\n\n'
+        'Allowed moods: "happy", "sad", "anxious", "angry", "neutral", "distressed", "lonely", "bored", "relaxed", "spiritual".\n'
+        f'User text: "{text}"'
     )
 
     try:
         data = call_gemini(
-            {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1}},
+            {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1, "maxOutputTokens": 200}},
             timeout=10, caller="[analyze_mood]"
         )
         if data and data.get('candidates'):
-            ai_text = data['candidates'][0]['content']['parts'][0]['text']
-            ai_text = ai_text.replace("```json", "").replace("```", "").strip()
-            result = json.loads(ai_text)
-            mood_str = result.get("mood", "neutral").lower()
-            valid_moods = [m.value for m in MoodEnum]
-            if mood_str not in valid_moods:
-                mood_str = "neutral"
-            return {"mood": MoodEnum(mood_str), "confidence": float(result.get("confidence", 0.5))}
+            raw = data['candidates'][0]['content']['parts'][0]['text'].strip()
+            result = safe_json_parse(raw)
+            if result:
+                mood_str = result.get("mood", "neutral").lower()
+                valid_moods = [m.value for m in MoodEnum]
+                if mood_str in valid_moods:
+                    return {"mood": MoodEnum(mood_str), "confidence": float(result.get("confidence", 0.5))}
+                
+            print(f"[analyze_mood] Parse Failed or invalid mood for raw: {raw}")
     except Exception as e:
         print(f"[analyze_mood] Error: {e}")
 

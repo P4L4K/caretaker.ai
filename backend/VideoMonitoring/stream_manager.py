@@ -19,12 +19,24 @@ logger = logging.getLogger(__name__)
 
 
 class CameraSession:
-    """Manages a single camera monitoring session with MJPEG streaming"""
+    """Manages a single camera monitoring session with MJPEG streaming.
     
-    def __init__(self, session_id: str, camera_index: int = 0, 
-                 sensitivity: str = "medium", inactivity_threshold: int = 30):
+    camera_source can be:
+      - int  : local webcam index (0, 1, …)
+      - str  : RTSP URL  rtsp://user:pass@192.168.1.100:554/stream
+               HTTP MJPEG http://192.168.1.100/video
+               or any OpenCV-compatible URL
+    """
+    
+    def __init__(self, session_id: str,
+                 camera_source = 0,          # int | str
+                 sensitivity: str = "medium",
+                 inactivity_threshold: int = 30,
+                 camera_name: str = ""):
         self.session_id = session_id
-        self.camera_index = camera_index
+        # Accept legacy camera_index kwarg as well
+        self.camera_source = camera_source
+        self.camera_name   = camera_name or str(camera_source)
         self.sensitivity = sensitivity
         self.inactivity_threshold = inactivity_threshold
         
@@ -54,19 +66,47 @@ class CameraSession:
         self.alerts: List[dict] = []
         self.frame_count = 0
         
+        # Reconnect state (for IP cameras that drop)
+        self._consecutive_failures = 0
+        self._max_failures = 30   # ~3 s at 10 fps before reconnect attempt
+        self._reconnect_attempts = 0
+        self._max_reconnect = 5
+        
+    def _open_capture(self) -> bool:
+        """Open (or re-open) cv2.VideoCapture for this session's camera source."""
+        source = self.camera_source
+        logger.info(f"Session {self.session_id}: Opening capture source={source}")
+        
+        # For RTSP/HTTP URLs prefer FFMPEG backend which handles network streams better
+        if isinstance(source, str) and (source.startswith("rtsp") or source.startswith("http")):
+            cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+            # Reduce internal buffer to minimize latency on IP cams
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        else:
+            cap = cv2.VideoCapture(source)
+        
+        if not cap.isOpened():
+            logger.error(f"Session {self.session_id}: Cannot open source: {source}")
+            return False
+        
+        # Only set resolution/fps for local webcams
+        if isinstance(source, int):
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+        
+        if self.cap:
+            self.cap.release()
+        self.cap = cap
+        self._consecutive_failures = 0
+        logger.info(f"Session {self.session_id}: Capture opened OK")
+        return True
+
     def start(self) -> bool:
         """Start the camera session"""
         try:
-            # Initialize camera
-            self.cap = cv2.VideoCapture(self.camera_index)
-            if not self.cap.isOpened():
-                logger.error(f"Failed to open camera index {self.camera_index}")
+            if not self._open_capture():
                 return False
-            
-            # Set camera properties for better performance
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            self.cap.set(cv2.CAP_PROP_FPS, 30)
             
             # Initialize unified monitor
             self.monitor = UnitedMonitor(
@@ -102,6 +142,17 @@ class CameraSession:
                     self.monitor.inactivity_monitor.safety_threshold = seconds
                     logger.info(f"Session {self.session_id}: Inactivity threshold updated (direct) to {seconds}s")
 
+    def _try_reconnect(self) -> bool:
+        """Attempt to reconnect to an IP camera after repeated failures."""
+        if self._reconnect_attempts >= self._max_reconnect:
+            logger.error(f"Session {self.session_id}: Max reconnect attempts reached. Stopping.")
+            self.running = False
+            return False
+        self._reconnect_attempts += 1
+        logger.warning(f"Session {self.session_id}: Reconnect attempt {self._reconnect_attempts}/{self._max_reconnect}")
+        time.sleep(3)  # Wait before reconnecting
+        return self._open_capture()
+
     def _capture_loop(self):
         """Main capture and processing loop"""
         while self.running:
@@ -112,9 +163,24 @@ class CameraSession:
 
                 ret, frame = self.cap.read()
                 if not ret:
-                    logger.warning("Failed to read frame")
+                    self._consecutive_failures += 1
+                    logger.warning(f"Session {self.session_id}: Frame read failed ({self._consecutive_failures}/{self._max_failures})")
                     time.sleep(0.1)
+                    # Attempt reconnect for IP cameras after sustained failures
+                    if self._consecutive_failures >= self._max_failures:
+                        is_network = isinstance(self.camera_source, str)
+                        if is_network:
+                            if not self._try_reconnect():
+                                break
+                        else:
+                            # Local webcam with sustained failure — stop
+                            logger.error(f"Session {self.session_id}: Local camera failed persistently. Stopping.")
+                            self.running = False
+                            break
                     continue
+                
+                self._consecutive_failures = 0  # Reset on success
+                self._reconnect_attempts = 0
                 
                 # Check monitor existence
                 if not self.monitor:
@@ -229,11 +295,19 @@ class StreamManager:
         self.sessions: Dict[str, CameraSession] = {}
         self.lock = threading.Lock()
     
-    def create_session(self, session_id: str, camera_index: int = 0,
+    def create_session(self, session_id: str,
+                      camera_source = 0,      # int | str (RTSP/HTTP URL)
+                      camera_index: int = 0,  # legacy kwarg — ignored if camera_source supplied
                       sensitivity: str = "medium", 
-                      inactivity_threshold: int = 30) -> bool:
-        """Create and start a new camera session"""
+                      inactivity_threshold: int = 30,
+                      camera_name: str = "") -> bool:
+        """Create and start a new camera session.
         
+        camera_source accepts:
+          - int  : local webcam index
+          - str  : RTSP URL  e.g. rtsp://admin:pass@192.168.1.100:554/Streaming/Channels/101
+                   HTTP URL  e.g. http://192.168.1.100:8080/video
+        """
         # Auto-cleanup before creating new session
         self.cleanup_inactive_sessions()
         
@@ -243,9 +317,10 @@ class StreamManager:
             
             session = CameraSession(
                 session_id=session_id,
-                camera_index=camera_index,
+                camera_source=camera_source,
                 sensitivity=sensitivity,
-                inactivity_threshold=inactivity_threshold
+                inactivity_threshold=inactivity_threshold,
+                camera_name=camera_name,
             )
             
             if session.start():

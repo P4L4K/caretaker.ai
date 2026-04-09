@@ -1,13 +1,20 @@
 """
-Live webcam fall monitor using YOLO + LSTM pipeline.
+Live webcam / IP-camera fall monitor using YOLO + LSTM pipeline.
 
 Usage:
-    python run_live_monitor.py [options]
+    # Local webcam
+    python run_live_monitor.py
+    python run_live_monitor.py --camera 0
+
+    # IP / network camera via URL (RTSP, HTTP stream)
+    python run_live_monitor.py --url rtsp://user:pass@192.168.1.10:554/stream
+    python run_live_monitor.py --url http://192.168.1.10:8080/video
 
 Options:
     --session-id  Active monitoring session ID (for API alerts)
     --token       JWT auth token
-    --camera      Camera index (default: 0)
+    --camera      Camera index (default: 0)  [ignored if --url is given]
+    --url         IP camera / RTSP / HTTP stream URL
     --sensitivity low | medium | high  (default: medium)
     --threshold   Inactivity threshold seconds (default: 30)
 """
@@ -33,10 +40,10 @@ class LiveMonitorSession:
     """Live webcam monitoring session with optional backend alert integration."""
 
     def __init__(self, session_id=None, token=None,
-                 camera_index=0, sensitivity="medium", threshold=30):
-        self.session_id   = session_id
-        self.token        = token
-        self.camera_index = camera_index
+                 camera_source=0, sensitivity="medium", threshold=30):
+        self.session_id    = session_id
+        self.token         = token
+        self.camera_source = camera_source   # int index OR string URL
 
         self.monitor = UnitedMonitor(
             sensitivity=sensitivity,
@@ -76,13 +83,18 @@ class LiveMonitorSession:
         threading.Thread(target=_send, daemon=True).start()
 
     def run(self):
+        src_label = self.camera_source if isinstance(self.camera_source, int) \
+                    else f"URL: {self.camera_source}"
         print(f"=== Live Monitor Started  "
-              f"(session={self.session_id or 'local'}  camera={self.camera_index}) ===")
+              f"(session={self.session_id or 'local'}  source={src_label}) ===")
         print("Press 'q' to quit.\n")
 
-        cap = cv2.VideoCapture(self.camera_index)
+        # Support both integer device index and URL strings (RTSP, HTTP, etc.)
+        cap = cv2.VideoCapture(self.camera_source)
         if not cap.isOpened():
-            print(f"[Error] Cannot open camera {self.camera_index}")
+            print(f"[Error] Cannot open source: {self.camera_source}")
+            if isinstance(self.camera_source, str):
+                print("  Tip: check the URL is reachable and OpenCV was built with FFMPEG.")
             return
 
         self.running = True
@@ -154,18 +166,24 @@ def main():
     parser = argparse.ArgumentParser(description="Caretaker.ai Live Monitor")
     parser.add_argument("--session-id",  type=str, default=None)
     parser.add_argument("--token",       type=str, default=None)
-    parser.add_argument("--camera",      type=int, default=0)
+    parser.add_argument("--camera",      type=int, default=0,
+                        help="Local webcam index (default 0). Ignored if --url is set.")
+    parser.add_argument("--url",         type=str, default=None,
+                        help="IP camera / RTSP / HTTP stream URL, e.g. rtsp://user:pass@ip/stream")
     parser.add_argument("--sensitivity", type=str, default="medium",
                         choices=["low", "medium", "high"])
     parser.add_argument("--threshold",   type=int, default=30)
     args = parser.parse_args()
 
+    # URL takes priority over camera index
+    camera_source = args.url if args.url else args.camera
+
     session = LiveMonitorSession(
-        session_id   = args.session_id,
-        token        = args.token,
-        camera_index = args.camera,
-        sensitivity  = args.sensitivity,
-        threshold    = args.threshold,
+        session_id    = args.session_id,
+        token         = args.token,
+        camera_source = camera_source,
+        sensitivity   = args.sensitivity,
+        threshold     = args.threshold,
     )
     session.run()
 

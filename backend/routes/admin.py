@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Header, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, text
 from datetime import timedelta, datetime
 from typing import Optional, List
 
@@ -101,14 +101,16 @@ async def get_analytics(
 
     total_caretakers = db.query(func.count(CareTaker.id)).scalar()
     total_doctors = db.query(func.count(Doctor.id)).scalar()
-    # pending verification — those with is_verified column = False (via getattr safety)
-    pending_doctors = 0
-    verified_doctors = 0
+
+    # Use raw SQL because is_verified was added via ALTER TABLE, not declared in ORM
     try:
-        pending_doctors = db.query(Doctor).filter(Doctor.is_verified == False).count()
-        verified_doctors = db.query(Doctor).filter(Doctor.is_verified == True).count()
-    except Exception:
-        pass  # Column may not exist yet on older DB
+        pending_result = db.execute(text("SELECT COUNT(*) FROM doctors WHERE is_verified = FALSE OR is_verified IS NULL")).scalar()
+        verified_result = db.execute(text("SELECT COUNT(*) FROM doctors WHERE is_verified = TRUE")).scalar()
+        pending_doctors = int(pending_result or 0)
+        verified_doctors = int(verified_result or 0)
+    except Exception as e:
+        pending_doctors = 0
+        verified_doctors = 0
 
     total_recipients = db.query(func.count(CareRecipient.id)).scalar()
     total_fall_events = 0
@@ -167,21 +169,35 @@ async def list_pending_doctors(
     """List only unverified doctors."""
     _get_admin_from_token(authorization, db)
     try:
-        doctors = db.query(Doctor).filter(Doctor.is_verified == False).order_by(desc(Doctor.created_at)).all()
+        # Use raw SQL because is_verified was added via ALTER TABLE, not declared in ORM
+        rows = db.execute(
+            text("SELECT id, username, full_name, email, specialization, created_at FROM doctors WHERE is_verified = FALSE OR is_verified IS NULL ORDER BY created_at DESC")
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "username": r[1],
+                "full_name": r[2],
+                "email": r[3],
+                "specialization": r[4],
+                "created_at": r[5].isoformat() if r[5] else None,
+            }
+            for r in rows
+        ]
     except Exception:
+        # Fallback: return all doctors if column doesn't exist
         doctors = db.query(Doctor).order_by(desc(Doctor.created_at)).all()
-
-    return [
-        {
-            "id": d.id,
-            "username": d.username,
-            "full_name": d.full_name,
-            "email": d.email,
-            "specialization": d.specialization,
-            "created_at": d.created_at.isoformat() if d.created_at else None,
-        }
-        for d in doctors
-    ]
+        return [
+            {
+                "id": d.id,
+                "username": d.username,
+                "full_name": d.full_name,
+                "email": d.email,
+                "specialization": d.specialization,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+            }
+            for d in doctors
+        ]
 
 
 @router.patch("/doctors/{doctor_id}/verify")

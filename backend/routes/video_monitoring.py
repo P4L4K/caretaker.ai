@@ -13,6 +13,7 @@ import shutil
 import time
 import asyncio
 import logging
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -207,7 +208,8 @@ async def upload_video_for_analysis(
         output_dir = Path("processed_videos")
         output_dir.mkdir(parents=True, exist_ok=True)
         output_filename = f"analyzed_{unique_filename}"
-        output_path = output_dir / output_filename
+        # Force .mp4 extension for output to ensure browser compatibility
+        output_path = output_dir / f"{Path(output_filename).stem}.mp4"
         
         # Start video processing in background
         process_id = str(uuid.uuid4())
@@ -281,27 +283,27 @@ def process_video_direct(process_id: str, input_path: str, output_path: str, use
         fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
-        # Initialize Writer with H.264 codec for browser compatibility
-        # Try H.264 first (best browser support), fallback to mp4v if not available
-        try:
-            fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 codec
-            writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        # Initialize Writer - use a standard avi container for the intermediate analysis file
+        # to avoid Windows DLL issues with H.264 in OpenCV directly. 
+        # We will transcode to H.264 using FFmpeg afterwards.
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        temp_avi_path = str(output_path).replace(".mp4", "_raw.avi")
+        writer = cv2.VideoWriter(temp_avi_path, fourcc, fps, (width, height))
+        
+        if not writer.isOpened():
+            logger.error(f"Failed to initialize VideoWriter with mp4v for {temp_avi_path}")
+            # Try one more fallback
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')
+            writer = cv2.VideoWriter(temp_avi_path, fourcc, fps, (width, height))
             if not writer.isOpened():
-                raise Exception("H.264 codec not available")
-            logger.info(f"Using H.264 (avc1) codec for video encoding")
-        except:
-            logger.warning("H.264 codec not available, falling back to mp4v")
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+                raise Exception("Could not initialize VideoWriter with any available codec")
+        
+        logger.info(f"Using intermediate AVI file: {temp_avi_path}")
         
         frame_count = 0
         falls_detected = []
+        total_inactivity_frames = 0
         last_alert_time = 0
-        
-        # Create window for showcase
-        window_name = "Video Analysis - Processing"
-        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(window_name, 1280, 720)
         
         while True:
             ret, frame = cap.read()
@@ -317,23 +319,17 @@ def process_video_direct(process_id: str, input_path: str, output_path: str, use
             # Write Frame
             writer.write(display_frame)
             
-            # Display for showcase (every 2nd frame to reduce lag)
-            if frame_count % 2 == 0:
-                cv2.imshow(window_name, display_frame)
-                cv2.waitKey(1)  # 1ms delay for window update
-            
-            # Track Alerts
-            if results["global_state"]["fall_detected"]:
-                current_time = time.time()
-                # Simple debounce (5 seconds)
-                if current_time - last_alert_time > 5.0:
-                    timestamp = results["global_state"].get("timestamp", datetime.now().isoformat())
-                    falls_detected.append({
-                        "timestamp": timestamp,
-                        "message": "Fall Detected",
-                        "frame": frame_count
-                    })
-                    last_alert_time = current_time
+            # Track Inactivity
+            if results["inactivity"].get("alert"):
+                total_inactivity_frames += 1
+            if results["fall"]["fall_event_fired"]:
+                timestamp = results["global_state"].get("timestamp", datetime.now().isoformat())
+                falls_detected.append({
+                    "timestamp": timestamp,
+                    "message": "Fall Detected",
+                    "frame": frame_count
+                })
+                logger.info(f"Fall Event Recorded: Frame {frame_count}")
             
             frame_count += 1
             
@@ -349,7 +345,34 @@ def process_video_direct(process_id: str, input_path: str, output_path: str, use
         # Cleanup
         cap.release()
         writer.release()
-        cv2.destroyWindow(window_name)
+
+        # --- H.264 Transcoding for Web Playback ---
+        # OpenCV output with mp4v/avc1 in Windows often results in non-playable files.
+        # We use FFmpeg to re-encode into a standard web-friendly H.264 format with YUV420P.
+        if os.path.exists(temp_avi_path) and os.path.getsize(temp_avi_path) > 0:
+            try:
+                logger.info(f"Transcoding {temp_avi_path} to {output_path} for web compatibility...")
+                # -pix_fmt yuv420p and -movflags faststart are critical for browser playback
+                cmd = f'ffmpeg -i "{temp_avi_path}" -vcodec libx264 -pix_fmt yuv420p -preset ultrafast -movflags +faststart -crf 23 -y "{output_path}"'
+                result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
+                
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                    os.remove(temp_avi_path)
+                    logger.info("Transcoding successful. Intermediate file removed.")
+                else:
+                    raise Exception("Output file was not created or is empty")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"FFmpeg command failed with return code {e.returncode}")
+                logger.error(f"FFmpeg stderr: {e.stderr}")
+                # If transcoding failed, try to just move the AVI to MP4 so there's AT LEAST a file (though it may not play)
+                if not os.path.exists(output_path):
+                    os.rename(temp_avi_path, output_path)
+            except Exception as e:
+                logger.error(f"FFmpeg transcoding error: {e}")
+                if not os.path.exists(output_path):
+                    os.rename(temp_avi_path, output_path)
+        else:
+            logger.error(f"Intermediate file {temp_avi_path} is missing or empty. Cannot transcode.")
         
         # Final Status Update
         if process_id in process_status:
@@ -368,7 +391,7 @@ def process_video_direct(process_id: str, input_path: str, output_path: str, use
                 asyncio.run(send_alert_email_with_image(
                     recipient_email=user_email,
                     subject="⚠️ Fall Detected in Uploaded Video",
-                    body=f"Analysis detected {len(falls_detected)} fall events. Please review the processed video on your dashboard."
+                    body=f"A fall was detected during the analysis of your uploaded video. Please log in to your dashboard to review the details and playback."
                     # No image attachment for now
                 ))
 
@@ -376,11 +399,17 @@ def process_video_direct(process_id: str, input_path: str, output_path: str, use
             try:
                 db_session = SessionLocal()
                 
-                # Mock metrics for now (since we don't have detailed tracking yet)
+                # Calculate metrics from actual monitoring results
                 fall_count = len(falls_detected)
-                activity_score = max(0.0, 10.0 - (fall_count * 2))  # Reduce by 2 for each fall
-                mobility_score = max(0.0, 10.0 - (fall_count * 1.5))
-                inactivity_secs = 0 # Placeholder
+                inactivity_secs = int(total_inactivity_frames / fps) if fps > 0 else 0
+                
+                # Activity Score logic: 10 base, minus deductions for falls and excessive inactivity
+                # (Assuming 1 hour video, if 50% inactive, score 5.0)
+                duration_secs = frame_count / fps if fps > 0 else 1
+                inactivity_ratio = inactivity_secs / duration_secs if duration_secs > 0 else 0
+                
+                activity_score = max(0.0, 10.0 * (1.0 - inactivity_ratio) - (fall_count * 2.0))
+                mobility_score = max(0.0, 10.0 * (1.0 - (inactivity_ratio * 0.5)) - (fall_count * 1.5))
                 
                 analysis_entry = VideoAnalysis(
                     recipient_id=recipient_id,

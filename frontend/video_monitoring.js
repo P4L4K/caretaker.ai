@@ -254,8 +254,8 @@ function showResults(results) {
         resultsAlert.innerHTML = `
             <h5><i class="fas fa-exclamation-triangle me-2"></i>Fall Detected!</h5>
             <p class="mb-0">
-                ${results.falls_detected.length} fall(s) detected in the video. 
-                An alert email has been sent to you.
+                A fall was detected in the video analysis. 
+                Please review the playback and details below.
             </p>
         `;
 
@@ -293,8 +293,9 @@ function showResults(results) {
 
 
 
-    // Update stats
+    // Update stats and history
     loadStats();
+    loadHistory();
 
     // Update charts and insights
     updateCharts(results);
@@ -396,6 +397,14 @@ function setupCameraSelector() {
             // Only auto-refresh if USB mode is active
             const selectedType = document.querySelector('input[name="cameraType"]:checked')?.value;
             if (selectedType !== 'ip') refreshCameraList();
+        });
+    }
+
+    // Auto-refresh history when user switches to History tab
+    const historyTabBtn = document.getElementById('history-tab');
+    if (historyTabBtn) {
+        historyTabBtn.addEventListener('shown.bs.tab', function () {
+            loadHistory();
         });
     }
 

@@ -71,6 +71,13 @@ class UnitedMonitor:
         self._monitored_id = None
         self._monitored_id_locked = False   # True after first person is chosen
         self._monitored_centroid = None
+
+        # Sudden-disappearance tracking (fall below camera FoV detection)
+        self._monitored_last_seen = None      # timestamp when monitored was last in frame
+        self._monitored_was_present = False   # was monitored in frame last processed frame?
+        self._DISAPPEAR_FALL_WINDOW = 1.5     # seconds — if gone within this time, flag as potential fall
+        self._disappear_fall_fired = False    # one-shot per disappearance event
+
         self._fps_start = time.time()
         self._fps_frames = 0
         self._current_fps = 0.0
@@ -152,19 +159,19 @@ class UnitedMonitor:
 
             if possible_humans:
                 # ── Sticky ID Tracking ──────────────────────────────────────
-                # Rule: once a person is locked as monitored, they stay monitored.
-                # We only ever switch to centroid-proximity tracking if the YOLO
-                # ID is reassigned (camera glitch), never to a different person.
+                # Priority order:
+                #  1. Exact YOLO ID match
+                #  2. Centroid proximity (handles YOLO tracker ID reassignment)
+                #  3. Single person in frame → always monitored (regardless of lock)
+                #  4. Never-locked yet → pick best pose score and lock
                 target = None
 
                 if self._monitored_id is not None:
-                    # 1. Try to find by exact YOLO ID
                     matches = [p for p in possible_humans if p["id"] == self._monitored_id]
                     if matches:
                         target = matches[0]
 
                 if target is None and self._monitored_centroid is not None:
-                    # 2. YOLO may have re-issued the ID — find closest person by centroid
                     best_dist = 1e6
                     for p in possible_humans:
                         dist = math.sqrt((p["cx"]-self._monitored_centroid[0])**2 + (p["cy"]-self._monitored_centroid[1])**2)
@@ -172,9 +179,13 @@ class UnitedMonitor:
                             best_dist = dist
                             target = p
 
+                if target is None and len(possible_humans) == 1:
+                    # Only one person visible — they must be the monitored person
+                    target = possible_humans[0]
+                    self._monitored_id_locked = True
+
                 if target is None and not self._monitored_id_locked:
-                    # 3. First time only — pick the person with the highest pose score
-                    #    After this we NEVER pick a different person automatically.
+                    # First time with multiple people — pick best pose score and lock
                     target = max(possible_humans, key=lambda p: p["h_score"])
                     self._monitored_id_locked = True
 
@@ -182,9 +193,11 @@ class UnitedMonitor:
                     monitored_idx = target["id"]
                     self._monitored_id = monitored_idx
                     self._monitored_centroid = (target["cx"], target["cy"])
+                    self._monitored_was_present = True
+                    self._monitored_last_seen = now
+                    self._disappear_fall_fired = False  # reset once found again
                 else:
-                    # Monitored person is temporarily out of frame — keep last ID,
-                    # every current detection is a visitor
+                    # Monitored person temporarily out of frame
                     monitored_idx = -1
 
                 for p in possible_humans:
@@ -194,9 +207,10 @@ class UnitedMonitor:
                         "label": "MONITORED" if is_mon else "VISITOR"
                     })
             else:
-                # No humans at all — keep the ID locked for when they return,
-                # but clear the centroid so we don't do bad proximity matches
+                # No humans at all — keep the ID but clear centroid
+                monitored_idx = -1
                 self._monitored_centroid = None
+                self._monitored_was_present = False
         else:
             self._monitored_id = None
             self._monitored_centroid = None
@@ -237,30 +251,56 @@ class UnitedMonitor:
 
             features = {"lstm_prob": lstm_prob, "is_upright": is_upright, "standing_duration": self._standing_duration}
             
-            # Confirmation logic
-            if lstm_prob > self._lstm_thresh and (self._has_been_standing and bbox_is_horizontal or lstm_prob > 0.98):
+            # Confirmation logic — LSTM score + bbox orientation
+            # bbox_is_horizontal: wide bbox means person is lying down
+            if lstm_prob > self._lstm_thresh and (self._has_been_standing and bbox_is_horizontal or lstm_prob > 0.97):
                 self._confirm_count += 1
             else:
                 self._confirm_count = max(0, self._confirm_count - 1)
 
-            self._fall_event_just_fired = (
-                self._confirm_count >= self._confirm_frames and 
+            fall_triggered = (
+                self._confirm_count >= self._confirm_frames and
                 not self._is_currently_falling and
                 (self._frame_counter - self._last_event_frame) > self._EVENT_FRAME_COOLDOWN
             )
-            if self._fall_event_just_fired:
+            if fall_triggered:
+                self._fall_event_just_fired = True
                 self._is_currently_falling = True
                 self._fall_detected = True
                 self._last_fall_event_time = now
                 self._last_event_frame = self._frame_counter
             
-            # HUD Clearing Logic: If they are clearly upright and moving, hide the "FALL" label
+            # HUD Clearing Logic: once clearly upright and stable, clear the fall flag
             if self._is_currently_falling:
                 if is_upright and self._standing_duration > 2.0:
-                    self._fall_detected = False 
+                    self._fall_detected = False
                     if self._standing_duration > 10.0:
                         self._is_currently_falling = False
                         self._confirm_count = 0
+
+        # ── Sudden Disappearance Check ───────────────────────────────────────
+        # If the monitored person was present and abruptly vanishes (faster than
+        # DISAPPEAR_FALL_WINDOW seconds), treat it as a possible fall below camera FoV.
+        self._fall_event_just_fired = False
+        if (
+            self._monitored_was_present and
+            monitored_idx == -1 and
+            self._monitored_last_seen is not None and
+            not self._disappear_fall_fired and
+            self._has_been_standing and
+            not self._is_currently_falling and
+            (self._frame_counter - self._last_event_frame) > self._EVENT_FRAME_COOLDOWN
+        ):
+            time_since_seen = now - self._monitored_last_seen
+            if time_since_seen < self._DISAPPEAR_FALL_WINDOW:
+                # Abrupt disappearance after being tracked while upright → possible fall
+                self._fall_event_just_fired = True
+                self._fall_detected = True
+                self._is_currently_falling = True
+                self._last_fall_event_time = now
+                self._last_event_frame = self._frame_counter
+                self._disappear_fall_fired = True
+                print(f"[UnitedMonitor] Sudden disappearance fall trigger at frame {self._frame_counter}")
 
         # Inactivity
         inactivity_res = self._inactivity.update([monitored_box.tolist()] if monitored_box is not None else [], now)

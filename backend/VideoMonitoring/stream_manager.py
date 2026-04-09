@@ -21,10 +21,11 @@ logger = logging.getLogger(__name__)
 class CameraSession:
     """Manages a single camera monitoring session with MJPEG streaming"""
     
-    def __init__(self, session_id: str, camera_index: int = 0, 
+    def __init__(self, session_id: str, camera_source=0,
                  sensitivity: str = "medium", inactivity_threshold: int = 30):
         self.session_id = session_id
-        self.camera_index = camera_index
+        # camera_source can be int (USB index) or str (RTSP/HTTP URL)
+        self.camera_source = camera_source
         self.sensitivity = sensitivity
         self.inactivity_threshold = inactivity_threshold
         
@@ -57,10 +58,10 @@ class CameraSession:
     def start(self) -> bool:
         """Start the camera session"""
         try:
-            # Initialize camera
-            self.cap = cv2.VideoCapture(self.camera_index)
+            # Initialize camera — works with both int index and URL string
+            self.cap = cv2.VideoCapture(self.camera_source)
             if not self.cap.isOpened():
-                logger.error(f"Failed to open camera index {self.camera_index}")
+                logger.error(f"Failed to open camera source: {self.camera_source}")
                 return False
             
             # Set camera properties for better performance
@@ -229,10 +230,14 @@ class StreamManager:
         self.sessions: Dict[str, CameraSession] = {}
         self.lock = threading.Lock()
     
-    def create_session(self, session_id: str, camera_index: int = 0,
+    def create_session(self, session_id: str, camera_source=0,
                       sensitivity: str = "medium", 
                       inactivity_threshold: int = 30) -> bool:
-        """Create and start a new camera session"""
+        """Create and start a new camera session.
+        
+        Args:
+            camera_source: int for USB webcam index, or str for RTSP/HTTP IP camera URL.
+        """
         
         # Auto-cleanup before creating new session
         self.cleanup_inactive_sessions()
@@ -243,7 +248,7 @@ class StreamManager:
             
             session = CameraSession(
                 session_id=session_id,
-                camera_index=camera_index,
+                camera_source=camera_source,
                 sensitivity=sensitivity,
                 inactivity_threshold=inactivity_threshold
             )

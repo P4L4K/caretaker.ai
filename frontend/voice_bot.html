@@ -536,6 +536,7 @@
                 document.getElementById('music-widget').classList.add('hidden');
                 playlist = [...localPlaylist];
                 state.youtubeMode = false;
+                fetch('http://127.0.0.1:8000/api/music/close-external').catch(e => console.error(e));
             }
         }
 

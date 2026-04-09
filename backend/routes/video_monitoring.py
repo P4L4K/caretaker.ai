@@ -71,6 +71,7 @@ inactivity_thresholds = {}  # username -> threshold_seconds
 # Models
 class StartLiveRequest(BaseModel):
     camera_index: int = 0
+    camera_url: Optional[str] = None   # RTSP / HTTP IP camera URL (overrides camera_index)
     sensitivity: str = "medium"
 
 class InactivityThresholdRequest(BaseModel):
@@ -547,13 +548,21 @@ async def start_live_monitoring(
                 "message": "You already have an active session"
             }
     
+    # Resolve camera source: URL takes priority over index
+    if request.camera_url and request.camera_url.strip():
+        camera_source = request.camera_url.strip()
+        logger.info(f"[Live] Using IP camera URL: {camera_source}")
+    else:
+        camera_source = request.camera_index
+        logger.info(f"[Live] Using USB camera index: {camera_source}")
+
     # Create new session
     session_id = str(uuid.uuid4())
     inactivity_threshold = inactivity_thresholds.get(username, 30)
     
     success = stream_manager.create_session(
         session_id=session_id,
-        camera_index=request.camera_index,
+        camera_source=camera_source,
         sensitivity=request.sensitivity,
         inactivity_threshold=inactivity_threshold
     )
@@ -740,6 +749,55 @@ async def get_inactivity_threshold(authorization: Optional[str] = Header(None)):
     
     threshold = inactivity_thresholds.get(username, 30)
     return {"threshold_seconds": threshold}
+
+
+# ── IP Camera Test Endpoint ─────────────────────────────────────────────────
+
+class TestIPCameraRequest(BaseModel):
+    camera_url: str
+
+@router.post("/test-ip-camera")
+async def test_ip_camera(
+    request: TestIPCameraRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Test whether an IP camera URL is reachable by briefly opening it with OpenCV.
+    Returns {reachable: true/false} within ~5 seconds.
+    """
+    username = _get_username_from_auth(authorization)
+    if not username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token")
+
+    url = request.camera_url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="camera_url is required")
+
+    def _check():
+        cap = cv2.VideoCapture(url)
+        # Give it up to 5 seconds to open
+        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
+        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
+        opened = cap.isOpened()
+        if opened:
+            ret, _ = cap.read()
+            opened = ret
+        cap.release()
+        return opened
+
+    try:
+        # Run the blocking OpenCV call in a thread pool so we don't block the event loop
+        loop = asyncio.get_event_loop()
+        reachable = await asyncio.wait_for(
+            loop.run_in_executor(None, _check),
+            timeout=8.0
+        )
+        return {"reachable": reachable, "url": url}
+    except asyncio.TimeoutError:
+        return {"reachable": False, "detail": "Connection timed out after 8 seconds"}
+    except Exception as e:
+        logger.error(f"[test-ip-camera] Error testing {url}: {e}")
+        return {"reachable": False, "detail": str(e)}
 
 
 @router.get("/recipient/{recipient_id}/stats")

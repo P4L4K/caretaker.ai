@@ -304,6 +304,23 @@ def open_external_youtube(youtube_id: str = Query(...)):
         print(f"[Music] Error opening browser: {e}")
         return {"status": "error", "message": str(e)}
 
+@router.get("/music/close-external")
+def close_external_youtube():
+    """Closes any external browser window playing YouTube."""
+    try:
+        print("[Music] Closing external video...")
+        if os.name == 'nt':
+            # This aggressively targets processes with 'YouTube' in the window title.
+            # Edge and Chrome usually spawn processes per tab/window.
+            import os
+            os.system('taskkill /F /FI "WINDOWTITLE eq *YouTube*" /T >nul 2>&1')
+            # Additionally, kill anything with "YouTube" in the title without wildcards just in case
+            os.system('taskkill /F /FI "WINDOWTITLE eq YouTube*" /T >nul 2>&1')
+        return {"status": "success", "message": "Closed external windows"}
+    except Exception as e:
+        print(f"[Music] Error closing browser: {e}")
+        return {"status": "error", "message": str(e)}
+
 @router.get("/spotify/search")
 def search_tracks(q: str = Query(...)):
     return search_youtube_track(q)

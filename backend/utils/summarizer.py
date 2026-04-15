@@ -503,13 +503,32 @@ INDIVIDUAL REPORT SUMMARIES:
         }
         print(f'[summarizer] Calling Gemini for AGGREGATE summary (history_text_len={len(history_text)})')
         data = call_gemini(payload, timeout=60, caller="[summarizer/aggregate]")
+        
         if data and 'candidates' in data and len(data['candidates']) > 0:
-            summary = data['candidates'][0]['content']['parts'][0]['text']
-            summary = summary.replace('•', '\n•')
-            summary = '\n'.join(line.strip() for line in summary.split('\n'))
+            full_text = data['candidates'][0]['content']['parts'][0]['text']
+            
+            # Clean markdown code fences
+            summary = re.sub(r'```(?:[a-zA-Z]+)?\n', '', full_text)
+            summary = summary.replace('```', '')
+            
+            # Extract content between START_CLINICAL_SUMMARY markers
+            if "START_CLINICAL_SUMMARY" in summary:
+                parts = summary.split("START_CLINICAL_SUMMARY")
+                if len(parts) > 1:
+                    summary = parts[1].split("END_CLINICAL_SUMMARY")[0]
+            
+            # Clean up bullet points and spacing
+            summary = summary.replace('•', '\n•').strip()
+            summary = '\n'.join(line.strip() for line in summary.split('\n') if line.strip())
+            
+            if len(summary.split()) < 5:
+                # If too short, return the full version as fallback
+                summary = full_text.strip()
+
             print(f'[summarizer] Aggregate summary produced: {len(summary.split())} words')
             return summary
-        return "Failed to synthesize aggregate history."
+            
+        return "No sufficient clinical insights to generate a summary at this time."
     except Exception as e:
         print(f'[summarizer] Aggregate synthesis failed: {e}')
         return "Synthesis error."

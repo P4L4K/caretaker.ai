@@ -268,13 +268,18 @@ Medical Report:
 
         if data and "candidates" in data and data["candidates"]:
             raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+            # Clean markdown code fences if present (multiline-safe)
             raw_text = raw_text.strip()
             cleaned = re.sub(r"```(?:json)?\s*", "", raw_text, flags=re.DOTALL)
             cleaned = re.sub(r"\s*```", "", cleaned, flags=re.DOTALL).strip()
 
             try:
                 result = json.loads(cleaned)
-                result.setdefault("report_date", report_date_hint or str(date.today()))
+                # Ensure date is always valid
+                if not result.get("report_date") or not str(result["report_date"]).strip():
+                    result["report_date"] = report_date_hint or str(date.today())
+                
+                # Validate structure
                 result.setdefault("diagnoses", [])
                 result.setdefault("resolved_diagnoses", [])
                 result["lab_values"] = {}   # Always override — we don't want Gemini lab guesses
@@ -284,18 +289,67 @@ Medical Report:
                 print(f"[ingestion_v2] Gemini context: {len(result['diagnoses'])} diagnoses")
                 return result
             except json.JSONDecodeError:
-                # Try extracting first { ... } block
-                m = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-                if m:
+                # Fallback: try extracting first { ... } block
+                match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+                if match:
                     try:
-                        result = json.loads(m.group(0))
+                        result = json.loads(match.group(0))
+                        result.setdefault("report_date", report_date_hint or str(date.today()))
+                        result.setdefault("diagnoses", [])
+                        result.setdefault("resolved_diagnoses", [])
                         result["lab_values"] = {}
+                        result.setdefault("medications", [])
+                        result.setdefault("doctor_notes", "")
+                        result.setdefault("symptoms", [])
                         return result
                     except json.JSONDecodeError:
                         pass
-
+                print(f"[ingestion_v2] Failed to parse Gemini JSON response")
         return empty_result
 
     except Exception as e:
         print(f"[ingestion_v2] Gemini context extraction failed: {e}")
+        return empty_result
+
+
+def extract_text_from_image_bytes(image_bytes: bytes, mime_type: str, report_date_hint: str = None) -> dict:
+    """Extract structured medical data directly from an image using Gemini Vision."""
+    import base64
+    empty_result = {
+        "report_date": report_date_hint or str(date.today()),
+        "diagnoses": [],
+        "resolved_diagnoses": [],
+        "lab_values": {},
+        "medications": [],
+        "doctor_notes": "",
+        "symptoms": []
+    }
+    if not image_bytes: return empty_result
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key: return empty_result
+
+    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+    prompt = """Extract medical info from image. Return JSON: {report_date, diagnoses, resolved_diagnoses, lab_values, medications, doctor_notes, symptoms}."""
+
+    try:
+        payload = {
+            "contents": [{
+                "parts": [{"text": prompt}, {"inline_data": {"mime_type": mime_type, "data": b64_image}}]
+            }],
+            "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.1, "topP": 0.8}
+        }
+        data = call_gemini(payload, timeout=90, caller="[report_ingestion/ocr]")
+        if data and "candidates" in data and data["candidates"]:
+            raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            cleaned = re.sub(r"```(?:json)?\s*", "", raw_text, flags=re.DOTALL)
+            cleaned = re.sub(r"\s*```", "", cleaned, flags=re.DOTALL).strip()
+            try:
+                result = json.loads(cleaned)
+                for k in empty_result: result.setdefault(k, empty_result[k])
+                return result
+            except json.JSONDecodeError:
+                pass
+        return empty_result
+    except Exception as e:
+        print(f"[report_ingestion/ocr] Extraction failed: {e}")
         return empty_result

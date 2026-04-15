@@ -33,12 +33,9 @@ _YOLO_MODEL_PATH = os.path.join(_here, "..", "yolov8n-pose.pt")
 _LSTM_MODEL_PATH = os.path.join(_here, "fall_lstm.pth")
 
 _SENSITIVITY_PRESETS = {
-    # Live monitoring — tuned for speed, camera may be at odd angles
-    "low":    {"lstm_thresh": 0.88, "confirm_frames": 6, "confirm_decay": 1},
-    "medium": {"lstm_thresh": 0.82, "confirm_frames": 4, "confirm_decay": 1},
-    "high":   {"lstm_thresh": 0.75, "confirm_frames": 3, "confirm_decay": 1},
-    # Video analysis — stricter to avoid false positives on uploaded footage
-    "video":  {"lstm_thresh": 0.90, "confirm_frames": 7, "confirm_decay": 1},
+    "low":    {"lstm_thresh": 0.88, "confirm_frames": 8, "confirm_decay": 2},
+    "medium": {"lstm_thresh": 0.85, "confirm_frames": 6, "confirm_decay": 2},
+    "high":   {"lstm_thresh": 0.80, "confirm_frames": 4, "confirm_decay": 2},
 }
 
 class UnitedMonitor:
@@ -53,42 +50,40 @@ class UnitedMonitor:
         self._confirm_frames = cfg["confirm_frames"]
         self._confirm_decay = cfg["confirm_decay"]
 
+        # ── Adjust internal gates based on sensitivity ───────────────────────
+        mult = 1.0
+        if self.sensitivity == "high":    mult = 0.5
+        elif self.sensitivity == "low":   mult = 2.0
+
         self._frame_counter = 0
         self._confirm_count = 0
         self._fall_detected = False
         self._fall_start_time = None
         self._inactivity_alert = False
         self._last_result = None
-        self._last_fall_event_time = -9999.0
-        self._fall_event_just_fired = False
-        self._is_currently_falling = False
-        self._reset_confirm_frames = 0
+        
+        # standing-first gate
         self._has_been_standing = False
         self._standing_duration = 0.0
+        self._STANDING_TIME_NEEDED = 0.5 * mult
 
-        # Alert Suppression
+        # State-based event gate
+        self._is_currently_falling = False
+        self._reset_confirm_frames = 0
+        self._last_fall_event_time = -9999.0
+        self._fall_event_just_fired = False
+
+        # Alert Suppression / Cooldown
+        self._EVENT_COOLDOWN_SEC = 10.0 * mult
+        self._ENTRY_GRACE_SEC = 0.5 * mult
         self._last_event_frame = -999
-        self._EVENT_FRAME_COOLDOWN = 300 # 10 seconds at 30fps
 
         # Tracking state — once the monitored_id is locked it never auto-switches
         self._monitored_id = None
         self._monitored_id_locked = False   # True after first person is chosen
         self._monitored_centroid = None
 
-        # Pre-disappearance pose state tracking
-        # We record what the body was doing just BEFORE it left the frame.
-        # If the body was tilting/falling and then vanished →  real fall.
-        # If the body was upright and walked out → NOT a fall.
-        self._monitored_last_seen = None       # timestamp when monitored was last seen
-        self._monitored_was_present = False    # True if monitored was in last processed frame
-        self._disappear_fall_fired = False     # one-shot guard per disappearance event
-        self._DISAPPEAR_FALL_WINDOW = 2.0      # seconds: how long after disappear to still check
-        # Rolling history (last N readings while monitored was visible)
-        self._pre_disappear_torso_angles = []  # recent torso angles
-        self._pre_disappear_lstm_probs   = []  # recent LSTM fall probabilities
-        self._pre_disappear_bbox_horiz   = []  # recent bbox horizontality flags
-        self._PRE_HISTORY_LEN = 10             # keep last 10 readings (~0.3–0.4 s at 25fps)
-
+        # FPS tracking
         self._fps_start = time.time()
         self._fps_frames = 0
         self._current_fps = 0.0
@@ -98,38 +93,10 @@ class UnitedMonitor:
         self._seq_buf = FallSequenceBuffer(seq_len=DEFAULT_SEQ_LEN)
         self._inactivity = InactivityMonitor(safety_threshold_seconds=inactivity_threshold, stability_percentage=stable_percentage)
 
-    def _is_human_pose(self, kps_xy, kps_conf, box):
-        """
-        Hardened Humanity Test (Furniture Ghost Rejection):
-        Checks if the skeleton's geometry and joints are human-like.
-        """
-        if kps_xy is None or kps_conf is None or box is None: return False
-        
-        # 1. Geometry Check: Spine Proportionality
-        # A human's neck-to-hip distance should be reasonable relative to the box height.
-        neck = (kps_xy[5] + kps_xy[6]) / 2.0
-        hip  = (kps_xy[11] + kps_xy[12]) / 2.0
-        spine_len = math.sqrt((neck[0]-hip[0])**2 + (neck[1]-hip[1])**2)
-        bbox_h = box[3] - box[1]
-        
-        if spine_len < 0.12 * bbox_h: # Skeleton is too collapsed (common in furniture)
-            return False
-
-        # 2. Strict Head Check (Eyes/Ears/Nose)
-        head_joints = [0, 1, 2, 3, 4]
-        head_conf_count = sum(1 for idx in head_joints if idx < len(kps_conf) and kps_conf[idx] > 0.4)
-        if head_conf_count < 2: # Need at least a few facial points
-            return False
-
-        # 3. Structural Integrity (Shoulders, Hips, Knees, Ankles)
-        major_joints = [5, 6, 11, 12, 13, 14, 15, 16] 
-        conf_count = sum(1 for idx in major_joints if idx < len(kps_conf) and kps_conf[idx] > 0.4)
-        
-        # Need at least 5 major joints with reasonable confidence
-        return conf_count >= 5
 
     def process_frame(self, frame: np.ndarray) -> dict:
         self._frame_counter += 1
+        self._fall_event_just_fired = False  # Reset per frame
         now = time.time()
         ts = now - self._fps_start
 
@@ -151,30 +118,23 @@ class UnitedMonitor:
             yolo_ids = boxes_raw.id.cpu().numpy().astype(int) if boxes_raw.id is not None else None
             
             for i in range(len(boxes)):
-                kp_xy = kps_data.xy[i].cpu().numpy()
-                kp_conf = kps_data.conf[i].cpu().numpy()
-                y_id = yolo_ids[i] if yolo_ids is not None else i
-                
-                if self._is_human_pose(kp_xy, kp_conf, boxes[i]):
+                if kps_data is not None and len(kps_data.xy) > i:
+                    kp_xy = kps_data.xy[i].cpu().numpy()
+                    kp_conf = kps_data.conf[i].cpu().numpy()
+                    y_id = yolo_ids[i] if yolo_ids is not None else i
+                    
                     box = boxes[i]
                     area = (box[2]-box[0]) * (box[3]-box[1])
                     cx, cy = (box[0]+box[2])/2, (box[1]+box[3])/2
                     
-                    # Humanity Score
-                    h_score = sum(kp_conf[idx] for idx in [5, 6, 11, 12, 13, 14, 15, 16] if idx < len(kp_conf))
-                    
                     possible_humans.append({
                         "id": y_id, "box": box, "xy": kp_xy, "conf": kp_conf, 
-                        "cx": cx, "cy": cy, "area": area, "h_score": h_score
+                        "cx": cx, "cy": cy, "area": area
                     })
 
             if possible_humans:
-                # ── Sticky ID Tracking ──────────────────────────────────────
-                # Priority order:
-                #  1. Exact YOLO ID match
-                #  2. Centroid proximity (handles YOLO tracker ID reassignment)
-                #  3. Single person in frame → always monitored (regardless of lock)
-                #  4. Never-locked yet → pick best pose score and lock
+                # ── Sticky ID Tracking (Finalized Logic) ───────────────────
+                # Priority: MONITORED_ID -> Centroid -> Largest Subject
                 target = None
 
                 if self._monitored_id is not None:
@@ -185,19 +145,14 @@ class UnitedMonitor:
                 if target is None and self._monitored_centroid is not None:
                     best_dist = 1e6
                     for p in possible_humans:
-                        dist = math.sqrt((p["cx"]-self._monitored_centroid[0])**2 + (p["cy"]-self._monitored_centroid[1])**2)
+                        dist = math.sqrt((p["cx"] - self._monitored_centroid[0])**2 + (p["cy"] - self._monitored_centroid[1])**2)
                         if dist < best_dist and dist < 250:
                             best_dist = dist
                             target = p
 
-                if target is None and len(possible_humans) == 1:
-                    # Only one person visible — they must be the monitored person
-                    target = possible_humans[0]
-                    self._monitored_id_locked = True
-
-                if target is None and not self._monitored_id_locked:
-                    # First time with multiple people — pick best pose score and lock
-                    target = max(possible_humans, key=lambda p: p["h_score"])
+                if target is None:
+                    # Choose largest subject as the primary monitored person
+                    target = max(possible_humans, key=lambda p: p["area"])
                     self._monitored_id_locked = True
 
                 if target is not None:
@@ -206,9 +161,7 @@ class UnitedMonitor:
                     self._monitored_centroid = (target["cx"], target["cy"])
                     self._monitored_was_present = True
                     self._monitored_last_seen = now
-                    self._disappear_fall_fired = False  # reset once found again
                 else:
-                    # Monitored person temporarily out of frame
                     monitored_idx = -1
 
                 for p in possible_humans:
@@ -246,7 +199,7 @@ class UnitedMonitor:
             # Compute bbox aspect ratio — horizontal bbox = person is lying down
             bw = monitored_box[2] - monitored_box[0]
             bh = monitored_box[3] - monitored_box[1]
-            bbox_is_horizontal = (bw > bh * 1.2) if bh > 0 else False
+            bbox_is_horizontal = (bw > bh * 0.8) if bh > 0 else False
 
             if is_upright:
                 self._standing_duration += dt
@@ -260,34 +213,30 @@ class UnitedMonitor:
                     logits = self._lstm(self._seq_buf.get_tensor(device=self._device))
                     lstm_prob = float(torch.softmax(logits, dim=1)[0, 1])
 
-            # ── Record pose state for pre-disappearance analysis ──
-            self._pre_disappear_torso_angles.append(torso_angle)
-            self._pre_disappear_lstm_probs.append(lstm_prob)
-            self._pre_disappear_bbox_horiz.append(bbox_is_horizontal)
-            # Keep only last N readings
-            self._pre_disappear_torso_angles = self._pre_disappear_torso_angles[-self._PRE_HISTORY_LEN:]
-            self._pre_disappear_lstm_probs   = self._pre_disappear_lstm_probs[-self._PRE_HISTORY_LEN:]
-            self._pre_disappear_bbox_horiz   = self._pre_disappear_bbox_horiz[-self._PRE_HISTORY_LEN:]
-
             features = {"lstm_prob": lstm_prob, "is_upright": is_upright, "standing_duration": self._standing_duration}
             
-            # Confirmation logic — LSTM score + bbox orientation
-            # bbox_is_horizontal: wide bbox means person is lying down
-            if lstm_prob > self._lstm_thresh and (self._has_been_standing and bbox_is_horizontal or lstm_prob > 0.97):
+            # Confirmation counter (Finalized 0.8 Geometric Gate)
+            high_conf_bypass = (lstm_prob > 0.98)
+            
+            if (lstm_prob >= self._lstm_thresh) and (high_conf_bypass or (self._has_been_standing and bbox_is_horizontal)):
                 self._confirm_count += 1
             else:
-                self._confirm_count = max(0, self._confirm_count - 1)
+                self._confirm_count = max(0, self._confirm_count - self._confirm_decay)
 
-            fall_triggered = (
-                self._confirm_count >= self._confirm_frames and
-                not self._is_currently_falling and
-                (self._frame_counter - self._last_event_frame) > self._EVENT_FRAME_COOLDOWN
-            )
-            if fall_triggered:
+            # Trigger logic from finalized version
+            effective_now = self._frame_counter / self._current_fps if self._current_fps > 0 else now
+            if not self.is_live:
+                 effective_now = self._frame_counter / 30.0
+
+            time_since_event = effective_now - self._last_fall_event_time
+            
+            if (self._confirm_count >= self._confirm_frames and 
+                not self._is_currently_falling and 
+                time_since_event > self._EVENT_COOLDOWN_SEC):
                 self._fall_event_just_fired = True
                 self._is_currently_falling = True
                 self._fall_detected = True
-                self._last_fall_event_time = now
+                self._last_fall_event_time = effective_now
                 self._last_event_frame = self._frame_counter
             
             # HUD Clearing Logic: once clearly upright and stable, clear the fall flag
@@ -298,46 +247,6 @@ class UnitedMonitor:
                         self._is_currently_falling = False
                         self._confirm_count = 0
 
-        # ── Pose-Aware Disappearance Check ───────────────────────────────────
-        # Only fires if the body was ALREADY showing fall characteristics
-        # (tilting torso, rising LSTM score, or horizontal bbox) before vanishing.
-        # Walking out of frame = body stays upright throughout → will NOT trigger.
-        self._fall_event_just_fired = False
-        if (
-            self._monitored_was_present and
-            monitored_idx == -1 and
-            self._monitored_last_seen is not None and
-            not self._disappear_fall_fired and
-            self._has_been_standing and
-            not self._is_currently_falling and
-            (self._frame_counter - self._last_event_frame) > self._EVENT_FRAME_COOLDOWN
-        ):
-            time_since_seen = now - self._monitored_last_seen
-            if time_since_seen < self._DISAPPEAR_FALL_WINDOW and self._pre_disappear_torso_angles:
-                # Analyse the last readings BEFORE the person left frame
-                avg_torso  = sum(self._pre_disappear_torso_angles) / len(self._pre_disappear_torso_angles)
-                max_torso  = max(self._pre_disappear_torso_angles)
-                avg_lstm   = sum(self._pre_disappear_lstm_probs)   / len(self._pre_disappear_lstm_probs) if self._pre_disappear_lstm_probs else 0.0
-                any_horiz  = any(self._pre_disappear_bbox_horiz)
-
-                # Fall signal present before disappearing:
-                #   a) Torso was seriously tilted (>50°) just before vanishing
-                #   b) LSTM was elevated (>0.40) suggesting fall-like motion
-                #   c) BBox was already horizontal (lying down) before vanishing
-                was_falling_before = (
-                    max_torso > 50 or        # body tilting sharply
-                    avg_lstm  > 0.40 or      # LSTM raising fall probability
-                    any_horiz                # bbox already horizontal = lying
-                )
-
-                if was_falling_before:
-                    self._fall_event_just_fired = True
-                    self._fall_detected = True
-                    self._is_currently_falling = True
-                    self._last_fall_event_time = now
-                    self._last_event_frame = self._frame_counter
-                    self._disappear_fall_fired = True
-                    print(f"[UnitedMonitor] Pose-aware disappearance fall: torso={avg_torso:.1f}° lstm={avg_lstm:.2f} horiz={any_horiz}")
 
         # Inactivity
         inactivity_res = self._inactivity.update([monitored_box.tolist()] if monitored_box is not None else [], now)

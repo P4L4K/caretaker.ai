@@ -75,6 +75,10 @@ class CareRecipient(Base):
     # aggregated summary of uploaded medical reports for this recipient
     report_summary = Column(Text, nullable=True)
 
+    # Proactive Health System (v4)
+    doctor_email = Column(String, nullable=True)                    # Who to notify for urgent issues
+    last_doctor_summary_at = Column(DateTime, nullable=True)        # Track 3-day intervals
+
     # Medical History System (v3)
     risk_score = Column(Float, nullable=True)                       # 0-100 deterministic risk score
     risk_factors_breakdown = Column(JSON, nullable=True)            # Transparent factor-by-factor explanation

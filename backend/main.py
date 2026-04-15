@@ -39,6 +39,7 @@ import tables.environment as environment_tables
 import tables.medications as medications_tables
 import tables.allergies as allergies_tables
 import tables.admin as admin_tables
+import tables.health_recommendations as health_rec_tables
 
 # Import routes
 import routes.users as user_routes
@@ -62,6 +63,7 @@ environment_tables.Base.metadata.create_all(bind=engine)
 medications_tables.Base.metadata.create_all(bind=engine)
 allergies_tables.Base.metadata.create_all(bind=engine)
 admin_tables.Base.metadata.create_all(bind=engine)
+health_rec_tables.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="CareTaker AI Backend")
 

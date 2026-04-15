@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -47,7 +47,7 @@
                 radial-gradient(at 40% 80%, var(--pastel-lavender) 0px, transparent 50%),
                 radial-gradient(at 90% 90%, var(--pastel-mint) 0px, transparent 40%);
             background-attachment: fixed;
-            background-size: 120% 120%;
+
             color: var(--text);
             font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         }
@@ -358,7 +358,7 @@
             box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02);
         }
 
-        canvas {
+        .wave-shell canvas {
             width: 100%;
             max-width: 100%;
             border-radius: 18px;
@@ -1274,6 +1274,9 @@
                     <div class="status-pill">
                         Updated: <span id="last-updated">--</span>
                     </div>
+                    <button id="logVitalsBtn" class="primary-btn" style="padding:6px 16px; font-size:0.82rem; border-radius:16px; display:flex; align-items:center; gap:6px; margin-left:10px;">
+                        <i class="fas fa-edit"></i> Log Vitals
+                    </button>
                 </div>
 
                 <div class="grid-two"
@@ -1537,6 +1540,57 @@
                 <span id="toastMessage">Report uploaded successfully!</span>
             </div>
 
+            <!-- Log Vitals Modal -->
+            <div id="logVitalsModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+                <div style="background:white; border-radius:20px; padding:28px 32px; max-width:480px; width:90%; box-shadow:0 20px 60px rgba(0,0,0,0.2); animation: slideUp 0.3s ease;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                        <h3 style="margin:0; font-size:1.15rem;"><i class="fas fa-heartbeat" style="color:var(--accent); margin-right:8px;"></i>Log Today's Vitals</h3>
+                        <button id="closeVitalsModal" style="background:none; border:none; font-size:1.3rem; cursor:pointer; color:var(--muted); padding:4px 8px;">&times;</button>
+                    </div>
+                    <form id="logVitalsForm">
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                            <div>
+                                <label style="font-size:0.75rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em;">Heart Rate (bpm)</label>
+                                <input type="number" id="mv-hr" placeholder="e.g. 85" style="width:100%; padding:10px 12px; border:1px solid rgba(0,0,0,0.1); border-radius:12px; font-size:0.9rem; margin-top:4px; box-sizing:border-box;">
+                            </div>
+                            <div>
+                                <label style="font-size:0.75rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em;">SpO2 (%)</label>
+                                <input type="number" id="mv-o2" placeholder="e.g. 97" style="width:100%; padding:10px 12px; border:1px solid rgba(0,0,0,0.1); border-radius:12px; font-size:0.9rem; margin-top:4px; box-sizing:border-box;">
+                            </div>
+                            <div>
+                                <label style="font-size:0.75rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em;">Systolic BP (mmHg)</label>
+                                <input type="number" id="mv-sys" placeholder="e.g. 140" style="width:100%; padding:10px 12px; border:1px solid rgba(0,0,0,0.1); border-radius:12px; font-size:0.9rem; margin-top:4px; box-sizing:border-box;">
+                            </div>
+                            <div>
+                                <label style="font-size:0.75rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em;">Diastolic BP (mmHg)</label>
+                                <input type="number" id="mv-dia" placeholder="e.g. 90" style="width:100%; padding:10px 12px; border:1px solid rgba(0,0,0,0.1); border-radius:12px; font-size:0.9rem; margin-top:4px; box-sizing:border-box;">
+                            </div>
+                            <div>
+                                <label style="font-size:0.75rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em;">Temperature (°C)</label>
+                                <input type="number" step="0.1" id="mv-temp" placeholder="e.g. 37.1" style="width:100%; padding:10px 12px; border:1px solid rgba(0,0,0,0.1); border-radius:12px; font-size:0.9rem; margin-top:4px; box-sizing:border-box;">
+                            </div>
+                            <div>
+                                <label style="font-size:0.75rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em;">Sleep (hours)</label>
+                                <input type="number" step="0.5" id="mv-sleep" placeholder="e.g. 7" style="width:100%; padding:10px 12px; border:1px solid rgba(0,0,0,0.1); border-radius:12px; font-size:0.9rem; margin-top:4px; box-sizing:border-box;">
+                            </div>
+                            <div>
+                                <label style="font-size:0.75rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em;">Weight (kg) <span style="font-weight:400; text-transform:none; font-size:0.7rem;">— updates profile</span></label>
+                                <input type="number" step="0.1" id="mv-weight" placeholder="e.g. 72" style="width:100%; padding:10px 12px; border:1px solid rgba(0,0,0,0.1); border-radius:12px; font-size:0.9rem; margin-top:4px; box-sizing:border-box;">
+                            </div>
+                        </div>
+                        <div style="margin-top:10px; padding:8px 14px; background:rgba(74,144,226,0.06); border-radius:10px; font-size:0.78rem; color:var(--muted);">
+                            <i class="fas fa-info-circle" style="color:var(--accent);"></i>
+                            BMI auto-calculates from profile height + current weight.
+                        </div>
+                        <div style="margin-top:18px; display:flex; gap:10px; justify-content:flex-end;">
+                            <button type="button" id="cancelVitalsBtn" style="padding:10px 20px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background:white; cursor:pointer; font-size:0.85rem; font-weight:600; color:var(--muted);">Cancel</button>
+                            <button type="submit" id="submitVitalsBtn" class="primary-btn" style="padding:10px 24px; border-radius:12px; font-size:0.85rem;">Save Vitals</button>
+                        </div>
+                        <p id="vitalsFormMsg" style="text-align:center; margin-top:10px; font-size:0.82rem; color:var(--success); display:none;"></p>
+                    </form>
+                </div>
+            </div>
+
         </main>
     </div>
 
@@ -1593,6 +1647,89 @@
         let sessionPredictions = [];
         let summaryGenerating = false;
         let reportsRefreshing = false;
+
+        // ── Log Vitals Modal Logic ──────────────────────────────────────────
+        (function initLogVitals() {
+            const modal = document.getElementById('logVitalsModal');
+            const openBtn = document.getElementById('logVitalsBtn');
+            const closeBtn = document.getElementById('closeVitalsModal');
+            const cancelBtn = document.getElementById('cancelVitalsBtn');
+            const form = document.getElementById('logVitalsForm');
+            const msgEl = document.getElementById('vitalsFormMsg');
+
+            function showModal() {
+                if (!selectedRecipientId) {
+                    alert('Please select a care recipient first.');
+                    return;
+                }
+                modal.style.display = 'flex';
+            }
+            function hideModal() {
+                modal.style.display = 'none';
+                msgEl.style.display = 'none';
+            }
+
+            openBtn.addEventListener('click', showModal);
+            closeBtn.addEventListener('click', hideModal);
+            cancelBtn.addEventListener('click', hideModal);
+            modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(); });
+
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const submitBtn = document.getElementById('submitVitalsBtn');
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Saving...';
+
+                const payload = {
+                    care_recipient_id: selectedRecipientId,
+                    heart_rate: parseInt(document.getElementById('mv-hr').value) || null,
+                    oxygen_saturation: parseInt(document.getElementById('mv-o2').value) || null,
+                    systolic_bp: parseInt(document.getElementById('mv-sys').value) || null,
+                    diastolic_bp: parseInt(document.getElementById('mv-dia').value) || null,
+                    temperature: parseFloat(document.getElementById('mv-temp').value) || null,
+                    sleep_score: parseFloat(document.getElementById('mv-sleep').value) || null,
+                    weight: parseFloat(document.getElementById('mv-weight').value) || null
+                };
+
+                try {
+                    const res = await fetch(API_BASE + '/vitals/manual', {
+                        method: 'POST',
+                        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (res.ok) {
+                        msgEl.textContent = '\u2705 Vitals saved!' + (data.bmi ? ' BMI: ' + data.bmi : '');
+                        msgEl.style.color = 'var(--success)';
+                        msgEl.style.display = 'block';
+
+                        // Update the dashboard vitals display immediately
+                        const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+                        if (payload.heart_rate) set('val-hr', payload.heart_rate);
+                        if (payload.systolic_bp || payload.diastolic_bp) set('val-bp', (payload.systolic_bp || '--') + '/' + (payload.diastolic_bp || '--'));
+                        if (payload.oxygen_saturation) set('val-o2', payload.oxygen_saturation);
+                        if (payload.temperature) set('val-temp', payload.temperature);
+                        if (payload.sleep_score) set('val-sleep', payload.sleep_score);
+                        if (data.bmi) set('val-bmi', data.bmi);
+                        if (payload.weight) set('val-hw', 'W:' + payload.weight + 'kg');
+                        set('last-updated', new Date().toLocaleString());
+
+                        setTimeout(() => { hideModal(); form.reset(); }, 1500);
+                    } else {
+                        msgEl.textContent = '\u274c ' + (data.detail || 'Failed to save');
+                        msgEl.style.color = 'var(--danger)';
+                        msgEl.style.display = 'block';
+                    }
+                } catch (err) {
+                    msgEl.textContent = '\u274c Network error';
+                    msgEl.style.color = 'var(--danger)';
+                    msgEl.style.display = 'block';
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Save Vitals';
+                }
+            });
+        })();
 
         // Video monitoring state
         let emotionMonitoringActive = false;

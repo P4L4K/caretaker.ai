@@ -305,46 +305,47 @@ def process_video_direct(process_id: str, input_path: str, output_path: str, use
         total_inactivity_frames = 0
         last_alert_time = 0
         
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                    
+                # Process Frame
+                results = monitor.process_frame(frame)
                 
-            # Process Frame
-            results = monitor.process_frame(frame)
-            
-            # Draw Interface
-            display_frame = draw_united_interface(frame, results)
-            
-            # Write Frame
-            writer.write(display_frame)
-            
-            # Track Inactivity
-            if results["inactivity"].get("alert"):
-                total_inactivity_frames += 1
-            if results["fall"]["fall_event_fired"]:
-                timestamp = results["global_state"].get("timestamp", datetime.now().isoformat())
-                falls_detected.append({
-                    "timestamp": timestamp,
-                    "message": "Fall Detected",
-                    "frame": frame_count
-                })
-                logger.info(f"Fall Event Recorded: Frame {frame_count}")
-            
-            frame_count += 1
-            
-            # Update progress every 30 frames
-            if frame_count % 30 == 0:
-                progress = int((frame_count / total_frames) * 100) if total_frames > 0 else 0
-                if process_id in process_status:
-                    process_status[process_id]["progress"] = progress
-                    # Optimization: Don't save to disk on every frame, maybe every 10%
-                    if progress % 10 == 0:
-                        save_process_status(process_status)
-        
-        # Cleanup
-        cap.release()
-        writer.release()
+                # Draw Interface
+                display_frame = draw_united_interface(frame, results)
+                
+                # Write Frame
+                writer.write(display_frame)
+                
+                # Track Inactivity
+                if results["inactivity"].get("alert"):
+                    total_inactivity_frames += 1
+                if results["fall"]["fall_event_fired"]:
+                    timestamp = results["global_state"].get("timestamp", datetime.now().isoformat())
+                    falls_detected.append({
+                        "timestamp": timestamp,
+                        "message": "Fall Detected",
+                        "frame": frame_count
+                    })
+                    logger.info(f"Fall Event Recorded: Frame {frame_count}")
+                
+                frame_count += 1
+                
+                # Update progress every 30 frames
+                if frame_count % 30 == 0:
+                    progress = int((frame_count / total_frames) * 100) if total_frames > 0 else 0
+                    if process_id in process_status:
+                        process_status[process_id]["progress"] = progress
+                        # Optimization: Don't save to disk on every frame, maybe every 10%
+                        if progress % 10 == 0:
+                            save_process_status(process_status)
+        finally:
+            # Cleanup
+            cap.release()
+            writer.release()
 
         # --- H.264 Transcoding for Web Playback ---
         # OpenCV output with mp4v/avc1 in Windows often results in non-playable files.
@@ -444,9 +445,20 @@ def process_video_direct(process_id: str, input_path: str, output_path: str, use
                 "error": str(e)
             })
             save_process_status(process_status)
-        # Try cleanup
+        # Try cleanup - ensure cap/writer are released handled by finally block above
+        # for early errors before the loop, we check here
+        try:
+            if 'cap' in locals() and cap.isOpened(): cap.release()
+            if 'writer' in locals(): writer.release()
+        except:
+            pass
+            
         if os.path.exists(input_path):
-             os.remove(input_path)
+             try:
+                 os.remove(input_path)
+             except Exception as cleanup_err:
+                 logger.error(f"Post-error file cleanup failed: {cleanup_err}")
+        
         # Close window if it exists
         try:
             cv2.destroyAllWindows()

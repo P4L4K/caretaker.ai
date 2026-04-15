@@ -481,6 +481,29 @@
             <div id="alertsList" style="max-height: 400px; overflow-y: auto;"></div>
         </div>
 
+        <!-- SECTION: HEALTH ADVISOR (Feature 3 — Proactive Recommendations) -->
+        <div class="card col-span-12">
+            <div class="card-header">
+                <h2><i class="fas fa-brain" style="color:#8b5cf6;"></i> Health Advisor</h2>
+                <span id="recTriggerBadge" class="badge info" style="display:none;"></span>
+            </div>
+            <div id="recommendationsContainer">
+                <div class="empty-state" id="recEmptyState">
+                    <i class="fas fa-brain" style="font-size:2rem; opacity:0.3; margin-bottom:8px;"></i>
+                    <p>Recommendations will appear automatically after uploading lab reports or logging vitals.</p>
+                </div>
+                <div id="recContent" style="display:none;">
+                    <div id="recUrgentFlags" style="display:none; margin-bottom:16px;"></div>
+                    <div style="background:rgba(139,92,246,0.06); border-left:4px solid #8b5cf6; padding:14px 18px; border-radius:8px; margin-bottom:16px;">
+                        <div style="font-size:0.75rem; font-weight:700; text-transform:uppercase; color:#8b5cf6; margin-bottom:6px;">Trend Summary</div>
+                        <div id="recTrendSummary" style="font-size:0.95rem; color:var(--text-main); line-height:1.6;"></div>
+                        <div id="recTimestamp" style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;"></div>
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;" id="recSuggestionsGrid"></div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <!-- MODALS -->
@@ -1534,6 +1557,86 @@
         setTimeout(checkInPageMedReminders, 5000);
         setInterval(checkInPageMedReminders, 60000);
 
+
+        // ============================================
+        //  HEALTH RECOMMENDATIONS (Feature 3)
+        // ============================================
+        async function loadRecommendations() {
+            try {
+                const res = await fetch(`${API_BASE}/care-recipients/${recipientId}/recommendations?limit=1`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data.recommendations || data.recommendations.length === 0) return;
+
+                const rec = data.recommendations[0];
+                const suggestions = rec.suggestions || {};
+
+                // Show the content, hide empty state
+                document.getElementById('recEmptyState').style.display = 'none';
+                document.getElementById('recContent').style.display = 'block';
+
+                // Trigger badge
+                const badge = document.getElementById('recTriggerBadge');
+                badge.textContent = rec.trigger_type === 'report' ? 'After Lab Report' : 'After Vitals Entry';
+                badge.style.display = 'inline-block';
+
+                // Trend summary
+                document.getElementById('recTrendSummary').textContent = rec.trend_summary || 'No summary available.';
+                document.getElementById('recTimestamp').textContent = rec.generated_at
+                    ? `Generated: ${new Date(rec.generated_at).toLocaleString()}`
+                    : '';
+
+                // Urgent flags
+                if (suggestions.urgent_flags && suggestions.urgent_flags.length) {
+                    const urgentEl = document.getElementById('recUrgentFlags');
+                    urgentEl.style.display = 'block';
+                    urgentEl.innerHTML = suggestions.urgent_flags.map(f =>
+                        `<div class="alert-item critical" style="border-color:#dc2626;">
+                            <strong style="color:#dc2626;"><i class="fas fa-exclamation-triangle"></i> Urgent:</strong> ${f}
+                        </div>`
+                    ).join('');
+                }
+
+                // Suggestion categories
+                const grid = document.getElementById('recSuggestionsGrid');
+                const categories = [
+                    { key: 'diet', icon: 'fas fa-utensils', title: 'Dietary Advice', color: '#10B981' },
+                    { key: 'lifestyle', icon: 'fas fa-walking', title: 'Lifestyle Changes', color: '#4A90E2' },
+                    { key: 'medication_suggestions', icon: 'fas fa-pills', title: 'Medication Notes', color: '#F59E0B' },
+                    { key: 'next_tests', icon: 'fas fa-vial', title: 'Recommended Tests', color: '#8b5cf6' }
+                ];
+
+                let gridHtml = '';
+                categories.forEach(cat => {
+                    const items = suggestions[cat.key] || [];
+                    if (items.length === 0) return;
+                    gridHtml += `
+                        <div style="background:white; border:1px solid var(--border-light); border-radius:12px; padding:14px; border-top:3px solid ${cat.color};">
+                            <div style="font-size:0.8rem; font-weight:700; text-transform:uppercase; color:${cat.color}; margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+                                <i class="${cat.icon}"></i> ${cat.title}
+                            </div>
+                            <ul style="margin:0; padding-left:18px; font-size:0.88rem; line-height:1.7; color:var(--text-main);">
+                                ${items.map(item => `<li>${item}</li>`).join('')}
+                            </ul>
+                        </div>
+                    `;
+                });
+                grid.innerHTML = gridHtml;
+
+                // Mark as read
+                if (!rec.is_read) {
+                    fetch(`${API_BASE}/care-recipients/${recipientId}/recommendations/${rec.id}/read`, {
+                        method: 'PATCH',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    }).catch(() => {});
+                }
+
+            } catch (err) {
+                console.error('[Recommendations] Error loading:', err);
+            }
+        }
 
     </script>
 </body>

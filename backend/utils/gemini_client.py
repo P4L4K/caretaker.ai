@@ -69,9 +69,13 @@ def call_gemini(payload: dict, timeout: int = 30, caller: str = "") -> dict | No
         print(f"{caller} [Gemini] ERROR: GEMINI_API_KEY is not set in .env")
         return None
 
+    # Debug: Print key suffix
+    if api_key:
+        print(f"{caller} [Gemini] Using API Key ending in: ...{api_key[-4:]}")
+
     # Get primary model from env
     primary_model = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
-    
+
     # Create the sequence of models to try
     models_to_try = [primary_model]
     for model in FALLBACK_MODELS:
@@ -81,33 +85,39 @@ def call_gemini(payload: dict, timeout: int = 30, caller: str = "") -> dict | No
     for i, model in enumerate(models_to_try):
         url = get_gemini_url(model, api_key)
         
-        # Internal retries for the SAME model in case of temporary 5xx or connection error
-        for attempt in range(2):
+        # Internal retries for the SAME model
+        for attempt in range(3):
             try:
                 resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=timeout)
 
                 if resp.status_code == 200:
-                    if i > 0:
-                        print(f"{caller} [Gemini] Success using fallback model: {model}")
+                    if i > 0 or attempt > 0:
+                        print(f"{caller} [Gemini] Success using {model} (attempt {attempt+1})")
                     return resp.json()
 
-                # Quota errors (429) or Server Busy (503) -> Try next model immediately
+                # Quota errors (429) or Server Busy (503) -> Wait and retry the SAME model once before switching
                 if resp.status_code in [429, 503]:
-                    print(f"{caller} [Gemini] Model '{model}' overloaded (HTTP {resp.status_code}). Trying next...")
-                    break 
+                    if attempt < 2:
+                        wait_time = (attempt + 1) * 2
+                        print(f"{caller} [Gemini] Model '{model}' rate limited (429). Retrying in {wait_time}s...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        print(f"{caller} [Gemini] Model '{model}' consistently overloaded. Switching model...")
+                        break 
 
-                # Deprecated model (404) -> Try next
+                # Deprecated model (404) -> Try next model immediately
                 if resp.status_code == 404:
                     print(f"{caller} [Gemini] Model '{model}' not found. Skipping...")
                     break
 
-                # Internal Error (500) -> Wait 1s and retry ONCE before switching
-                if resp.status_code == 500 and attempt == 0:
+                # Internal Error (500) -> Wait 1s and retry
+                if resp.status_code == 500 and attempt < 2:
                     time.sleep(1)
                     continue
 
                 print(f"{caller} [Gemini] HTTP {resp.status_code}: {resp.text[:300]}")
-                break # Non-recoverable or already retried
+                break
 
             except requests.exceptions.Timeout:
                 print(f"{caller} [Gemini] Timeout for model '{model}'. Trying next...")

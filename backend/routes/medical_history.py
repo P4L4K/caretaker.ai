@@ -145,6 +145,9 @@ def get_trends(recipient_id: int, db: Session = Depends(get_db)):
                     "is_abnormal": l.is_abnormal,
                     "pct_change_from_previous": l.pct_change_from_previous,
                     "pct_change_from_baseline": l.pct_change_from_baseline,
+                    "confidence_score":   round(l.confidence_score, 3) if l.confidence_score is not None else None,
+                    "extraction_source":  l.extraction_source or "regex",
+                    "source_text":        l.source_text or "",
                 }
                 for l in labs
             ],
@@ -185,6 +188,9 @@ def get_metric_trend(
                 "is_abnormal": l.is_abnormal,
                 "pct_change_from_previous": l.pct_change_from_previous,
                 "pct_change_from_baseline": l.pct_change_from_baseline,
+                "confidence_score":  round(l.confidence_score, 3) if l.confidence_score is not None else None,
+                "extraction_source": l.extraction_source or "regex",
+                "source_text":       l.source_text or "",
             }
             for l in labs
         ],

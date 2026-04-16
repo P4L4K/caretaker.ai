@@ -666,6 +666,19 @@
                         };
                     }
                 }
+
+                // Load Clinical Recommendations into State Memory
+                try {
+                    const recRes = await fetch(`http://127.0.0.1:8000/api/care-recipients/${rid}/recommendations`, {
+                        headers: { 'Authorization': 'Bearer ' + token }
+                    });
+                    if (recRes.ok) {
+                        const recData = await recRes.json();
+                        state.recommendations = recData.result || [];
+                    }
+                } catch (e) {
+                    console.error('Failed to load clinical recommendations for Voice Bot memory', e);
+                }
             } catch (e) {
                 console.error('Profile load error:', e);
             }

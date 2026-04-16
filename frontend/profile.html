@@ -453,7 +453,7 @@
         </div>
 
         <!-- SECTION 6: LAB TEST TRENDS -->
-        <div class="card col-span-6">
+        <div class="card col-span-12">
             <div class="card-header">
                 <h2><i class="fas fa-vial"></i> Lab Results & Trends</h2>
                 <select id="labMetricSelect" style="padding: 4px; border-radius: 4px;">
@@ -463,6 +463,14 @@
             <div class="chart-container">
                 <canvas id="labChart"></canvas>
             </div>
+        </div>
+
+        <!-- NEW SECTION: ACTIONABLE RECOMMENDATIONS -->
+        <div class="card col-span-6">
+            <div class="card-header">
+                <h2><i class="fas fa-user-md"></i> Actionable Recommendations</h2>
+            </div>
+            <div id="recommendationsList" style="max-height: 400px; overflow-y: auto;"></div>
         </div>
 
         <!-- SECTION 9: CLINICAL ALERTS -->
@@ -740,6 +748,7 @@
                 loadMedications();
                 loadAllergies();
                 loadAlerts();
+                loadRecommendations();
                 // Render Visualizations
                 renderVitalCharts();
                 initLabCharts();
@@ -784,6 +793,9 @@
                
                 ${riskHtml}
                 ${doctorRemarksHtml}
+                <div class="data-item col-span-12" id="healthStateSummary" style="margin-top:12px; display:none;">
+                    <!-- Populated by loadRecommendations -->
+                </div>
             `;
         }
 
@@ -897,6 +909,119 @@
                     <button class="btn btn-sm btn-outline" onclick="showEditModal('allergy', ${a.id})"><i class="fas fa-edit"></i></button>
                 </div>
             `).join('');
+        }
+
+        // Section: Actionable Recommendations
+        async function loadRecommendations() {
+            const el = document.getElementById('recommendationsList');
+            try {
+                const res = await fetch(`${API_BASE}/care-recipients/${recipientId}/recommendations`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) throw new Error('Failed to fetch recommendations');
+                const data = await res.json();
+                const items = data.result || [];
+
+                // State of Health Logic (Architect Rule #11)
+                const healthEl = document.getElementById('healthStateSummary');
+                if (healthEl) {
+                    try {
+                        const hRes = await fetch(`${API_BASE}/care-recipients/${recipientId}/health-status`, {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (hRes.ok) {
+                            const hData = await hRes.json();
+                            const status = hData.result;
+                            healthEl.style.display = 'block';
+                            healthEl.innerHTML = `
+                                <div style="background:${status.color}10; border: 1px solid ${status.color}30; padding:16px; border-radius:12px; display:flex; align-items:center; gap:16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                                    <div style="width:48px; height:48px; border-radius:12px; background:${status.color}; display:flex; align-items:center; justify-content:center; color:#fff; font-size:1.5rem; box-shadow: 0 4px 10px ${status.color}40;">
+                                        <i class="fas ${status.icon}"></i>
+                                    </div>
+                                    <div style="flex:1;">
+                                        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                                            <strong style="font-size:1.1rem; color:var(--text);">${status.category}</strong>
+                                            <span style="font-size:0.75rem; background:rgba(0,0,0,0.05); padding:2px 8px; border-radius:10px; color:var(--text-muted);">Updated just now</span>
+                                        </div>
+                                        <div style="font-size:0.85rem; color:var(--text-muted); margin-top:2px;">
+                                            ${status.label} &bull; ${items.length ? `${items.length} actionable items found.` : 'Normal tracking.'}
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    } catch (e) {
+                         console.error("Health status fetch failed:", e);
+                    }
+                }
+
+                if (!items.length) {
+                    el.innerHTML = '<div class="empty-state">No active recommendations.</div>';
+                    return;
+                }
+
+                const colors = { critical: '#fef2f2', high: '#fffbeb', medium: '#f0fdf4', suggestion: '#f8fafc', low: '#f8fafc' };
+                const borders = { critical: '#ef4444', high: '#f59e0b', medium: '#22c55e', suggestion: '#3b82f6', low: '#94a3b8' };
+                const iconColors = { critical: '#ef4444', high: '#f59e0b', medium: '#22c55e', suggestion: '#3b82f6', low: '#94a3b8' };
+                const icons = { critical: 'fa-exclamation-triangle', high: 'fa-bolt', medium: 'fa-info-circle', suggestion: 'fa-lightbulb', low: 'fa-info-circle' };
+
+                el.innerHTML = items.map(r => {
+                    const iconColors = { critical: '#ef4444', high: '#f59e0b', medium: '#22c55e', suggestion: '#3b82f6', low: '#94a3b8' };
+                    const icons = { critical: 'fa-exclamation-triangle', high: 'fa-bolt', medium: 'fa-info-circle', suggestion: 'fa-lightbulb', low: 'fa-info-circle' };
+                    const colors = { critical: '#fef2f2', high: '#fffbeb', medium: '#f0fdf4', suggestion: '#f8fafc', low: '#f8fafc' };
+                    const borders = { critical: '#ef4444', high: '#f59e0b', medium: '#22c55e', suggestion: '#3b82f6', low: '#94a3b8' };
+
+                    // Group actions by category
+                    const grouped = { doctor: [], lifestyle: [], tests: [] };
+                    (r.actions || []).forEach(a => {
+                        if (a.type === 'doctor_visit') grouped.doctor.push(a);
+                        else if (a.type === 'test') grouped.tests.push(a);
+                        else grouped.lifestyle.push(a);
+                    });
+
+                    const renderGroup = (list, title, gIcon) => {
+                        if (!list.length) return '';
+                        return `
+                            <div style="margin-top:8px;">
+                                <div style="font-size:0.65rem; font-weight:700; text-transform:uppercase; color:var(--text-muted); margin-bottom:2px; display:flex; align-items:center; gap:4px;">
+                                    <i class="fas ${gIcon}"></i> ${title}
+                                </div>
+                                <ul style="list-style:none; padding:0; margin:0;">
+                                    ${list.map(a => {
+                                        let aIcon = 'fa-check';
+                                        if (a.type === 'doctor_visit') aIcon = 'fa-stethoscope';
+                                        else if (a.type === 'diet') aIcon = 'fa-apple-alt';
+                                        else if (a.type === 'lifestyle') aIcon = 'fa-running';
+                                        else if (a.type === 'test') aIcon = 'fa-vial';
+                                        else if (a.type === 'home_remedy') aIcon = 'fa-leaf';
+                                        return `<li style="margin-top:2px; font-size: 0.75rem; color: var(--text-main); display:flex; align-items:flex-start; gap:6px;">
+                                                    <i class="fas ${aIcon}" style="color:${iconColors[r.severity]}; margin-top:2px; width:14px;"></i> 
+                                                    <span>${a.text} ${a.evidence ? `<i class="fas fa-info-circle" style="font-size:0.6rem; opacity:0.5;" title="Evidence: ${a.evidence}"></i>` : ''}</span>
+                                                </li>`;
+                                    }).join('')}
+                                </ul>
+                            </div>
+                        `;
+                    };
+
+                    return `
+                    <div class="list-item" style="background:${colors[r.severity]}; border-left:4px solid ${borders[r.severity]}; padding:12px; margin-bottom:12px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="font-weight:700; font-size:0.9rem; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+                            <span><i class="fas ${icons[r.severity]}" style="color:${iconColors[r.severity]}; margin-right:6px;"></i> ${r.metric}</span>
+                            ${r.trigger_value ? `<span style="font-size:10px; opacity:0.6; background:rgba(0,0,0,0.05); padding:1px 6px; border-radius:4px;">${r.trigger_value} ${r.reference_range ? `(${r.reference_range})` : ''}</span>` : ''}
+                        </div>
+                        <div style="font-size:0.82rem; color:var(--text); margin-bottom:8px; line-height:1.4;">${r.message}</div>
+                        
+                        ${renderGroup(grouped.doctor, 'Clinical Steps', 'fa-user-md')}
+                        ${renderGroup(grouped.lifestyle, 'Lifestyle & Remedy', 'fa-seedling')}
+                        ${renderGroup(grouped.tests, 'Follow-up', 'fa-vial')}
+                    </div>`;
+                }).join('');
+
+            } catch (err) {
+                console.error(err);
+                el.innerHTML = '<div class="empty-state">Unable to load recommendations.</div>';
+            }
         }
 
         // ============================================

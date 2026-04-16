@@ -47,10 +47,19 @@ def _simple_text_from_pdf_bytes(b: bytes):
     if pdfplumber:
         try:
             with pdfplumber.open(BytesIO(b)) as pdf:
-                parts = [p.extract_text() or '' for p in pdf.pages]
+                parts = []
+                for p in pdf.pages:
+                    try:
+                        # Attempt layout-preserving extraction first to keep tables aligned
+                        text_page = p.extract_text(layout=True)
+                    except Exception as e:
+                        print(f"layout extraction failed: {e}")
+                        text_page = p.extract_text()
+                    parts.append(text_page or '')
                 text = '\n'.join(parts).strip()
-        except Exception:
-            text = ''  # ignore failures
+        except Exception as e:
+            text = '' 
+            print(f"[pdfplumber] extraction failed: {e}")
 
     # 2. If no text, try PyPDF2
     if not text and PdfReader:
@@ -96,12 +105,15 @@ def _simple_text_from_docx_bytes(b: bytes):
 
 def _simple_text_from_image_bytes(b: bytes):
     if not Image or not pytesseract:
+        print("[summarizer] Missing PIL or pytesseract module for image extraction.")
         return ''
     try:
         img = Image.open(BytesIO(b))
         text = pytesseract.image_to_string(img)
+        print(f"[summarizer] OCR image extraction succeeded, {len(text)} characters extracted.")
         return text
-    except Exception:
+    except Exception as e:
+        print(f"[summarizer] Image OCR extraction failed: {e}")
         return ''
 
 
@@ -110,9 +122,13 @@ def extract_text_from_bytes(b: bytes, mime: str = None) -> str:
     mime = (mime or '').lower()
     if 'pdf' in mime:
         return _simple_text_from_pdf_bytes(b)
-    if 'word' in mime or 'officedocument' in mime or mime.endswith('.docx'):
+    if 'word' in mime or 'officedocument' in mime or mime.endswith('.docx') or mime.endswith('.doc'):
         return _simple_text_from_docx_bytes(b)
-    if mime.startswith('image'):
+    if mime.startswith('image') or mime.endswith('.png') or mime.endswith('.jpg') or mime.endswith('.jpeg'):
+        return _simple_text_from_image_bytes(b)
+    
+    # Also fallback to image extraction if the bytes look like a common image format
+    if b.startswith(b'\x89PNG') or b.startswith(b'\xff\xd8'):
         return _simple_text_from_image_bytes(b)
 
     # Last-ditch: try to decode as utf-8 text

@@ -19,17 +19,21 @@ router = APIRouter(tags=["Recipients"])
 
 
 def _run_medical_history_pipeline(recipient_id: int, report_id: int, filename: str):
-    """Async background task: runs full medical history pipeline on a new report.
+    """Async background task. Runs V2 hybrid pipeline; falls back to V1 on failure."""
+    try:
+        _run_medical_history_pipeline_v2(recipient_id, report_id, filename)
+    except Exception:
+        _run_medical_history_pipeline_v1_legacy(recipient_id, report_id, filename)
 
-    Steps: text extraction → structured extraction (Gemini) → disease detection →
-    progression analysis → alert generation → risk score update.
-    """
+
+def _run_medical_history_pipeline_v2(recipient_id: int, report_id: int, filename: str):
+    """V2 hybrid pipeline: deterministic lab extraction + Gemini for clinical context."""
     from config import SessionLocal
     db = SessionLocal()
     try:
         from tables.medical_reports import MedicalReport, ReportProcessingStatus
         from tables.medical_conditions import PatientCondition, ConditionStatus, ConditionSeverity, SourceType
-        from services.report_ingestion import extract_structured_report
+        from services.report_ingestion import run_hybrid_lab_extraction, extract_structured_report
         from services.disease_detection import detect_diseases_from_report
         from services.disease_progression import analyze_progression
         from services.alert_engine import generate_alerts, check_monitoring_gaps
@@ -39,41 +43,53 @@ def _run_medical_history_pipeline(recipient_id: int, report_id: int, filename: s
 
         report = db.query(MedicalReport).filter(MedicalReport.id == report_id).first()
         if not report:
-            print(f"[pipeline] Report {report_id} not found")
             return
 
         report.processing_status = ReportProcessingStatus.processing
         db.flush()
 
-        # 1. Extract text from report
+        # ── 1. Text extraction ────────────────────────────────────────────────
         text = ""
         if report.data:
             try:
                 text = extract_text_from_bytes(report.data, filename)
             except Exception as e:
-                print(f"[pipeline] Text extraction failed: {e}")
+                print(f"[pipeline_v2] Text extraction failed: {e}")
 
         if not text:
-            print(f"[pipeline] No text extracted from report {report_id}")
+            print(f"[pipeline_v2] No text extracted from report {report_id}")
             report.processing_status = ReportProcessingStatus.failed
             db.commit()
             return
 
-        # 2. Structured extraction via Gemini
-        extracted = extract_structured_report(text)
-        report.extracted_data = extracted
-        if extracted.get("report_date"):
-            try:
-                report.report_date = datetime.date.fromisoformat(extracted["report_date"])
-            except (ValueError, TypeError):
-                pass
+        # ── 2. Hybrid lab extraction (rule → fuzzy → LLM fallback) ─────────
+        upload_date = report.uploaded_at.date() if report.uploaded_at else datetime.date.today()
+        hybrid_result = run_hybrid_lab_extraction(
+            text=text, report_id=report_id,
+            care_recipient_id=recipient_id, upload_date=upload_date, db=db,
+        )
+        report_date_obj = hybrid_result["report_date"]
+        if report_date_obj:
+            report.report_date = report_date_obj
+        print(f"[pipeline_v2] Lab rows saved={hybrid_result['saved_count']} "
+              f"template={hybrid_result['template']} date={report_date_obj}")
 
-        # 3. Disease detection
+        # ── 3. Gemini: diagnoses, medications, notes (NOT lab values) ──────
+        report_date_str = str(report_date_obj) if report_date_obj else None
+        extracted = extract_structured_report(text, report_date_hint=report_date_str)
+        extracted["lab_values"] = {
+            row["metric_name"]: {"value": row["normalized_value"], "unit": row["normalized_unit"]}
+            for row in hybrid_result["lab_rows"]
+        }
+        extracted["extraction_template"] = hybrid_result["template"]
+        report.extracted_data = extracted
+
+        # ── 4. Disease detection ──────────────────────────────────────────────
         existing = repo.get_all_conditions(db, recipient_id)
         new_diseases = detect_diseases_from_report(
-            extracted, existing, db, report_id, extracted.get("report_date")
+            extracted, existing, db, report_id,
+            report_date_str or extracted.get("report_date")
         )
-
         for disease in new_diseases:
             cond = PatientCondition(
                 care_recipient_id=recipient_id,
@@ -92,47 +108,128 @@ def _run_medical_history_pipeline(recipient_id: int, report_id: int, filename: s
             db.add(cond)
         db.flush()
 
-        # 4. Progression analysis
+        # ── 5–7. Progression, alerts, risk score ──────────────────────────────
         progression = analyze_progression(
             recipient_id, extracted, report_id,
-            extracted.get("report_date", ""), db
+            report_date_str or extracted.get("report_date", ""), db
         )
-
-        # 5. Generate alerts
         generate_alerts(recipient_id, progression, db)
-
-        # 6. Check monitoring gaps
         check_monitoring_gaps(recipient_id, db)
-
-        # 7. Update risk score
         calculate_risk_score(recipient_id, db)
 
-        # 8. Update last_report_date on recipient
+        # ── 8. Update last_report_date ────────────────────────────────────────
         from tables.users import CareRecipient
-        recipient = db.query(CareRecipient).filter(CareRecipient.id == recipient_id).first()
-        if recipient:
-            recipient.last_report_date = datetime.datetime.utcnow()
+        rec = db.query(CareRecipient).filter(CareRecipient.id == recipient_id).first()
+        if rec:
+            rec.last_report_date = datetime.datetime.utcnow()
 
         report.processing_status = ReportProcessingStatus.completed
         db.commit()
-        print(f"[pipeline] ✅ Report {report_id} processing complete")
-        
-        # 9. Auto-update summary (Moved from sync API call)
+        print(f"[pipeline_v2] ✅ Report {report_id} — "
+              f"{hybrid_result['saved_count']} lab values, {len(new_diseases)} new conditions")
+
+        # ── 9. Aggregate summary ──────────────────────────────────────────────
         try:
             _recalculate_aggregate_summary(db, recipient_id)
         except Exception as e:
-            print(f"[pipeline] _recalculate_aggregate_summary failed: {e}")
+            print(f"[pipeline_v2] summary failed: {e}")
+
+        # ── 10. Clinical Recommendations ──────────────────────────────────────
+        try:
+            from services.recommendation_engine import generate_recommendations
+            generate_recommendations(recipient_id, db)
+        except Exception as e:
+            print(f"[pipeline_v2] recommendations failed: {e}")
 
     except Exception as e:
-        print(f"[pipeline] ❌ Error processing report {report_id}: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"[pipeline_v2] ❌ Error: {e}")
+        import traceback; traceback.print_exc()
         db.rollback()
         try:
-            from tables.medical_reports import MedicalReport, ReportProcessingStatus
-            report = db.query(MedicalReport).filter(MedicalReport.id == report_id).first()
-            if report:
-                report.processing_status = ReportProcessingStatus.failed
+            rep = db.query(MedicalReport).filter(MedicalReport.id == report_id).first()
+            if rep:
+                rep.processing_status = ReportProcessingStatus.failed
+                db.commit()
+        except Exception:
+            pass
+        raise   # Re-raise so the outer dispatcher triggers v1 fallback
+    finally:
+        db.close()
+
+
+def _run_medical_history_pipeline_v1_legacy(recipient_id: int, report_id: int, filename: str):
+    """V1 legacy fallback — pure Gemini extraction (used only if v2 fails entirely)."""
+    from config import SessionLocal
+    db = SessionLocal()
+    try:
+        from tables.medical_reports import MedicalReport, ReportProcessingStatus
+        from tables.medical_conditions import PatientCondition, ConditionStatus, ConditionSeverity, SourceType
+        from services.report_ingestion import extract_structured_report
+        from services.disease_detection import detect_diseases_from_report
+        from services.disease_progression import analyze_progression
+        from services.alert_engine import generate_alerts, check_monitoring_gaps
+        from services.medical_history_ai import calculate_risk_score
+        from repository import medical_history as repo
+        import datetime
+
+        report = db.query(MedicalReport).filter(MedicalReport.id == report_id).first()
+        if not report:
+            return
+
+        text = extract_text_from_bytes(report.data, filename) if report.data else ""
+        if not text:
+            report.processing_status = ReportProcessingStatus.failed
+            db.commit()
+            return
+
+        extracted = extract_structured_report(text)
+        report.extracted_data = extracted
+        if extracted.get("report_date"):
+            try:
+                report.report_date = datetime.date.fromisoformat(extracted["report_date"])
+            except (ValueError, TypeError):
+                pass
+
+        existing = repo.get_all_conditions(db, recipient_id)
+        new_diseases = detect_diseases_from_report(extracted, existing, db, report_id, extracted.get("report_date"))
+        for disease in new_diseases:
+            db.add(PatientCondition(
+                care_recipient_id=recipient_id,
+                disease_code=disease["disease_code"],
+                disease_name=disease["disease_name"],
+                status=ConditionStatus.active,
+                severity=ConditionSeverity.moderate,
+                first_detected=disease.get("first_detected", datetime.date.today()),
+                last_updated=disease.get("first_detected", datetime.date.today()),
+                confidence_score=disease.get("confidence_score", 0.5),
+                source_type=SourceType(disease.get("source_type", "lab_inferred")),
+                source_report_id=report_id,
+            ))
+        db.flush()
+        progression = analyze_progression(recipient_id, extracted, report_id, extracted.get("report_date", ""), db)
+        generate_alerts(recipient_id, progression, db)
+        check_monitoring_gaps(recipient_id, db)
+        calculate_risk_score(recipient_id, db)
+
+        from tables.users import CareRecipient
+        rec = db.query(CareRecipient).filter(CareRecipient.id == recipient_id).first()
+        if rec:
+            rec.last_report_date = datetime.datetime.utcnow()
+
+        report.processing_status = ReportProcessingStatus.completed
+        db.commit()
+        print(f"[pipeline_v1] ✅ Report {report_id} complete (legacy mode)")
+        try:
+            _recalculate_aggregate_summary(db, recipient_id)
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[pipeline_v1] ❌ Error: {e}")
+        db.rollback()
+        try:
+            rep = db.query(MedicalReport).filter(MedicalReport.id == report_id).first()
+            if rep:
+                rep.processing_status = ReportProcessingStatus.failed
                 db.commit()
         except Exception:
             pass
@@ -972,3 +1069,44 @@ async def update_allergy(recipient_id: int, all_id: int, data: AllergyInput, aut
     db.commit()
     return {"code": 200, "status": "success", "message": "Allergy updated"}
 
+# Recommendations
+@router.get("/care-recipients/{recipient_id}/recommendations", response_model=ResponseSchema)
+async def get_recommendations(recipient_id: int, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    from tables.medical_recommendations import MedicalRecommendation
+    recs = db.query(MedicalRecommendation).filter(
+        MedicalRecommendation.care_recipient_id == recipient_id
+    ).order_by(MedicalRecommendation.created_at.desc()).limit(15).all()
+
+    # Deduplicate by metric locally to only return the latest instance per metric
+    latest_recs = {}
+    for r in recs:
+        if r.metric not in latest_recs:
+            latest_recs[r.metric] = r
+
+    results = []
+    for r in latest_recs.values():
+        results.append({
+            "id": r.id,
+            "metric": r.metric,
+            "severity": r.severity,
+            "message": r.message,
+            "trigger_value": r.trigger_value,
+            "reference_range": r.reference_range,
+            "source": r.source,
+            "confidence_score": r.confidence_score,
+            "actions": r.actions,
+            "created_at": r.created_at.isoformat() if r.created_at else None
+        })
+
+    # Sort so critical/high come first, matching UI expectation
+    priority = {"critical": 4, "high": 3, "medium": 2, "suggestion": 1, "low": 0}
+    results.sort(key=lambda x: priority.get(x["severity"], 0), reverse=True)
+
+    return {"code": 200, "status": "success", "message": "Recommendations retrieved", "result": results}
+
+@router.get("/care-recipients/{recipient_id}/health-status", response_model=ResponseSchema)
+async def get_health_status(recipient_id: int, db: Session = Depends(get_db)):
+    """Backend endpoint for Architect Rule #11 - State of Health categorical score."""
+    from services.recommendation_engine import get_state_of_health
+    status = get_state_of_health(recipient_id, db)
+    return {"code": 200, "status": "success", "message": "Health status retrieved", "result": status}

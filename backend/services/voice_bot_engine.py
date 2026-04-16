@@ -10,6 +10,7 @@ from tables.conversation_history import ConversationMessage, ProactiveReminder, 
 from tables.users import CareRecipient
 from tables.vital_signs import VitalSign
 from tables.medical_conditions import PatientCondition, LabValue, MedicalAlert
+from tables.medical_recommendations import MedicalRecommendation
 from tables.medications import Medication
 from tables.audio_events import AudioEvent
 
@@ -100,6 +101,22 @@ def build_conversation_context(recipient_id: int, db: Session):
         Medication.status == "active"
     ).all()
 
+    # New: Fetch the latest deterministic clinical recommendations
+    deterministic_recs = db.query(MedicalRecommendation).filter(
+        MedicalRecommendation.care_recipient_id == recipient_id
+    ).order_by(desc(MedicalRecommendation.created_at)).limit(5).all()
+
+    # Compute a quick trend summary for the bot (Architect Rule #12)
+    trends = []
+    for r in deterministic_recs:
+        if "worsening" in r.message.lower():
+            trends.append(f"{r.metric} is rising/worsening")
+        elif "improving" in r.message.lower() or "deteriorating" in r.message.lower():
+             # 'deteriorating' in current engine actually means 'decreasing_bad'
+            trends.append(f"{r.metric} is falling/worsening")
+        elif "stable" in r.message.lower():
+            trends.append(f"{r.metric} is stable")
+
     return {
         "recipient": {
             "name": recipient.full_name,
@@ -122,7 +139,9 @@ def build_conversation_context(recipient_id: int, db: Session):
         "audio_events_count": len(audio_events),
         "active_alerts": [{"type": a.alert_type.value if hasattr(a.alert_type, 'value') else str(a.alert_type), "message": a.message, "severity": a.severity.value if hasattr(a.severity, 'value') else str(a.severity)} for a in active_alerts],
         "reminders": [{"type": r.reminder_type.value, "text": r.reminder_text, "time": r.scheduled_time} for r in pending_reminders],
-        "medications": [{"name": m.medicine_name, "details": m.dosage, "frequency": m.frequency} for m in active_meds]
+        "medications": [{"name": m.medicine_name, "details": m.dosage, "frequency": m.frequency} for m in active_meds],
+        "clinical_recs": [{"metric": r.metric, "message": r.message, "actions": [a["text"] for a in r.actions]} for r in deterministic_recs],
+        "trend_summary": trends
     }
 
 # ─────────────────────────────────────────────
@@ -253,10 +272,11 @@ The JSON must follow this EXACT schema:
    - Identify 3 diverse options and include them in the "recommendation" with type: "choice".
 3. For normal conversation, leave "recommendation" as null or omit it.
 
-### 🚫 CLINICAL ACCURACY:
-- Only discuss health info provided in the HEALTH CONTEXT above. 
-- If asked about something NOT in the data, your "reply" must be "Iske baare mein mujhe abhi jaankari nahi hai." 
-- DO NOT hallucinate medication dosages or lab values.
+### 🚫 CLINICAL ACCURACY & SAFETY:
+- You are provided with "SAFE CLINICAL RECOMMENDATIONS" below. If the user asks for medical advice, ONLY use these recommendations.
+- DO NOT hallucinate medication dosages or new clinical facts.
+- If asked about something NOT in the provided data, say "Iske baare mein mujhe abhi jaankari nahi hai." 
+- ALWAYS add a gentle reminder: "Lekin ek baar doctor se zaroor baat kar lijiyega." (or similar English equivalent).
  
 """
 
@@ -284,6 +304,19 @@ The JSON must follow this EXACT schema:
             prompt += f"Active health alert: {alerts[0]['message']} — mention gently if it fits. "
         if audio_count > 3:
             prompt += f"They had {audio_count} cough/sneeze events this week — you could gently check on their breathing. "
+        
+        # ── Trend Awareness (Architect Rule #12) ──
+        trends = context.get("trend_summary", [])
+        if trends:
+            prompt += f"IMPORTANT TRENDS THIS WEEK: {', '.join(trends)}. If relevant, mention them warmly (e.g. 'Aapka sugar thoda badh raha hai is hafte, dhyan rakhiyega').\n"
+
+        # ── Deterministic Recommendations (Highest Priority for Advice) ──
+        recs = context.get("clinical_recs", [])
+        if recs:
+            prompt += "\nSAFE CLINICAL RECOMMENDATIONS (Use these to answer health questions):\n"
+            for r in recs:
+                prompt += f"- {r['metric']}: {r['message']} Actions: {', '.join(r['actions'])}\n"
+        
         prompt += "\n"
 
     # ── Conversation history ──

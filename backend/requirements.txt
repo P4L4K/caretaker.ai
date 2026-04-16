@@ -25,3 +25,5 @@ deepface
 python-socketio
 google-cloud-texttospeech
 google-generativeai
+rapidfuzz
+faiss-cpu

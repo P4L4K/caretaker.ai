@@ -329,15 +329,18 @@
     async function loadClinicalData() {
         if (!selectedRecipientId) return;
         try {
-            const [stateRes, trendsRes, alertsRes] = await Promise.all([
+            const [stateRes, trendsRes, alertsRes, recsRes] = await Promise.all([
                 fetch(`${API}/recipients/${selectedRecipientId}/medical-state`, { headers: { 'Authorization': 'Bearer ' + token } }),
                 fetch(`${API}/recipients/${selectedRecipientId}/trends`, { headers: { 'Authorization': 'Bearer ' + token } }),
                 fetch(`${API}/recipients/${selectedRecipientId}/alerts`, { headers: { 'Authorization': 'Bearer ' + token } }),
+                fetch(`${API}/recipients/${selectedRecipientId}/recommendations`, { headers: { 'Authorization': 'Bearer ' + token } }),
             ]);
 
             const state = await stateRes.json();
             const trends = await trendsRes.json();
             const alerts = await alertsRes.json();
+            const recommendationsData = await recsRes.json();
+            const recommendations = recommendationsData.result || [];
 
             const hasData = state.active_conditions?.length || state.past_conditions?.length || state.latest_labs?.length || state.risk_score;
 
@@ -350,6 +353,11 @@
                 renderTrendChart(trends);
                 renderTimeline(state.active_conditions, state.past_conditions);
                 setupSeverityTracker(state.active_conditions, state.past_conditions);
+                
+                // Render the new actionable clinical recommendations
+                if (typeof renderRecommendations === 'function') {
+                    renderRecommendations(recommendations);
+                }
             } else {
                 $('clinicalDashboard').style.display = 'none';
                 $('clinicalEmpty').style.display = 'block';
@@ -479,26 +487,49 @@
     function drawTrend(metric) {
         if (!metric) return;
         const badges = $('trendBadges');
-        const trendIcons = { increasing: '\u2191', decreasing: '\u2193', stable: '\u2192', fluctuating: '\u2195' };
+        const trendIcons = { increasing: '↑', decreasing: '↓', stable: '→', fluctuating: '↕' };
         const trendColors = { increasing: '#ef4444', decreasing: '#22c55e', stable: '#6b7280', fluctuating: '#eab308' };
         const last = metric.data_points?.[metric.data_points.length - 1];
         const pPrev = last?.pct_change_from_previous;
-        const pBase = last?.pct_change_from_baseline;
+
+        // ── Confidence threshold filter (default: show all ≥ 0.0) ──────────
+        const confThreshold = parseFloat($('confThreshold')?.value || '0');
+        const filteredPoints = metric.data_points.filter(d =>
+            d.confidence_score == null || d.confidence_score >= confThreshold
+        );
+        const lowConfCount = metric.data_points.filter(d =>
+            d.confidence_score != null && d.confidence_score < 0.8
+        ).length;
+
+        // ── Confidence-based point colour ────────────────────────────────────
+        // regex=0.95 → strong blue  |  fuzzy=0.82 → teal  |  llm=0.65 → orange
+        const CONF_COLORS = { regex: '#4A90E2', template: '#2563eb', fuzzy: '#06b6d4', llm: '#f97316' };
+        const ptColors = filteredPoints.map(d => {
+            if (d.is_abnormal) return '#ef4444';
+            return CONF_COLORS[d.extraction_source] || '#4A90E2';
+        });
+        const ptSizes = filteredPoints.map(d =>
+            d.confidence_score != null && d.confidence_score < 0.8 ? 7 : 5
+        );
 
         badges.innerHTML = `
             <span style="background:${trendColors[metric.trend_direction]}15; color:${trendColors[metric.trend_direction]}; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:700;">${trendIcons[metric.trend_direction] || ''} ${metric.trend_direction}</span>
             <span style="background:rgba(0,0,0,0.04); padding:3px 12px; border-radius:20px; font-size:0.75rem;">Volatility: ${metric.volatility_label || 'Low'}</span>
-            ${pPrev != null ? `<span style="background:rgba(0,0,0,0.04); padding:3px 12px; border-radius:20px; font-size:0.75rem;">${pPrev > 0 ? '\u2191' : '\u2193'} ${Math.abs(pPrev).toFixed(1)}% from last</span>` : ''}
+            ${pPrev != null ? `<span style="background:rgba(0,0,0,0.04); padding:3px 12px; border-radius:20px; font-size:0.75rem;">${pPrev > 0 ? '↑' : '↓'} ${Math.abs(pPrev).toFixed(1)}% from last</span>` : ''}
+            ${lowConfCount > 0 ? `<span style="background:rgba(249,115,22,0.12); color:#f97316; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:700;" title="${lowConfCount} point(s) extracted by AI (lower confidence)">⚠ ${lowConfCount} AI-extracted</span>` : '<span style="background:rgba(34,197,94,0.12); color:#22c55e; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:700;">✓ Rule-verified</span>'}
         `;
 
         if (trendChart) trendChart.destroy();
-        const labels = metric.data_points.map(d => d.date);
-        const values = metric.data_points.map(d => d.value);
-        const ptColors = metric.data_points.map(d => d.is_abnormal ? '#ef4444' : '#4A90E2');
+        const labels = filteredPoints.map(d => d.date);
+        const values = filteredPoints.map(d => d.value);
 
         const datasets = [{
-            label: metric.metric_name, data: values, borderColor: '#4A90E2', backgroundColor: 'rgba(74,144,226,0.1)',
-            fill: true, tension: 0.3, pointBackgroundColor: ptColors, pointRadius: 5, pointHoverRadius: 7,
+            label: metric.metric_name, data: values, borderColor: '#4A90E2', backgroundColor: 'rgba(74,144,226,0.08)',
+            fill: true, tension: 0.3, pointBackgroundColor: ptColors, pointRadius: ptSizes, pointHoverRadius: 8,
+            pointBorderColor: filteredPoints.map(d =>
+                d.confidence_score != null && d.confidence_score < 0.8 ? '#f97316' : 'transparent'
+            ),
+            pointBorderWidth: 2,
         }];
 
         if (metric.reference_range_low != null && metric.reference_range_high != null) {
@@ -519,7 +550,23 @@
             type: 'line', data: { labels, datasets },
             options: {
                 responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } },
+                plugins: {
+                    legend: { position: 'bottom', labels: { font: { size: 10 } } },
+                    tooltip: {
+                        callbacks: {
+                            afterLabel: ctx => {
+                                const pt = filteredPoints[ctx.dataIndex];
+                                if (!pt) return '';
+                                const lines = [];
+                                if (pt.confidence_score != null)
+                                    lines.push(`Confidence: ${Math.round(pt.confidence_score * 100)}% (${pt.extraction_source || 'rule'})`);
+                                if (pt.source_text)
+                                    lines.push(`Source: "${pt.source_text.substring(0, 60)}${pt.source_text.length > 60 ? '...' : ''}"`); 
+                                return lines;
+                            }
+                        }
+                    }
+                },
                 scales: {
                     x: { grid: { display: false }, ticks: { font: { size: 10 } } },
                     y: { grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { font: { size: 10 } } },
@@ -767,6 +814,87 @@
         } catch (e) { console.error('Analysis failed:', e); showToast('Analysis failed', 'error'); }
         btn.innerHTML = '<i class="fas fa-brain"></i> Run Full Analysis'; btn.disabled = false;
     });
+
+    // ── Clinical Recommendations ──
+    window.renderRecommendations = function(recommendations) {
+        let container = $('recommendationsContainer');
+        if (!container) {
+            // Create container below alerts if it doesn't exist
+            const insightsCol = document.querySelector('.insights-column');
+            if (insightsCol) {
+                container = document.createElement('div');
+                container.id = 'recommendationsContainer';
+                container.className = 'panel';
+                container.style.marginTop = '24px';
+                
+                // Find where to insert (after alerts list)
+                const alertsPanel = $('alertsList')?.closest('.panel');
+                if (alertsPanel) {
+                    alertsPanel.after(container);
+                } else {
+                    insightsCol.appendChild(container); // Fallback
+                }
+            }
+        }
+        
+        if (!container) return;
+
+        if (!recommendations || recommendations.length === 0) {
+            container.style.display = 'none';
+            return;
+        }
+
+        container.style.display = 'block';
+        
+        // Group by severity
+        const groups = { critical: [], high: [], medium: [], low: [], suggestion: [] };
+        recommendations.forEach(r => {
+            if (groups[r.severity]) groups[r.severity].push(r);
+            else groups.suggestion.push(r); // default to suggestion
+        });
+
+        let html = `<div class="panel-header" style="margin-bottom: 16px;"><h2 class="panel-title"><i class="fas fa-user-md" style="color:var(--accent);"></i> Actionable Recommendations</h2></div><div style="display:flex; flex-direction:column; gap:12px;">`;
+
+        const colors = { critical: '#fef2f2', high: '#fffbeb', medium: '#f0fdf4', suggestion: '#f8fafc', low: '#f8fafc' };
+        const borders = { critical: '#ef4444', high: '#f59e0b', medium: '#22c55e', suggestion: '#3b82f6', low: '#94a3b8' };
+        const iconColors = { critical: '#ef4444', high: '#f59e0b', medium: '#22c55e', suggestion: '#3b82f6', low: '#94a3b8' };
+        const icons = { critical: 'fa-exclamation-triangle', high: 'fa-bolt', medium: 'fa-info-circle', suggestion: 'fa-lightbulb', low: 'fa-info-circle' };
+        
+        // Render groups in priority order
+        ['critical', 'high', 'medium', 'suggestion', 'low'].forEach(sev => {
+            if (groups[sev].length > 0) {
+                groups[sev].forEach(rec => {
+                    const actionsHtml = (rec.actions || []).map(action => {
+                        let aIcon = 'fa-check';
+                        if (action.type === 'doctor_visit') aIcon = 'fa-stethoscope';
+                        else if (action.type === 'diet') aIcon = 'fa-apple-alt';
+                        else if (action.type === 'lifestyle') aIcon = 'fa-running';
+                        else if (action.type === 'test') aIcon = 'fa-vial';
+                        else if (action.type === 'home_remedy') aIcon = 'fa-leaf';
+                        return `<li style="margin-top:4px;"><i class="fas ${aIcon}" style="color:${iconColors[sev]}; width:16px;"></i> ${action.text}</li>`;
+                    }).join('');
+                    
+                    const triggerHtml = rec.trigger_value ? `<span style="float:right; font-size:0.75rem; background:#fff; padding:2px 8px; border-radius:12px; border:1px solid ${borders[sev]}50; color:${borders[sev]};">Trigger: ${rec.trigger_value} ${rec.reference_range ? `(Ref: ${rec.reference_range})` : ''}</span>` : '';
+
+                    html += `
+                    <div style="background:${colors[sev]}; border-left:4px solid ${borders[sev]}; padding:12px; border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+                        <div style="font-weight:600; font-size:0.9rem; margin-bottom:4px; display:flex; align-items:center;">
+                            <i class="fas ${icons[sev]}" style="color:${iconColors[sev]}; margin-right:8px;"></i>
+                            ${rec.metric}
+                            <span style="flex-grow:1;"></span>
+                            ${triggerHtml}
+                        </div>
+                        <p style="font-size:0.85rem; color:var(--text); margin-bottom:8px;">${rec.message}</p>
+                        ${actionsHtml ? `<ul style="font-size:0.8rem; color:var(--muted); list-style:none; padding-left:4px;">${actionsHtml}</ul>` : ''}
+                    </div>`;
+                });
+            }
+        });
+
+        html += `</div>`;
+        container.innerHTML = html;
+    };
+
 
     $('btnRefresh')?.addEventListener('click', () => {
         if (selectedRecipientId) { loadReports(); loadClinicalData(); }

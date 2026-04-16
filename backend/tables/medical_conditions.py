@@ -182,6 +182,11 @@ class LabValue(Base):
 
     recorded_date = Column(Date, nullable=False)
 
+    # Traceability (v2 pipeline)
+    source_text = Column(Text, nullable=True)                       # Exact line from report that produced this value
+    confidence_score = Column(Float, nullable=True, default=0.9)    # 0.0–1.0: regex=0.95, fuzzy=0.82, llm=0.65
+    extraction_source = Column(String, nullable=True, default="regex")  # 'regex' | 'fuzzy' | 'llm' | 'template'
+
     # Relationships
     care_recipient = relationship("CareRecipient", back_populates="lab_values")
     report = relationship("MedicalReport", foreign_keys=[report_id])

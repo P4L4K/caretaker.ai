@@ -193,7 +193,7 @@ Medical Document:
         try:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-2.5-flash')
+            model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content(prompt)
             print('[summarizer] Clinical extraction via genai library successful')
             return response.text if response.text else ''
@@ -585,7 +585,7 @@ def chat_with_patient_ai(patient_context: dict, chat_history: list, user_message
     })
     
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
         headers = {'Content-Type': 'application/json'}
         
         payload = {

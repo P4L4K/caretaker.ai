@@ -840,15 +840,25 @@ async def get_care_recipient_profile(
         } for r in reports_raw
     ]
 
-    # 8. Test Trends (Lab Results)
-    labs_raw = db.query(LabValue).filter(LabValue.care_recipient_id == recipient_id).order_by(LabValue.recorded_date).all()
+    # 8. Test Trends (Lab Results) — Joined with Reports for authoritative chronological ordering
+    from tables.medical_reports import MedicalReport
+    labs_raw = db.query(LabValue).outerjoin(
+        MedicalReport, LabValue.report_id == MedicalReport.id
+    ).filter(
+        LabValue.care_recipient_id == recipient_id
+    ).order_by(
+        MedicalReport.report_date.asc(),
+        LabValue.recorded_date.asc(),
+        LabValue.id.asc()
+    ).all()
+
     test_trends = [
         {
             "id": l.id,
             "test_name": l.metric_name,
             "test_value": l.normalized_value,
             "test_unit": l.normalized_unit,
-            "test_date": str(l.recorded_date) if l.recorded_date else None,
+            "test_date": str(l.recorded_date or (l.report.report_date if l.report else None)),
             "is_abnormal": l.is_abnormal,
             "report_id": l.report_id,
             "reference_low": l.reference_range_low,

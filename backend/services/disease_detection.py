@@ -185,11 +185,19 @@ def _check_detection_rules(metric_name: str, value: float) -> list:
     rules = {
         "HbA1c": [
             {"threshold": 6.5, "op": ">", "code": "E11", "name": "Type 2 Diabetes Mellitus",
-             "confidence": lambda v: min(0.6 + (v - 6.5) * 0.05, 0.85)}
+             "confidence": lambda v: min(0.6 + (v - 6.5) * 0.05, 0.85)},
+            {"threshold": 5.7, "op": ">", "code": "E11", "name": "Prediabetes",
+             "confidence": lambda v: 0.5}
         ],
         "Fasting Glucose": [
             {"threshold": 126, "op": ">", "code": "E11", "name": "Type 2 Diabetes Mellitus",
-             "confidence": lambda v: min(0.55 + (v - 126) * 0.002, 0.8)}
+             "confidence": lambda v: min(0.55 + (v - 126) * 0.002, 0.8)},
+            {"threshold": 100, "op": ">", "code": "E11", "name": "Prediabetes",
+             "confidence": lambda v: 0.5}
+        ],
+        "Post-Prandial Glucose": [
+            {"threshold": 200, "op": ">", "code": "E11", "name": "Type 2 Diabetes Mellitus",
+             "confidence": lambda v: 0.6}
         ],
         "Systolic BP": [
             {"threshold": 140, "op": ">", "code": "I10", "name": "Hypertension",
@@ -204,8 +212,12 @@ def _check_detection_rules(metric_name: str, value: float) -> list:
              "confidence": lambda v: min(0.55 + (v - 240) * 0.003, 0.8)}
         ],
         "LDL": [
-            {"threshold": 160, "op": ">", "code": "E78", "name": "Hyperlipidemia",
-             "confidence": lambda v: min(0.55 + (v - 160) * 0.003, 0.8)}
+            {"threshold": 130, "op": ">", "code": "E78", "name": "Hyperlipidemia",
+             "confidence": lambda v: min(0.55 + (v - 130) * 0.003, 0.8)}
+        ],
+        "Triglycerides": [
+            {"threshold": 200, "op": ">", "code": "E78", "name": "Hyperlipidemia",
+             "confidence": lambda v: 0.6}
         ],
         "Creatinine": [
             {"threshold": 1.3, "op": ">", "code": "N18", "name": "Chronic Kidney Disease",
@@ -222,8 +234,8 @@ def _check_detection_rules(metric_name: str, value: float) -> list:
              "confidence": lambda v: min(0.55 + (0.4 - v) * 0.1, 0.8)}
         ],
         "Hemoglobin": [
-            {"threshold": 12.0, "op": "<", "code": "D64", "name": "Anemia",
-             "confidence": lambda v: min(0.55 + (12.0 - v) * 0.05, 0.8)}
+            {"threshold": 13.0, "op": "<", "code": "D64", "name": "Anemia",
+             "confidence": lambda v: min(0.55 + (13.0 - v) * 0.05, 0.8)}
         ],
         "Uric Acid": [
             {"threshold": 7.0, "op": ">", "code": "E87", "name": "Hyperuricemia",
@@ -243,6 +255,7 @@ def _check_detection_rules(metric_name: str, value: float) -> list:
 
         if triggered:
             conf = rule["confidence"](value)
+            print(f"[disease_detection] RULE TRIGGERED: {metric_name}={value} matches {rule['name']}")
             results.append({
                 "disease_code": rule["code"],
                 "disease_name": rule["name"],

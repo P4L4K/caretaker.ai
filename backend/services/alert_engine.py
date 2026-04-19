@@ -263,13 +263,9 @@ def _build_alert(new_status: str, disease_name: str, interpretation: str) -> tup
 
 
 def _get_cooldown_days(disease_code: str, db: Session) -> int:
-    """Get cooldown days from disease dictionary, default 7."""
-    if not disease_code:
-        return 7
-    disease = db.query(DiseaseDictionary).filter(
-        DiseaseDictionary.code == disease_code
-    ).first()
-    return disease.alert_cooldown_days if disease else 7
+    """Get cooldown days from disease dictionary, default 1 (for testing/high responsiveness)."""
+    # Industry standard is 7-30 days, but for this demo/setup we want immediate feedback
+    return 1
 
 
 def _is_critical_value(metric_name: str, value: float) -> bool:

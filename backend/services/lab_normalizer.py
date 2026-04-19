@@ -37,6 +37,8 @@ METRIC_ALIASES: dict[str, str] = {
     "hb a1c":                       "HbA1c",
     "glycohemoglobin":              "HbA1c",
     "gh":                           "HbA1c",
+    "hba1c (ifcc)":                 "HbA1c",
+    "hba1c, glycated hemoglobin":   "HbA1c",
 
     # ── Blood Pressure ─────────────────────────────────────────────
     "systolic bp":                  "Systolic BP",
@@ -50,6 +52,8 @@ METRIC_ALIASES: dict[str, str] = {
     "total cholesterol":            "Total Cholesterol",
     "cholesterol":                  "Total Cholesterol",
     "cholesterol total":            "Total Cholesterol",
+    "s. cholesterol":               "Total Cholesterol",
+    "serum cholesterol":            "Total Cholesterol",
     "ldl cholesterol":              "LDL",
     "ldl-c":                        "LDL",
     "low density lipoprotein":      "LDL",
@@ -66,15 +70,18 @@ METRIC_ALIASES: dict[str, str] = {
     "creatinine":                   "Creatinine",
     "creatinine, serum":            "Creatinine",
     "serum creatinine":             "Creatinine",
+    "s. creatinine":                "Creatinine",
     "urea":                         "BUN",
     "blood urea nitrogen":          "BUN",
     "bun":                          "BUN",
     "blood urea":                   "BUN",
+    "s. urea":                      "BUN",
     "egfr":                         "eGFR",
     "gfr estimated":                "eGFR",
     "estimated gfr":                "eGFR",
     "uric acid":                    "Uric Acid",
     "serum uric acid":              "Uric Acid",
+    "s. uric acid":                 "Uric Acid",
     "microalbumin":                 "Microalbumin",
     "urine microalbumin":           "Microalbumin",
 
@@ -112,18 +119,23 @@ METRIC_ALIASES: dict[str, str] = {
     "sgpt":                         "ALT",
     "alt":                          "ALT",
     "alanine aminotransferase":     "ALT",
+    "sgpt (alt)":                   "ALT",
     "sgot":                         "AST",
     "ast":                          "AST",
     "aspartate aminotransferase":   "AST",
+    "sgot (ast)":                   "AST",
     "alkaline phosphatase":         "ALP",
     "alp":                          "ALP",
     "total bilirubin":              "Bilirubin Total",
     "bilirubin total":              "Bilirubin Total",
+    "s. bilirubin":                 "Bilirubin Total",
     "direct bilirubin":             "Bilirubin Direct",
     "bilirubin direct":             "Bilirubin Direct",
     "indirect bilirubin":           "Bilirubin Indirect",
     "total protein":                "Total Protein",
+    "s. protein":                   "Total Protein",
     "albumin":                      "Albumin",
+    "s. albumin":                   "Albumin",
     "globulin":                     "Globulin",
     "ggtp":                         "GGT",
     "ggt":                          "GGT",
@@ -157,7 +169,9 @@ METRIC_ALIASES: dict[str, str] = {
     "serum calcium":                "Calcium",
     "phosphorus":                   "Phosphorus",
     "potassium":                    "Potassium",
+    "s. potassium":                 "Potassium",
     "sodium":                       "Sodium",
+    "s. sodium":                    "Sodium",
     "chloride":                     "Chloride",
 
     # ── Inflammatory / Other ───────────────────────────────────────
@@ -165,7 +179,6 @@ METRIC_ALIASES: dict[str, str] = {
     "c-reactive protein":           "CRP",
     "esr":                          "ESR",
     "erythrocyte sedimentation rate": "ESR",
-    "hba1c (ifcc)":                 "HbA1c",
 }
 
 
@@ -303,24 +316,29 @@ def canonicalize_metric_name(raw_name: str) -> Optional[str]:
 
     Tries:
       1. Direct lower-case lookup
-      2. Strip trailing punctuation / numbers
-      3. Return None if unmappable (caller decides whether to LLM-fallback)
+      2. Strip trailing punctuation / numbers / units
+      3. Return None if unmappable
     """
     if not raw_name:
         return None
+        
     normalized = raw_name.strip().lower()
-    # Direct match
+    
+    # ── Layer 1: Clean known pollution ──
+    # Strip common OCR trailing junk: "Creatinine 0.95 mg/dl" -> "Creatinine"
+    import re
+    cleaned = re.sub(r"\s+[\d\.].*$", "", normalized).strip() # Stop at first number
+    cleaned = re.sub(r"\s+\(.*\)\s*$", "", cleaned).strip()   # Drop trailing parens
+    cleaned = cleaned.rstrip(".,;:- ")
+    
+    # ── Layer 2: Direct match ──
+    if cleaned in METRIC_ALIASES:
+        return METRIC_ALIASES[cleaned]
+        
+    # ── Layer 3: Legacy lookups ──
     if normalized in METRIC_ALIASES:
         return METRIC_ALIASES[normalized]
-    # Strip trailing punctuation / extra words
-    shorter = normalized.rstrip(".,;:-").strip()
-    if shorter in METRIC_ALIASES:
-        return METRIC_ALIASES[shorter]
-    # Try dropping content in parentheses
-    import re
-    no_parens = re.sub(r"\s*\(.*?\)", "", normalized).strip()
-    if no_parens in METRIC_ALIASES:
-        return METRIC_ALIASES[no_parens]
+        
     return None
 
 
@@ -394,47 +412,56 @@ def normalize_and_validate(
     raw_value: float,
     raw_unit: str,
     source: str = "regex",
+    db: Session = None,
 ) -> Optional[dict]:
     """Run the full normalization + validation for a single extracted lab value.
-
-    Returns a dict ready for DB insertion, or None if the value is rejected.
-
-    Output dict keys:
-        metric_name       – canonical name
-        metric_value      – original raw value
-        unit              – original unit
-        normalized_value  – value in standard unit
-        normalized_unit   – standard unit string
-        confidence_score  – 0.0–1.0
-        is_valid          – always True (invalid values return None)
+    
+    Industry-level design:
+    - Checks static ALIASES
+    - Checks database MAPPINGS (LabParameterMapping)
+    - Checks fuzzy matching
+    - FLAGS instead of REJECTS (mostly)
     """
-    # 1. Canonicalize name (deterministic first)
+    # ── Step 1: Canonicalize name ───────────────────────────────────────────
     canonical = canonicalize_metric_name(raw_name)
     extraction_source = source
     fuzzy_score = None
+    is_mapped = True
+    needs_review = False
 
     if canonical is None:
-        # Try fuzzy
-        fuzzy_result = canonicalize_metric_name_fuzzy(raw_name)
-        if fuzzy_result:
-            canonical, fuzzy_score = fuzzy_result
-            extraction_source = "fuzzy"
-        else:
-            # Completely unmappable — caller should try LLM fallback
-            return None
+        # Check DB mappings if session provided
+        if db:
+            from tables.medical_conditions import LabParameterMapping
+            db_map = db.query(LabParameterMapping).filter(
+                LabParameterMapping.raw_name == raw_name
+            ).first()
+            if db_map:
+                canonical = db_map.canonical_name
+        
+        if not canonical:
+            # Try fuzzy
+            fuzzy_result = canonicalize_metric_name_fuzzy(raw_name)
+            if fuzzy_result:
+                canonical, fuzzy_score = fuzzy_result
+                extraction_source = "fuzzy"
+            else:
+                # Still no match? Save as-is but flag as unmapped
+                canonical = raw_name.strip()
+                is_mapped = False
 
-    # 2. Normalize unit and convert if needed
-    norm_value, norm_unit = convert_unit_if_needed(canonical, raw_value, raw_unit)
+    # ── Step 2: Normalize unit and convert if needed ────────────────────────
+    # If unmapped, skip conversion
+    norm_value, norm_unit = raw_value, normalize_unit(raw_unit)
+    if is_mapped:
+        norm_value, norm_unit = convert_unit_if_needed(canonical, raw_value, raw_unit)
 
-    # 3. Physiological validation
-    if not is_physiologically_valid(canonical, norm_value, norm_unit):
-        print(
-            f"[normalizer] ❌ Rejected {canonical}={norm_value} {norm_unit} "
-            f"(out of physiological range)"
-        )
-        return None
+    # ── Step 3: Physiological validation ────────────────────────────────────
+    if is_mapped and not is_physiologically_valid(canonical, norm_value, norm_unit):
+        print(f"[normalizer] ⚠️ Flagging outlier: {canonical}={norm_value} {norm_unit}")
+        needs_review = True  # Flag it but allow storage
 
-    # 4. Confidence score
+    # ── Step 4: Confidence score ────────────────────────────────────────────
     conf = confidence_for_source(extraction_source)
     if fuzzy_score and extraction_source == "fuzzy":
         conf = min(conf, fuzzy_score)
@@ -447,4 +474,6 @@ def normalize_and_validate(
         "normalized_unit":  norm_unit,
         "confidence_score": round(conf, 3),
         "extraction_source": extraction_source,
+        "is_mapped":        is_mapped,
+        "needs_review":     needs_review,
     }

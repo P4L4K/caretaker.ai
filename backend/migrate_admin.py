@@ -41,20 +41,30 @@ def run():
     # 3. Seed default admin if not already present
     db = SessionLocal()
     try:
-        existing_admin = db.query(Admin).filter(Admin.username == "admin").first()
+        # Load from env or use defaults
+        admin_user = os.getenv("ADMIN_USERNAME", "admin")
+        admin_pass = os.getenv("ADMIN_PASSWORD", "caretaker")
+        
+        existing_admin = db.query(Admin).filter(Admin.username == admin_user).first()
         if not existing_admin:
             admin = Admin(
-                username="admin",
+                username=admin_user,
                 email="admin@caretaker.ai",
-                password="caretaker",
+                password=admin_pass,
                 full_name="Platform Admin",
                 is_super_admin=True
             )
             db.add(admin)
             db.commit()
-            print("[OK] Default admin created: username=admin  password=caretaker")
+            print(f"[OK] Default admin created: username={admin_user}  password={'*' * len(admin_pass)}")
         else:
-            print("[INFO] Admin 'admin' already exists -- skipping seed.")
+            # Synchronize password if it differs from ENV
+            if existing_admin.password != admin_pass:
+                existing_admin.password = admin_pass
+                db.commit()
+                print(f"[OK] Admin '{admin_user}' password updated to match .env configuration.")
+            else:
+                print(f"[INFO] Admin '{admin_user}' already exists and matches .env -- skipping seed.")
     finally:
         db.close()
 

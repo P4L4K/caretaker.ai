@@ -163,7 +163,8 @@ class LabValue(Base):
     )
 
     # Metric data — raw as reported
-    metric_name = Column(String, nullable=False, index=True)        # e.g. "HbA1c", "Fasting Glucose"
+    metric_name = Column(String, nullable=False, index=True)        # Canonical name (e.g. "HbA1c")
+    raw_metric_name = Column(String, nullable=True)                 # Original name as it appeared in report
     metric_value = Column(Float, nullable=False)                    # Raw value
     unit = Column(String, nullable=True)                            # Raw unit as reported
 
@@ -175,6 +176,10 @@ class LabValue(Base):
     reference_range_low = Column(Float, nullable=True)
     reference_range_high = Column(Float, nullable=True)
     is_abnormal = Column(Boolean, default=False)
+    
+    # Mapping status (Industry-level design)
+    is_mapped = Column(Boolean, default=True)                       # False if name is unknown
+    needs_review = Column(Boolean, default=False)                   # True if value is physiologically weird
 
     # Change tracking
     pct_change_from_previous = Column(Float, nullable=True)         # % change since last reading
@@ -184,12 +189,26 @@ class LabValue(Base):
 
     # Traceability (v2 pipeline)
     source_text = Column(Text, nullable=True)                       # Exact line from report that produced this value
-    confidence_score = Column(Float, nullable=True, default=0.9)    # 0.0–1.0: regex=0.95, fuzzy=0.82, llm=0.65
-    extraction_source = Column(String, nullable=True, default="regex")  # 'regex' | 'fuzzy' | 'llm' | 'template'
+    confidence_score = Column(Float, nullable=True, default=0.9)    # 0.0–1.0
+    extraction_source = Column(String, nullable=True, default="regex")
 
     # Relationships
     care_recipient = relationship("CareRecipient", back_populates="lab_values")
     report = relationship("MedicalReport", foreign_keys=[report_id])
+
+
+# ---------- Lab Parameter Mappings (Learning Layer) ----------
+
+class LabParameterMapping(Base):
+    """Stores manual or learned mappings from report-text to canonical metrics."""
+    __tablename__ = "lab_parameter_mappings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    raw_name = Column(String, unique=True, nullable=False, index=True)  # e.g. "S. Creatinine"
+    canonical_name = Column(String, nullable=False, index=True)         # e.g. "Creatinine"
+    
+    is_approved = Column(Boolean, default=False)                        # True if admin/user confirmed
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
 # ---------- Medical Alerts ----------

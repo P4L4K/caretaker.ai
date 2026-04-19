@@ -272,7 +272,8 @@ def analyze_progression(
         # Get previous values for this metric
         prev_labs = db.query(LabValue).filter(
             LabValue.care_recipient_id == recipient_id,
-            LabValue.metric_name == metric_name
+            LabValue.metric_name == metric_name,
+            LabValue.report_id != report_id
         ).order_by(desc(LabValue.recorded_date)).limit(10).all()
 
         prev_values = [l.normalized_value for l in reversed(prev_labs)]
@@ -299,28 +300,24 @@ def analyze_progression(
                     pct_baseline = round(((norm_val - cond.baseline_value) / abs(cond.baseline_value)) * 100, 2)
                 break
 
-        # Determine if abnormal (simplified: check against known thresholds)
+        # Determination of abnormal (simplified: check against known thresholds)
         is_abnormal = _is_abnormal(metric_name, norm_val)
 
         # Get or compute reference range
         ref_low, ref_high = _get_reference_range(metric_name)
 
-        lab_record = LabValue(
-            care_recipient_id=recipient_id,
-            report_id=report_id,
-            metric_name=metric_name,
-            metric_value=raw_value,
-            unit=raw_unit,
-            normalized_value=norm_val,
-            normalized_unit=norm_unit,
-            reference_range_low=ref_low,
-            reference_range_high=ref_high,
-            is_abnormal=is_abnormal,
-            pct_change_from_previous=pct_prev,
-            pct_change_from_baseline=pct_baseline,
-            recorded_date=report_date
-        )
-        db.add(lab_record)
+        # Update existing LabValue record (saved by ingestion) with calculated trends
+        existing_lv = db.query(LabValue).filter(
+            LabValue.report_id == report_id,
+            LabValue.metric_name == metric_name
+        ).first()
+        if existing_lv:
+            existing_lv.pct_change_from_previous = pct_prev
+            existing_lv.pct_change_from_baseline = pct_baseline
+            # Safety Net: If ingestion didn't have a range, use system standard range to flag
+            if not existing_lv.is_abnormal and is_abnormal:
+                existing_lv.is_abnormal = True
+
         result["new_lab_values"].append({
             "metric": metric_name,
             "value": norm_val,

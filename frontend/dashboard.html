@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -1134,6 +1134,107 @@
                 max-height: none;
             }
         }
+        /* Vitals Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(8px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal-card {
+            background: white;
+            width: 100%;
+            max-width: 500px;
+            border-radius: 28px;
+            padding: 32px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+            position: relative;
+            animation: slideUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text);
+        }
+
+        .close-modal {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            color: var(--muted);
+            cursor: pointer;
+            padding: 4px;
+        }
+
+        .vitals-form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-group label {
+            font-size: 0.75rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            color: var(--muted);
+            letter-spacing: 0.05em;
+        }
+
+        .form-group input {
+            padding: 12px 16px;
+            border-radius: 12px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            background: #f8fafc;
+            font-size: 0.95rem;
+            transition: all 0.2s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--accent);
+            background: white;
+            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+        }
+
+        .modal-footer {
+            margin-top: 32px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(30px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
     </style>
     <!-- Socket.IO config for live alerts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
@@ -1271,8 +1372,14 @@
                         <p class="eyebrow">Health Signals</p>
                         <h2>Vitals & Sensor Status</h2>
                     </div>
-                    <div class="status-pill">
-                        Updated: <span id="last-updated">--</span>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <div class="status-pill">
+                            Updated: <span id="last-updated">--</span>
+                        </div>
+                        <button class="primary-btn" onclick="openVitalsModal()" 
+                            style="padding: 8px 16px; font-size: 0.85rem; display: flex; align-items: center; gap: 8px; border-radius: 12px;">
+                            <i class="fas fa-edit"></i> Log Vitals
+                        </button>
                     </div>
                 </div>
 
@@ -1540,6 +1647,55 @@
         </main>
     </div>
 
+    <!-- Manual Vitals Modal -->
+    <div id="vitalsModal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3><i class="fas fa-heartbeat" style="color: var(--accent);"></i> Log Today's Vitals</h3>
+                <button class="close-modal" onclick="closeVitalsModal()">&times;</button>
+            </div>
+            <form id="vitalsForm" onsubmit="event.preventDefault(); saveVitals();">
+                <div class="vitals-form-grid">
+                    <div class="form-group">
+                        <label>Heart Rate (bpm)</label>
+                        <input type="number" id="input-hr" placeholder="e.g. 85">
+                    </div>
+                    <div class="form-group">
+                        <label>SpO2 (%)</label>
+                        <input type="number" id="input-o2" placeholder="e.g. 97">
+                    </div>
+                    <div class="form-group">
+                        <label>Systolic BP (mmHg)</label>
+                        <input type="number" id="input-sys" placeholder="e.g. 140">
+                    </div>
+                    <div class="form-group">
+                        <label>Diastolic BP (mmHg)</label>
+                        <input type="number" id="input-dia" placeholder="e.g. 90">
+                    </div>
+                    <div class="form-group">
+                        <label>Temperature (Â°F)</label>
+                        <input type="number" step="0.1" id="input-temp" placeholder="e.g. 98.6">
+                    </div>
+                    <div class="form-group">
+                        <label>Sleep (Score)</label>
+                        <input type="number" id="input-sleep" placeholder="e.g. 85">
+                    </div>
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label>Weight (kg) <span style="font-weight: 400; text-transform: none;">â€” updates profile</span></label>
+                        <input type="number" step="0.1" id="input-weight" placeholder="e.g. 72">
+                        <p style="font-size: 0.7rem; color: var(--muted); margin-top: 6px;">
+                            <i class="fas fa-info-circle"></i> BMI auto-calculates from profile height + current weight.
+                        </p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="ghost-btn" onclick="closeVitalsModal()">Cancel</button>
+                    <button type="submit" class="primary-btn" id="saveVitalsBtn">Save Vitals</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/speech-commands"></script>
     <script>
@@ -1707,7 +1863,11 @@
 
         function selectRecipient(id, name) {
             selectedRecipientId = id;
-            localStorage.setItem('selectedRecipientId', id);
+            if (id) {
+                localStorage.setItem('selectedRecipientId', id);
+            } else {
+                localStorage.removeItem('selectedRecipientId');
+            }
             selectedRecipientName = name || 'All';
             const recipient = recipientsCache.find(r => String(r.id) === String(id));
 
@@ -2581,7 +2741,7 @@
             // Show chosen file name and enable upload button
             fileInput.addEventListener('change', () => {
                 const file = fileInput.files[0];
-                if (file) {
+                if (file && selectedRecipientId) {
                     fileNameEl.textContent = 'ðŸ“Ž ' + file.name;
                     fileNameEl.style.display = 'block';
                     uploadBtn.disabled = false;
@@ -2604,7 +2764,7 @@
             dropZone.addEventListener('drop', (e) => {
                 e.preventDefault();
                 const file = e.dataTransfer?.files?.[0];
-                if (file) {
+                if (file && selectedRecipientId) {
                     // Programmatically assign to the hidden input
                     const dt = new DataTransfer();
                     dt.items.add(file);
@@ -2612,6 +2772,8 @@
                     fileNameEl.textContent = 'ðŸ“Ž ' + file.name;
                     fileNameEl.style.display = 'block';
                     uploadBtn.disabled = false;
+                } else if (!selectedRecipientId) {
+                    alert('Please select a specific care recipient first.');
                 }
             });
 
@@ -3651,6 +3813,91 @@
 
         if (refreshAudioStatsBtn) {
             refreshAudioStatsBtn.addEventListener('click', fetchAudioAnalytics);
+        }
+
+        // --- Manual Vitals Functions ---
+        function openVitalsModal() {
+            if (!selectedRecipientId) {
+                showToast('Please select a recipient first', 'error');
+                return;
+            }
+            document.getElementById('vitalsModal').style.display = 'flex';
+            document.getElementById('vitalsForm').reset();
+            
+            // Pre-fill weight if available
+            const recipient = getSelectedRecipient();
+            if (recipient && recipient.weight) {
+                document.getElementById('input-weight').value = recipient.weight;
+            }
+        }
+
+        function closeVitalsModal() {
+            document.getElementById('vitalsModal').style.display = 'none';
+        }
+
+        async function saveVitals() {
+            const btn = document.getElementById('saveVitalsBtn');
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+
+            const payload = {
+                care_recipient_id: parseInt(selectedRecipientId),
+                heart_rate: parseInt(document.getElementById('input-hr').value) || null,
+                oxygen_saturation: parseInt(document.getElementById('input-o2').value) || null,
+                systolic_bp: parseInt(document.getElementById('input-sys').value) || null,
+                diastolic_bp: parseInt(document.getElementById('input-dia').value) || null,
+                temperature: parseFloat(document.getElementById('input-temp').value) || null,
+                sleep_score: parseInt(document.getElementById('input-sleep').value) || null,
+                weight: parseFloat(document.getElementById('input-weight').value) || null
+            };
+
+            try {
+                const res = await fetch(`${API_BASE}/vitals/manual`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!res.ok) throw new Error('Failed to save vitals');
+                
+                showToast('Vitals recorded successfully', 'success');
+                closeVitalsModal();
+                
+                // Refresh profile to get updated vitals/weight in cache
+                await fetchProfile();
+                
+                // Re-select to trigger UI updates
+                if (selectedRecipientId) {
+                    selectRecipient(selectedRecipientId, selectedRecipientName);
+                }
+
+            } catch (err) {
+                console.error('Error saving vitals:', err);
+                showToast('Error: ' + err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('uploadToast');
+            const icon = document.getElementById('toastIcon');
+            const msg = document.getElementById('toastMessage');
+            
+            if (!toast) return;
+
+            msg.textContent = message;
+            icon.textContent = type === 'success' ? '✓' : '✕';
+            toast.className = 'show ' + type;
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
         }
 
         fetchProfile();

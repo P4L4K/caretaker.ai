@@ -96,7 +96,11 @@
     function selectRecipient(id, name) {
         selectedRecipientId = id;
         selectedRecipientName = name || '';
-        localStorage.setItem('selectedRecipientId', id);
+        if (id) {
+            localStorage.setItem('selectedRecipientId', id);
+        } else {
+            localStorage.removeItem('selectedRecipientId');
+        }
         $('headerRecipientName').textContent = name || 'All';
         $('btnRunAnalysis').disabled = !id;
         $('btnRefresh').disabled = !id;
@@ -126,7 +130,7 @@
 
     fileInput?.addEventListener('change', () => {
         const f = fileInput.files[0];
-        if (f) { fileNameEl.textContent = f.name; fileNameEl.style.display = 'block'; uploadBtn.disabled = false; }
+        if (f && selectedRecipientId) { fileNameEl.textContent = f.name; fileNameEl.style.display = 'block'; uploadBtn.disabled = false; }
         else { fileNameEl.style.display = 'none'; uploadBtn.disabled = true; }
     });
 
@@ -135,9 +139,11 @@
     dropZone?.addEventListener('drop', e => {
         e.preventDefault();
         const f = e.dataTransfer?.files?.[0];
-        if (f) {
+        if (f && selectedRecipientId) {
             const dt = new DataTransfer(); dt.items.add(f); fileInput.files = dt.files;
             fileNameEl.textContent = f.name; fileNameEl.style.display = 'block'; uploadBtn.disabled = false;
+        } else if (!selectedRecipientId) {
+            showToast('Please select a recipient first', 'error');
         }
     });
 

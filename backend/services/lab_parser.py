@@ -100,15 +100,12 @@ def classify_section(line: str) -> Optional[str]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Master pattern:  TestName   Value   [Unit]   [Reference]
-# Handles:
-#   Creatinine          0.95    mg/dL     0.70 - 1.30
-#   Creatinine          0.95
-#   HbA1c 8.2 % 4.0 - 5.6
+# Refined to stop capturing name as soon as a numeric-ish value is found.
 _MASTER_LAB = re.compile(
-    r"^"
-    r"(?P<name>[A-Za-z][A-Za-z0-9 /(),\-\.]{2,40}?)"   # Test name (letters, spaces, parens)
-    r"\s+"                                             # 1+ spaces (relaxed from 2+)
-    r"(?P<value>[<>]?\d+(?:\.\d+)?)"                   # Numeric value (optional < or >)
+    r"^\s*[\*\|-]?\s*"                                 # Optional leading bullet, pipe, or dash
+    r"(?P<name>[A-Za-z0-9][A-Za-z0-9 /(),\-\.]{1,40}?(?=:?\s*[<>]?\d))" # Non-greedy name, stops before value
+    r"\s*[:\-]?\s*"                                    # Separator (colon, dash, or whitespace)
+    r"(?P<value>[<>]?\d+(?:\.\d+)?)"                   # Numeric value
     r"(?:\s+(?P<unit>[A-Za-z%/^µ³²·\d\.]+(?:/[A-Za-z³²µ\d\.]+)?))?"  # Optional Unit
     r"(?:\s+(?P<range>[<>]?\d[\d\.\-\s<>]+))?",        # Optional reference range
     re.IGNORECASE,
@@ -277,9 +274,10 @@ def extract_line(line: str) -> list[dict]:
     row = _extract_inline_labeled(line)
     if row:
         results.append(row)
-        return results
 
-    return []
+    # Filter results to ensure they look like actual medical metrics (not 'Age', 'Block-E', etc.)
+    final_results = [r for r in results if is_valid_clinical_metric(r["raw_name"])]
+    return final_results
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -361,6 +359,26 @@ JSON array:"""
 # 5. MAIN ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  FILTERING & SAFETY
+# ══════════════════════════════════════════════════════════════════════════════
+
+INVALID_KEYWORDS = {
+    "age", "reported", "block", "sector", "gender", "name", "dr.", 
+    "laboratory", "sample", "patient", "mr.", "mrs.", "ms.", "collected",
+    "received", "ref. by", "ref by", "id:", "uid:", "phone", "email"
+}
+
+def is_valid_clinical_metric(name: str) -> bool:
+    """Return False if the name contains administrative noise."""
+    lower_name = name.lower()
+    # Check if any invalid keyword is a whole word or significant part
+    if any(word in lower_name for word in INVALID_KEYWORDS):
+        return False
+    # Clinical metrics usually have letters, numbers are usually values
+    if re.search(r"^\d+$", lower_name): return False # Pure numbers aren't names
+    return True
+
 def parse_report(raw_text: str) -> dict:
     """Full parsing pass on a raw medical report.
 
@@ -411,16 +429,15 @@ def parse_report(raw_text: str) -> dict:
     print(f"[lab_parser] Rule-extracted: {len(rows)} rows, {len(unresolved)} unresolved")
 
     # ── Step D: LLM fallback for leftovers ──────────────────────────────────
-    # Only trigger LLM if unresolved count is low enough to be worth it
+    # Only trigger LLM if we have meaningful lines but failed rule-extraction
     llm_rows = []
-    # Disable LLM fallback for benchmarking phase
-    if False and 0 < len(unresolved) <= 40:
+    if 0 < len(unresolved) <= 100:
         llm_rows = _llm_extract_ambiguous_lines(unresolved)
         for row in llm_rows:
             row["section"] = "GENERAL"
             row["source_text"] = ""
         rows.extend(llm_rows)
-        print(f"[lab_parser] LLM recovered: {len(llm_rows)} additional rows")
+        print(f"[lab_parser] AI fallback recovered: {len(llm_rows)} additional rows")
 
     return {
         "template":       template,

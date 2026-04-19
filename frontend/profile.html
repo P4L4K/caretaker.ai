@@ -693,8 +693,9 @@
             window.location.href = 'index.html';
         }
 
-        // Redirect if no recipient specified
-        if (!recipientId) {
+        // Redirect if no recipient specified or recipient is literal "null" string
+        if (!recipientId || recipientId === 'null') {
+            console.warn('[Profile] Invalid recipientId:', recipientId);
             window.location.href = 'dashboard.html';
         }
 
@@ -911,6 +912,19 @@
             `).join('');
         }
 
+        function timeAgo(dateString) {
+            if (!dateString) return 'Just now';
+            const date = new Date(dateString);
+            const seconds = Math.floor((new Date() - date) / 1000);
+            if (seconds < 60) return 'Just now';
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return `${minutes}m ago`;
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return `${hours}h ago`;
+            const days = Math.floor(hours / 24);
+            return `${days}d ago`;
+        }
+
         // Section: Actionable Recommendations
         async function loadRecommendations() {
             const el = document.getElementById('recommendationsList');
@@ -1005,17 +1019,25 @@
                     };
 
                     return `
-                    <div class="list-item" style="background:${colors[r.severity]}; border-left:4px solid ${borders[r.severity]}; padding:12px; margin-bottom:12px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
-                        <div style="font-weight:700; font-size:0.9rem; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
-                            <span><i class="fas ${icons[r.severity]}" style="color:${iconColors[r.severity]}; margin-right:6px;"></i> ${r.metric}</span>
-                            ${r.trigger_value ? `<span style="font-size:10px; opacity:0.6; background:rgba(0,0,0,0.05); padding:1px 6px; border-radius:4px;">${r.trigger_value} ${r.reference_range ? `(${r.reference_range})` : ''}</span>` : ''}
+                        <div class="list-item" style="border-left: 4px solid ${borders[r.severity]}; background: ${colors[r.severity]}50; padding: 16px; margin-bottom: 12px; border-radius: 12px; position: relative;">
+                            <div style="position: absolute; top: 12px; right: 12px; font-size: 0.65rem; color: var(--text-muted); font-weight: 500;">
+                                <i class="fas fa-clock" style="font-size: 0.8em;"></i> ${timeAgo(r.created_at)}
+                            </div>
+                            <div style="display:flex; gap:12px; align-items:flex-start;">
+                                <div style="width:32px; height:32px; border-radius:8px; background:${borders[r.severity]}; color:#fff; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                                    <i class="fas ${icons[r.severity]}"></i>
+                                </div>
+                                <div style="flex:1;">
+                                    <div style="font-weight:600; font-size:0.95rem; color:var(--text);">${r.metric} Insight</div>
+                                    <div style="font-size:0.85rem; color:var(--text-muted); margin-top:4px; line-height:1.4;">${r.message}</div>
+                                    
+                                    ${renderGroup(grouped.doctor, 'Clinical Action', 'fa-stethoscope')}
+                                    ${renderGroup(grouped.tests, 'Follow-up Diagnostics', 'fa-vial')}
+                                    ${renderGroup(grouped.lifestyle, 'Lifestyle & Management', 'fa-running')}
+                                </div>
+                            </div>
                         </div>
-                        <div style="font-size:0.82rem; color:var(--text); margin-bottom:8px; line-height:1.4;">${r.message}</div>
-                        
-                        ${renderGroup(grouped.doctor, 'Clinical Steps', 'fa-user-md')}
-                        ${renderGroup(grouped.lifestyle, 'Lifestyle & Remedy', 'fa-seedling')}
-                        ${renderGroup(grouped.tests, 'Follow-up', 'fa-vial')}
-                    </div>`;
+                    `;
                 }).join('');
 
             } catch (err) {

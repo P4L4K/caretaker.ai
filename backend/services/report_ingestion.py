@@ -82,25 +82,33 @@ def run_hybrid_lab_extraction(
 
     # ── Step 3: Normalize + validate each row ─────────────────────────────────
     validated_rows: list[dict] = []
+    rejected_rows: list[dict] = []
+    
     for row in raw_rows:
         norm = normalize_and_validate(
             raw_name=row.get("raw_name", ""),
             raw_value=row.get("value", 0.0),
             raw_unit=row.get("unit", ""),
             source=row.get("source", "regex"),
+            db=db
         )
         if norm is None:
-            continue   # Rejected by physiological guard or unmappable name
+            rejected_rows.append(row)
+            continue   
+            
         norm.update({
             "source_text":   row.get("source_text", ""),
             "ref_low":       row.get("ref_low"),
             "ref_high":      row.get("ref_high"),
             "section":       row.get("section", "GENERAL"),
             "report_date":   report_date,
+            "raw_metric_name": row.get("raw_name"),
         })
         validated_rows.append(norm)
 
-    print(f"[ingestion_v2] Validated: {len(validated_rows)} / {len(raw_rows)} rows")
+    print(f"[ingestion_v2] Funnel: {len(raw_rows)} raw -> {len(validated_rows)} validated -> {len(rejected_rows)} rejected")
+    if rejected_rows:
+        print(f"[ingestion_v2] REJECTED ROWS: {json.dumps(rejected_rows, indent=2)}")
 
     # ── Step 4: Save LabValues to DB ──────────────────────────────────────────
     saved_count = 0
@@ -176,6 +184,7 @@ def _save_lab_values(
             care_recipient_id   = care_recipient_id,
             report_id           = report_id,
             metric_name         = metric,
+            raw_metric_name     = row.get("raw_metric_name"),
             metric_value        = row["metric_value"],
             unit                = row["unit"],
             normalized_value    = norm_val,
@@ -183,6 +192,8 @@ def _save_lab_values(
             reference_range_low = ref_low,
             reference_range_high= ref_high,
             is_abnormal         = is_abnormal,
+            is_mapped           = row.get("is_mapped", True),
+            needs_review        = row.get("needs_review", False),
             recorded_date       = rec_date,
             source_text         = row.get("source_text", "")[:500] if row.get("source_text") else None,
             confidence_score    = row.get("confidence_score", 0.9),

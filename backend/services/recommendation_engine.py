@@ -350,25 +350,32 @@ def prioritize_and_dedup(alerts: List[Dict], db: Session, recipient_id: int, now
     # 2. Database 24hr deduping
     final_alerts = []
     for a in unique_alerts:
-        # Check if identical metric & severity emitted in last 24h
+        # Check if identical metric & severity emitted in last 24h with SAME value
         recent = db.query(MedicalRecommendation).filter(
             MedicalRecommendation.care_recipient_id == recipient_id,
             MedicalRecommendation.metric == a["metric"],
             MedicalRecommendation.severity == a["severity"],
             MedicalRecommendation.created_at >= now - datetime.timedelta(days=1)
-        ).first()
+        ).order_by(MedicalRecommendation.created_at.desc()).first()
         
+        # If no recent alert, OR recent alert has a DIFFERENT trigger value, allow it
         if not recent:
             final_alerts.append(a)
+        else:
+            # Allow update if value changed by more than 1%
+            old_val = recent.trigger_value
+            new_val = a["value"]
+            if old_val is None or new_val is None or abs(new_val - old_val) / (old_val or 1) > 0.01:
+                final_alerts.append(a)
             
     # 3. Sort by priority
     final_alerts.sort(key=lambda x: PRIORITY.get(x["severity"], 0), reverse=True)
     
-    # 4. Enforce UI limit cap (Max 2 criticals, max 5 total - Architect Rule #10)
-    criticals = [a for a in final_alerts if a["severity"] == "critical"][:2]
+    # 4. Enforce UI limit cap (Max 3 criticals, max 7 total - Expanded per user request)
+    criticals = [a for a in final_alerts if a["severity"] == "critical"][:3]
     others = [a for a in final_alerts if a["severity"] != "critical"]
     
-    capped = (criticals + others)[:5]
+    capped = (criticals + others)[:7]
     
     return capped
 
@@ -433,9 +440,12 @@ def generate_recommendations(recipient_id: int, db: Session):
     alerts = []
 
     # 2. Evaluate Individual Rules (against LATEST lab)
+    print(f"[recommendation_engine] Processing {len(latest_labs)} metrics for recipient {recipient_id}")
     for name, latest in latest_labs.items():
         val = latest["value"]
+        print(f"[recommendation_engine] Checking metric: {name} = {val} {latest.get('unit')}")
         
+        rule_matched = False
         for rule in RULES:
             if rule["metric"] == name:
                 matched = False
@@ -465,10 +475,33 @@ def generate_recommendations(recipient_id: int, db: Session):
                             
                         alerts.append(alert)
                         matched = True
+                        rule_matched = True
+                        print(f"[recommendation_engine] Matched rule for {name} (severity: {t['severity']})")
                         break # Only trigger highest matching severity per rule
                         
                 if matched:
                     break
+
+        # Fallback: If no clinical rule matched, but lab was flagged as abnormal
+        # check if it originated from a recent abnormal LabValue
+        if not rule_matched:
+            # We look back at the DB record for this specific metric
+            lab_record = db.query(LabValue).filter(
+                LabValue.care_recipient_id == recipient_id,
+                LabValue.metric_name == name
+            ).order_by(LabValue.recorded_date.desc()).first()
+            
+            if lab_record and lab_record.is_abnormal:
+                print(f"[recommendation_engine] Fallback: Abnormal lab detected for UNKNOWN metric {name}")
+                alerts.append({
+                    "metric": name,
+                    "severity": "medium",
+                    "message": f"Your {name} level ({val} {latest.get('unit')}) is outside the normal reference range.",
+                    "actions": [{"type": "doctor_visit", "text": "Consult doctor about abnormal lab results."}],
+                    "value": val,
+                    "reference": latest["ref"],
+                    "source": "abnormal_flag"
+                })
 
     # 3. Evaluate Combo Rules
     alerts.extend(evaluate_combinations(latest_labs))

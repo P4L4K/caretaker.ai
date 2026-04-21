@@ -962,6 +962,12 @@
             const ytSrc = `https://www.youtube.com/embed/${track.youtube_id}?autoplay=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`;
             const iframe = document.getElementById('yt-player');
 
+            state.ytStartMs = Date.now();
+            state.ytOffset = 0;
+            state.ytVolume = 100;
+            state.ytSpeed = 1.0;
+            state._ytVolumeBeforeMute = 100;
+
             if (state.cinemaMode) {
                 // Cinema is active — load into cinema player; keep small player hidden
                 document.getElementById('cinema-player').src = ytSrc;
@@ -971,6 +977,16 @@
                 iframe.src = ytSrc;
             }
             return true;
+        }
+
+        function seekYouTube(deltaSeconds) {
+            const iframe = document.getElementById(state.cinemaMode ? 'cinema-player' : 'yt-player');
+            if (!iframe || !state.youtubeMode) return;
+            const elapsed = (Date.now() - (state.ytStartMs || Date.now())) / 1000 + (state.ytOffset || 0);
+            const newPos = Math.max(0, elapsed + deltaSeconds);
+            state.ytOffset = newPos;
+            state.ytStartMs = Date.now();
+            iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [newPos, true] }), '*');
         }
 
         // Called when YouTube postMessage signals error 101/150 (video not embeddable)
@@ -1234,6 +1250,7 @@
             // Strip emoji from speech
             const cleanText = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
             if (!cleanText) return;
+            state.lastSpokenText = cleanText;
 
             setAvatarState('talking');
             // Safety fallback — stop talking animation if nothing ends it
@@ -1607,6 +1624,36 @@
             await playYouTubeSong(query, title, false);
         }
 
+        // ── VCE helper data ────────────────────────────────────────────────
+        const VCE_JOKES = [
+            'एक आदमी डॉक्टर के पास गया। डॉक्टर ने कहा — आपको बहुत कम बोलना चाहिए। आदमी बोला — ठीक है डॉक्टर, अब आप जा सकते हैं! 😄',
+            'शिक्षक — बच्चों, इंसान और जानवर में क्या फ़र्क है? एक बच्चा बोला — जानवर सर्दी में कोट नहीं पहनता। शिक्षक — और इंसान? बच्चा — इंसान कोट पहनता है लेकिन ज़िप नहीं लगाता! 😂',
+            'पत्नी — सुनो, पड़ोसी ने अपनी पत्नी को हीरे की अंगूठी दी। पति — हाँ तो? पत्नी — तुम भी कुछ दो। पति — ठीक है, पड़ोसी से माँगकर लाओ! 😅',
+            'Why don\'t scientists trust atoms? Because they make up everything! 😄',
+            'Doctor: You need to stop eating oily food. Patient: But my hands were clean! 😂',
+        ];
+        const VCE_QUOTES = [
+            'हर सुबह एक नया मौका है। जो कल हुआ उसे भूलो, आज से बेहतर शुरुआत करो। 🌅',
+            'मुश्किलें वो हैं जो हमें अंदर से मज़बूत बनाती हैं। आप उनसे बड़े हैं। 💪',
+            'ज़िंदगी में उम्र नहीं, हौसला मायने रखता है। आप जब तक मुस्कुराते हैं, जवान हैं। 😊',
+            'Every day is a gift. Breathe it in, smile, and be thankful for one more beautiful day. 🌸',
+            'You are stronger than you think. Keep going — the best is yet to come. ✨',
+            'खुश रहना सबसे बड़ी दवाई है। आज खूब हँसिए। 😄',
+        ];
+        const VCE_DOHAS = [
+            'कबीर कहते हैं — काल करे सो आज कर, आज करे सो अब। पल में परलय होएगी, बहुरि करेगा कब॥ 🙏',
+            'दुःख में सुमिरन सब करें, सुख में करे न कोय। जो सुख में सुमिरन करे, तो दुःख काहे होय॥ — कबीर 🕉️',
+            'रहिमन धागा प्रेम का, मत तोड़ो चटकाय। टूटे से फिर ना जुड़े, जुड़े गाँठ पड़ जाय॥ — रहीम 🌺',
+        ];
+        const VCE_BREATHING = [
+            '🌬️ साँस लेने की कसरत शुरू करते हैं।',
+            '1. नाक से धीरे-धीरे 4 तक गिनते हुए साँस लें।',
+            '2. 4 सेकंड साँस रोकें।',
+            '3. मुँह से धीरे-धीरे 6 तक गिनते हुए साँस छोड़ें।',
+            '4. यही 5 बार दोहराएँ। इससे मन शांत होगा। 😌',
+        ];
+        let _vceFontScale = 1.0;
+
         // ═══════════════════════════════════════════════════════════════════
         // VOICE COMMAND ENGINE (VCE)
         // Context-aware, multi-language — Hindi / English / Hinglish
@@ -1720,6 +1767,452 @@
                     'song badlo','video badlo','gaana badlo','change song',
                     'change video','kuch aur','koi aur','dusra wala','बदलो',
                 ],
+                skip_forward: [
+                    '20 second aage karo please','bees second skip karo',
+                    'thoda aage karo please','skip 20 seconds please',
+                    'forward 20 seconds please','20 sec aage karo',
+                    'aage skip karo please','video aage karo please',
+                    '20 second aage karo','skip karo please','aage karo please',
+                    'skip 20 seconds','forward 20 seconds','bees second aage',
+                    'thoda aage karo','20 second skip','aage skip karo',
+                    'skip aage','video aage karo','thoda aage','aage karo',
+                    'skip karo','20 second','२० सेकंड आगे करो','आगे करो','स्किप करो',
+                ],
+                skip_backward: [
+                    '20 second peeche karo please','bees second rewind karo',
+                    'thoda peeche karo please','rewind 20 seconds please',
+                    'back 20 seconds please','20 sec peeche karo',
+                    'peeche skip karo please','video peeche karo please',
+                    '20 second peeche karo','peeche karo please',
+                    'rewind 20 seconds','back 20 seconds','bees second peeche',
+                    'thoda peeche karo','20 second rewind','peeche skip karo',
+                    'rewind karo','peeche jao please','thoda peeche',
+                    '२० सेकंड पीछे करो','पीछे करो','रिवाइंड करो',
+                ],
+                volume_up: [
+                    'awaaz badhao please','thoda loud karo please',
+                    'volume badhao please','thodi zyada awaaz karo',
+                    'aur loud karo please','awaaz tez karo please',
+                    'awaaz badhao','volume badhao','loud karo','tez karo',
+                    'awaaz zyada karo','volume up karo','awaaz upar karo',
+                    'आवाज़ बढ़ाओ','आवाज़ तेज़ करो','वॉल्यूम बढ़ाओ',
+                    'volume up','louder please','louder','awaaz badha',
+                ],
+                volume_down: [
+                    'awaaz kam karo please','thoda dhima karo please',
+                    'volume kam karo please','thodi kam awaaz karo',
+                    'aur dhima karo please','awaaz dheemi karo please',
+                    'awaaz kam karo','volume kam karo','dhima karo',
+                    'awaaz thodi kam karo','volume down karo','awaaz neeche karo',
+                    'आवाज़ कम करो','आवाज़ धीमी करो','वॉल्यूम कम करो',
+                    'volume down','quieter please','quieter','awaaz kum',
+                ],
+                replay: [
+                    'ye dobara shuru se chalao please','wapas se shuru karo please',
+                    'shuru se bajao please','beginning se chalao please',
+                    'phir se shuru se sunao please','dobara shuru se chalao',
+                    'wapas shuru se chalao','shuru se bajao',
+                    'beginning se chalao','phir se start karo',
+                    'start from beginning','replay please','replay karo please',
+                    'replay karo','shuru se chalao','wapas se chalao',
+                    'शुरू से चलाओ','दोबारा शुरू से','फिर से शुरू करो',
+                    'replay','start over','from beginning',
+                ],
+                repeat_speech: [
+                    'dobara bolo please','ek baar aur bolo please',
+                    'phir se bolo please','wapas bolo please',
+                    'again please','please say again','repeat please',
+                    'kya bola aapne','kya kaha aapne','thoda aur bol sakte ho',
+                    'dobara bolo','ek baar aur bolo','fir bolo',
+                    'फिर से बोलो','दोबारा बोलो','एक बार और बोलो',
+                    'repeat','again','dobara bol','fir se bol',
+                ],
+                lang_hindi: [
+                    'hindi mein baat karo please','hindi mein bolo please',
+                    'ab hindi mein baat karo','hindi mein boliye please',
+                    'hindi language use karo','hindi pe switch karo',
+                    'hindi mein baat karo','hindi mein bolo',
+                    'हिंदी में बात करो','हिंदी में बोलो','हिंदी में',
+                    'switch to hindi','speak hindi','use hindi',
+                    'hindi bolo','hindi pe aa jao',
+                ],
+                lang_english: [
+                    'english mein baat karo please','english mein bolo please',
+                    'ab english mein baat karo','english language use karo',
+                    'english pe switch karo','speak in english please',
+                    'english mein baat karo','english mein bolo',
+                    'अंग्रेज़ी में बात करो','अंग्रेज़ी में बोलो',
+                    'switch to english','speak english','use english',
+                    'english bolo','english pe aa jao',
+                ],
+                show_help: [
+                    'kya kya kar sakte ho please','sari commands batao please',
+                    'help dikhao please','kya kar sakte ho batao',
+                    'commands list dikhao mujhe','mujhe help chahiye please',
+                    'kya kya kar sakte ho','sari commands batao',
+                    'help dikhao','kya kar sakte ho','list of commands',
+                    'what can you do','show me commands','what commands',
+                    'तुम क्या कर सकते हो','मदद चाहिए','हेल्प दिखाओ',
+                    'help batao','commands batao','kya karo tum',
+                ],
+                // ── Media shortcuts ──────────────────────────
+                play_bhajan: [
+                    'bhajan sunao please','aarti sunao please','pooja ka gana bajao',
+                    'dharmik gana sunao','bhajan aarti chalao','devotional music bajao',
+                    'mandir wala gana','bhajan sunao','aarti sunao','bhajan bajao',
+                    'धार्मिक गाना सुनाओ','भजन सुनाओ','आरती सुनाओ','भजन बजाओ',
+                    'bhajan','aarti','devotional','mandir ka gana',
+                ],
+                play_meditation_music: [
+                    'meditation music chalao please','yoga music bajao please',
+                    'relaxing music sunao','mann ko shant karne wali music',
+                    'dhyan ki music chalao','calm music bajao',
+                    'meditation music chalao','yoga music bajao','relaxing music',
+                    'मेडिटेशन म्यूज़िक','ध्यान की म्यूज़िक','रिलैक्सिंग म्यूज़िक',
+                    'meditation music','yoga music','calming music','relax music',
+                ],
+                play_classical: [
+                    'classical music bajao please','sitar bajao please',
+                    'shastriya sangit sunao','indian classical music chalao',
+                    'tabla sitar bajao','raag sunao',
+                    'classical music bajao','sitar bajao','shastriya sangit',
+                    'शास्त्रीय संगीत सुनाओ','सितार बजाओ','राग सुनाओ',
+                    'classical music','sitar music','raag music',
+                ],
+                play_ghazal: [
+                    'ghazal sunao please','urdu gana bajao please',
+                    'ghazal music chalao','soft ghazal sunao',
+                    'ghazal sunao','ghazal bajao','urdu song',
+                    'ग़ज़ल सुनाओ','उर्दू गाना','ग़ज़ल बजाओ',
+                    'ghazal','urdu gana','ghazal music',
+                ],
+                play_old_bollywood: [
+                    'purana bollywood gana sunao please','1970s songs bajao',
+                    'old hindi songs chalao','purane gaane sunao',
+                    'kishore kumar sunao','lata mangeshkar bajao',
+                    'purana bollywood gana','purane gaane','old songs bajao',
+                    'पुराना बॉलीवुड गाना','पुराने गाने सुनाओ','पुराना गाना',
+                    'purane gaane','old bollywood','purana gana',
+                ],
+                play_folk: [
+                    'lok sangeet sunao please','folk music bajao please',
+                    'desi gana chalao','lokgeet sunao',
+                    'lok sangeet sunao','folk music bajao','desi gana',
+                    'लोक संगीत सुनाओ','देसी गाना बजाओ','लोकगीत',
+                    'folk song','lok geet','desi music',
+                ],
+                play_news: [
+                    'aaj ki news sunao please','khabar sunao please',
+                    'samachar batao','latest news sunao',
+                    'aaj ki khabar kya hai','news sunao','khabar batao',
+                    'आज की खबर सुनाओ','समाचार सुनाओ','खबर बताओ',
+                    'news sunao','khabar sunao','samachar sunao','news batao',
+                ],
+                play_motivational: [
+                    'motivational speech sunao please','himmat wali baat sunao',
+                    'josh badhaao please','positive speech bajao',
+                    'motivation do mujhe','motivational video chalao',
+                    'motivational speech sunao','himmat wali baat','josh wala gana',
+                    'मोटिवेशनल स्पीच सुनाओ','हिम्मत बढ़ाओ','मोटिवेशन दो',
+                    'motivational','inspiration sunao','josh dilao',
+                ],
+                play_sleep_music: [
+                    'neend ke liye music chalao please','sone ka gana bajao',
+                    'lullaby sunao please','neend wali music chalao',
+                    'so jao music','sleep music bajao',
+                    'neend ke liye music','sone ka gana','neend wali music',
+                    'नींद के लिए म्यूज़िक','सोने का गाना','लोरी सुनाओ',
+                    'sleep music','lullaby','neend music','so jao music',
+                ],
+                play_ramayana: [
+                    'ramayan sunao please','ram katha sunao please',
+                    'ramayana chalao','shri ram ki katha sunao',
+                    'ramayan sunao','ram katha','ramayana bajao',
+                    'रामायण सुनाओ','राम कथा सुनाओ','रामचरित मानस',
+                    'ramayan','ram katha','ramayana',
+                ],
+                play_gita: [
+                    'bhagavad gita sunao please','gita ka pravachan sunao',
+                    'geeta sunao please','krishna ki baat sunao',
+                    'bhagavad gita sunao','gita sunao','geeta bajao',
+                    'भगवद गीता सुनाओ','गीता का प्रवचन','श्रीमद्भगवद्गीता',
+                    'bhagavad gita','geeta','gita pravachan',
+                ],
+                play_yoga_music: [
+                    'yoga ke liye music bajao','pranayam music chalao',
+                    'surya namaskar music','yoga session music',
+                    'yoga music chalao','pranayam music','surya namaskar music',
+                    'योग म्यूज़िक बजाओ','प्राणायाम म्यूज़िक',
+                    'yoga music','pranayam music','surya namaskar',
+                ],
+                shuffle_random: [
+                    'kuch bhi bajao please','random gana chalao please',
+                    'koi bhi song lao','surprise karo mujhe music se',
+                    'kuch bhi bajao','random gana chalao','surprise gana',
+                    'कुछ भी बजाओ','रैंडम गाना','सरप्राइज़ गाना',
+                    'random music','anything bajao','surprise song',
+                ],
+                mute_media: [
+                    'mute karo please','awaaz bilkul band karo',
+                    'zero awaaz karo','sound off karo please',
+                    'mute karo','awaaz band karo','sound mute karo',
+                    'आवाज़ बंद करो','म्यूट करो','साउंड बंद',
+                    'mute please','mute it','sound off','zero volume',
+                ],
+                unmute_media: [
+                    'unmute karo please','awaaz wapas lao please',
+                    'sound on karo','awaaz chalu karo wapas',
+                    'unmute karo','awaaz wapas','sound wapas lao',
+                    'आवाज़ वापस लाओ','अनम्यूट करो','साउंड चालू',
+                    'unmute please','unmute it','sound on','awaaz wapas',
+                ],
+                increase_speed: [
+                    'jaldi chalao please','speed badhao please',
+                    'tez chalao video ko','fast karo please',
+                    'jaldi chalao','speed badhao','tez karo',
+                    'जल्दी चलाओ','स्पीड बढ़ाओ','तेज़ चलाओ',
+                    'speed up','faster please','speed increase',
+                ],
+                decrease_speed: [
+                    'dheere chalao please','speed kam karo please',
+                    'slow karo video ko','aahista chalao please',
+                    'dheere chalao','speed kam karo','slow karo',
+                    'धीरे चलाओ','स्पीड कम करो','धीमा करो',
+                    'slow down','slower please','speed decrease',
+                ],
+                // ── Time & Date ────────────────────────────────
+                show_time: [
+                    'abhi kitne baje hain batao','time kya chal raha hai',
+                    'watch mein kya time hai','ghadi mein kya waqt hai',
+                    'kitne baje hain','time kya hai','abhi ka time batao',
+                    'अभी कितने बजे हैं','समय क्या है','टाइम बताओ',
+                    'what time is it','tell me the time','time batao','time please',
+                    'baje hain kitne','ghadi batao',
+                ],
+                show_date: [
+                    'aaj ki tarikh kya hai batao','aaj kaunsa din aur tarikh hai',
+                    'aaj ki date kya hai','mahina aur tarikh batao',
+                    'aaj ki tarikh','aaj kaunsa din hai','date batao',
+                    'आज की तारीख क्या है','आज कौन सा दिन है','तारीख बताओ',
+                    'what is today date','what day is today','date please',
+                    'tarikh batao','din batao','aaj ka din',
+                ],
+                show_weather: [
+                    'aaj ka mausam kaisa hai batao','barish hogi kya aaj',
+                    'weather kya hai aaj ka','baahar thanda hai kya',
+                    'aaj ka mausam','weather batao','mausam kaisa hai',
+                    'आज का मौसम कैसा है','बारिश होगी क्या','मौसम बताओ',
+                    'what is the weather','how is the weather today',
+                    'weather please','mausam batao','barish',
+                ],
+                // ── Alerts & Safety ────────────────────────────
+                trigger_alert: [
+                    'caretaker ko abhi alert bhejo please','nurse ko notify karo please',
+                    'ghar walo ko batao mujhare baare mein','alert send karo please',
+                    'caretaker ko alert bhejo','alert bhejo','notify karo caretaker ko',
+                    'केयरटेकर को अलर्ट भेजो','अलर्ट भेजो','नोटिफ़ाई करो',
+                    'send alert','alert caretaker','notify nurse','alert bhejo',
+                ],
+                cancel_alert: [
+                    'sab theek hai koi problem nahi','galti se button daba gaya',
+                    'false alarm tha sorry','alert cancel karo please',
+                    'sab theek hai','koi problem nahi','false alarm',
+                    'सब ठीक है','गलती हो गई','फ़ॉल्स अलार्म',
+                    'cancel alert','false alarm','i am okay now','all is well',
+                    'theek hoon main','koi baat nahi',
+                ],
+                show_emergency_info: [
+                    'emergency number batao please','ambulance ka number kya hai',
+                    'fire brigade number batao','helpline number batao',
+                    'emergency contacts dikhao','emergency number batao',
+                    'इमरजेंसी नंबर बताओ','एम्बुलेंस नंबर','हेल्पलाइन नंबर',
+                    'emergency number','helpline number','ambulance number',
+                ],
+                // ── Medicine ───────────────────────────────────
+                medicine_taken: [
+                    'maine abhi dawai le li please note karo','tablet kha li maine',
+                    'medicine le li meri','dawai pi li maine abhi',
+                    'dawai le li','tablet kha li','medicine le li',
+                    'मैंने दवाई ले ली','दवाई खा ली','टेबलेट ले ली',
+                    'medicine taken','tablet liya','dawai kha li','took medicine',
+                    'medicine kha li','tablet pi li',
+                ],
+                medicine_not_taken: [
+                    'dawai lena bhool gaya hoon','tablet nahi khai aaj',
+                    'medicine skip ho gayi','dawai nahi pi main',
+                    'dawai bhool gaya','tablet nahi khai','medicine skip hui',
+                    'दवाई लेना भूल गया','दवाई नहीं खाई','टेबलेट भूल गया',
+                    'missed medicine','forgot medicine','dawai bhool gaya',
+                ],
+                next_medicine: [
+                    'agli dawai kab leni hai batao','next dose ka time kya hai',
+                    'kitne baje leni hai dawai','next tablet kab',
+                    'agli dawai kab','next dose kab','dawai ka time batao',
+                    'अगली दवाई कब लेनी है','नेक्स्ट डोज़ कब है','दवाई का टाइम',
+                    'next medicine time','next dose','next tablet time',
+                ],
+                // ── Health & Mood Logging ──────────────────────
+                i_feel_good: [
+                    'aaj main bahut acha feel kar raha hoon','mujhe bahut acha lag raha hai',
+                    'tabiyat bilkul theek hai aaj','main bahut khush hoon aaj',
+                    'mujhe acha lag raha hai','acha feel kar raha hoon','theek hoon',
+                    'मुझे अच्छा लग रहा है','तबियत ठीक है','बहुत अच्छा लग रहा है',
+                    'feeling good','feeling great','i am good','i am fine',
+                    'khush hoon','bilkul theek hoon',
+                ],
+                i_feel_bad: [
+                    'aaj mujhe bilkul acha nahi lag raha','tabiyat kharab hai aaj',
+                    'mujhe bura feel ho raha hai','kuch theek nahi lag raha',
+                    'mujhe bura lag raha hai','tabiyat kharab hai','theek nahi hoon',
+                    'मुझे बुरा लग रहा है','तबियत ख़राब है','अच्छा नहीं लग रहा',
+                    'feeling bad','not feeling well','feeling sick','bura lag raha',
+                    'udaas hoon','theek nahi',
+                ],
+                i_feel_pain: [
+                    'mujhe dard ho raha hai please help','takleef ho rahi hai',
+                    'dard hai kaafi mujhe','badan mein dard hai',
+                    'dard ho raha hai','takleef hai','dard hai',
+                    'मुझे दर्द हो रहा है','तकलीफ़ है','दर्द है',
+                    'i am in pain','pain hai','dard ho raha','hurting',
+                ],
+                show_vitals: [
+                    'meri vitals dikhao please','blood pressure batao mera',
+                    'heart rate kya hai mera','oxygen level batao',
+                    'meri vitals dikhao','blood pressure batao','vitals check karo',
+                    'मेरी विटल्स दिखाओ','ब्लड प्रेशर बताओ','ऑक्सीजन लेवल',
+                    'show vitals','my vitals','blood pressure','heart rate',
+                    'oxygen level','bp batao',
+                ],
+                // ── UI Navigation ──────────────────────────────
+                scroll_top: [
+                    'page ke upar chalo please','upar scroll karo please',
+                    'top pe le jao','page ka upar dikhao',
+                    'upar jao','top pe jao','scroll up karo',
+                    'ऊपर जाओ','पेज के ऊपर जाओ','टॉप पर जाओ',
+                    'go to top','scroll up','top pe','page top',
+                ],
+                scroll_bottom: [
+                    'page ke neeche chalo please','neeche scroll karo please',
+                    'bottom pe le jao','page ka neeche dikhao',
+                    'neeche jao','bottom pe jao','scroll down karo',
+                    'नीचे जाओ','पेज के नीचे जाओ','बॉटम पर जाओ',
+                    'go to bottom','scroll down','bottom pe','page bottom',
+                ],
+                close_music_widget: [
+                    'music player band karo please','player chhupao please',
+                    'music widget hatao','player minimize karo',
+                    'player band karo','music widget band','player chhupao',
+                    'म्यूज़िक प्लेयर बंद करो','प्लेयर छुपाओ',
+                    'close player','hide player','close music widget','close player',
+                ],
+                increase_font: [
+                    'font bada karo please','text bada karo please',
+                    'likhawat badi karo','bade font mein dikhao',
+                    'font bada karo','text bada karo','bada karo text',
+                    'फ़ॉन्ट बड़ा करो','टेक्स्ट बड़ा करो','लिखावट बड़ी करो',
+                    'increase font','bigger text','larger font','font bada',
+                ],
+                decrease_font: [
+                    'font chota karo please','text chota karo please',
+                    'likhawat choti karo','chote font mein dikhao',
+                    'font chota karo','text chota karo','chota karo text',
+                    'फ़ॉन्ट छोटा करो','टेक्स्ट छोटा करो','लिखावट छोटी करो',
+                    'decrease font','smaller text','smaller font','font chota',
+                ],
+                // ── Wellness ──────────────────────────────────
+                breathing_exercise: [
+                    'saans ki kasrat batao please','breathing exercise sikhao mujhe',
+                    'deep breathing kaise karte hain','saans ka vyayam batao',
+                    'saans ki kasrat batao','breathing exercise batao',
+                    'साँस की कसरत बताओ','ब्रीदिंग एक्सरसाइज़','गहरी साँस',
+                    'breathing exercise','deep breathing','pranayam batao',
+                    'saans lene ki kasrat','calm breathing',
+                ],
+                motivational_quote: [
+                    'koi motivational quote sunao please','acchi baat sunao mujhe',
+                    'josh bharने wali baat batao','positive quote sunao',
+                    'motivational quote sunao','acchi baat sunao','josh dilao',
+                    'मोटिवेशनल कोट सुनाओ','अच्छी बात सुनाओ','जोश दिलाओ',
+                    'motivational quote','positive quote','inspiring quote',
+                    'acchi baat batao','inspire karo',
+                ],
+                spiritual_quote: [
+                    'koi doha sunao please','kabir ka doha sunao',
+                    'gyan ki baat batao','spiritual quote sunao',
+                    'doha sunao','kabir ka doha','gyan ki baat',
+                    'दोहा सुनाओ','कबीर का दोहा','ज्ञान की बात',
+                    'doha please','spiritual thought','rahim doha','gyan batao',
+                ],
+                tell_joke: [
+                    'koi joke sunao please','hasao mujhe please',
+                    'chutkula sunao mujhe','funny joke batao',
+                    'joke sunao','hasao mujhe','chutkula sunao',
+                    'जोक सुनाओ','चुटकुला सुनाओ','हँसाओ मुझे',
+                    'tell me a joke','joke please','funny joke','chutkula batao',
+                ],
+                good_morning: [
+                    'good morning saathi','subah ho gayi namaskar',
+                    'suprabhat saathi','morning wish karo',
+                    'good morning','subah ho gayi','suprabhat',
+                    'गुड मॉर्निंग','सुप्रभात','सुबह हो गई',
+                    'morning','namaskar subah','rise and shine',
+                ],
+                good_night: [
+                    'good night saathi','raat ko so raha hoon ab',
+                    'shubh ratri saathi','so jaata hoon ab',
+                    'good night','shubh ratri','so raha hoon',
+                    'गुड नाइट','शुभ रात्रि','सो रहा हूँ',
+                    'night','goodnight','sleep time','so jao',
+                ],
+                // ── Bot interaction ───────────────────────────
+                bot_name: [
+                    'tera naam kya hai saathi','aap ka naam kya hai',
+                    'tum kaun ho','apna parichay do',
+                    'tera naam kya hai','tumhara naam kya','kaun ho tum',
+                    'तेरा नाम क्या है','आपका नाम क्या है','तुम कौन हो',
+                    'what is your name','who are you','your name',
+                    'naam batao','parichay do',
+                ],
+                thanks: [
+                    'bahut shukriya aapka','thank you bahut bahut',
+                    'dil se shukriya','aapka bahut meherbani',
+                    'shukriya','thank you','dhanyawad','aabhar',
+                    'शुक्रिया','धन्यवाद','बहुत शुक्रिया','आभार',
+                    'thanks','thank you','bahut shukriya','dhanyavaad',
+                ],
+                stop_all: [
+                    'sab kuch band karo abhi please','everything stop karo',
+                    'sab rok do abhi','band karo sab please',
+                    'sab band karo','everything stop','sab rok do',
+                    'सब बंद करो','सब रोको','सब कुछ बंद',
+                    'stop everything','stop all','sab khatam karo',
+                    'band kar sab','all stop',
+                ],
+                // ── Schedule & Appointments ───────────────────
+                show_appointments: [
+                    'mera appointment kab hai batao','doctor ka schedule dikhao',
+                    'upcoming appointments dikhao','doctor ke paas kab jaana hai',
+                    'appointment dikhao','mera appointment','doctor ka schedule',
+                    'अपॉइंटमेंट दिखाओ','मेरा अपॉइंटमेंट','डॉक्टर का शेड्यूल',
+                    'show appointments','my appointments','doctor appointment',
+                    'appointment kab hai','schedule dikhao',
+                ],
+                show_today_tasks: [
+                    'aaj kya kya karna hai batao','today ka complete schedule',
+                    'aaj ke saare kaam batao','aaj kya hai plan mein',
+                    'aaj kya karna hai','today ka schedule','aaj ka plan',
+                    'आज क्या करना है','आज का पूरा शेड्यूल','आज का प्लान',
+                    'today tasks','what to do today','todays schedule',
+                    'aaj ka kaam','daily tasks',
+                ],
+                daily_report: [
+                    'aaj ki health report dikhao','daily summary dikhao mujhe',
+                    'aaj ka health summary batao','daily report kya hai',
+                    'daily report dikhao','aaj ki report','health summary dikhao',
+                    'आज की रिपोर्ट दिखाओ','डेली रिपोर्ट','हेल्थ सारांश',
+                    'daily report','health report today','show daily report',
+                    'aaj ki summary','report dikhao',
+                ],
                 call_caretaker: [
                     'caretaker ko abhi call karo','nurse ko call karo please',
                     'family member ko call karo','help ke liye call karo',
@@ -1728,9 +2221,20 @@
                     'caretaker ko call karo','call caretaker please',
                     'video call karo please','caretaker ko phone karo',
                     'baat karni hai caretaker se',
+                    'call my caretaker','call the caretaker','please call my caretaker',
+                    'i need to call caretaker','can you call my caretaker',
+                    'call my nurse','call the nurse','call nurse please',
+                    'caretaker ko bulao','nurse ko bulao','caretaker bulao',
+                    'nurse bulao please','mujhe caretaker chahiye',
+                    'caretaker chahiye','mera caretaker bulao',
+                    'ghar walo ko call karo','family ko call karo',
+                    'call karna hai caretaker ko','caretaker ko call karna hai',
+                    'help me call caretaker','mujhe call karna hai',
                     'फोन करो','कॉल करो केयरटेकर को','वीडियो कॉल करो',
+                    'केयरटेकर को बुलाओ','नर्स को बुलाओ','केयरटेकर बुलाओ',
                     'call caretaker','video call karo','caretaker ko call',
                     'call karo','phone karo','call lagao','call lao','video call',
+                    'caretaker call','nurse call','bulao caretaker',
                 ],
                 end_call: [
                     'call khatam karo please','video call band karo',
@@ -1750,12 +2254,24 @@
                     'seene mein dard ho raha hai','gir gaya hoon madad karo',
                     'bahut dard hai madad karo','ambulance bulao please',
                     'koi aao bachao mujhe','emergency hai madad karo',
+                    'chakkar aa raha hai bahut zyada','chakkar aa rahi hai please help',
+                    'uthne mein bahut takleef ho rahi hai','chal nahi pa raha hoon',
+                    'chal nahi pa rahi hoon','pasina aa raha hai bahut zyada',
+                    'bahut kamzori lag rahi hai','aankhon ke aage andhera aa raha hai',
+                    'sir bahut ghum raha hai','kuch dikh nahi raha mujhe',
+                    'saans lene mein takleef ho rahi hai','dil ki dharkan tez hai',
+                    'chakkar aa raha hai','pasina aa raha hai bahut',
+                    'uthne mein takleef hai','chal nahi pa raha',
+                    'bahut kamzori hai','aankhon ke aage andhera',
+                    'chalna mushkil ho raha hai','saans nahi aa rahi',
                     'मदद करो जल्दी','बचाओ मुझे','इमरजेंसी है',
+                    'चक्कर आ रहा है','पसीना आ रहा है','बहुत कमज़ोरी',
+                    'उठने में तकलीफ़','आँखों के आगे अँधेरा','साँस नहीं आ रही',
                     'gir gaya','gir gayi','seene mein dard','chest pain',
                     'bahut dard','madad karo jaldi','ambulance bulao',
                     'bachao mujhe','hospital bulao','help me emergency',
                     'emergency hai','help me','madad karo','bachao',
-                    'मदद करो','बचाओ','इमरजेंसी','गिर गया','गिर गई',
+                    'chakkar','kamzori','pasina','andhera','मदद करो','बचाओ','इमरजेंसी','गिर गया','गिर गई',
                 ],
                 show_medicines: [
                     'meri dawai ka schedule dikhao','aaj kaunsi dawai leni hai',
@@ -1818,6 +2334,18 @@
                     if (cmd === 'prev_track' && !appState.musicPlaying && !appState.youtubeMode) continue;
                     if (cmd === 'change_video' && !appState.musicPlaying && !appState.youtubeMode) continue;
                     if (cmd === 'cinema_off' && !appState.cinemaMode) continue;
+                    if (cmd === 'skip_forward' && !appState.youtubeMode) continue;
+                    if (cmd === 'skip_backward' && !appState.youtubeMode) continue;
+                    if (cmd === 'replay' && !appState.youtubeMode) continue;
+                    if (cmd === 'repeat_speech' && !appState.lastSpokenText) continue;
+                    if (cmd === 'mute_media' && !appState.youtubeMode) continue;
+                    if (cmd === 'unmute_media' && !appState.youtubeMode) continue;
+                    if (cmd === 'increase_speed' && !appState.youtubeMode) continue;
+                    if (cmd === 'decrease_speed' && !appState.youtubeMode) continue;
+                    if (cmd === 'close_music_widget' && !appState.musicPlaying && !appState.youtubeMode) continue;
+                    if (cmd === 'cancel_alert' && !appState.alertActive) continue;
+                    if (cmd === 'good_morning') { const h = new Date().getHours(); if (h >= 12) continue; }
+                    if (cmd === 'good_night') { const h = new Date().getHours(); if (h < 18) continue; }
                     if (cmd === 'end_call') {
                         const m = document.getElementById('call-modal');
                         if (!m || m.classList.contains('hidden')) continue;
@@ -1895,6 +2423,382 @@
                     case 'change_video': {
                         controlMusic('next');
                         const msg = hindi ? 'ठीक है, दूसरा गाना लगाता हूँ! 🎵' : 'Sure, switching to another song! 🎵';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'skip_forward': {
+                        seekYouTube(20);
+                        const msg = hindi ? '20 सेकंड आगे कर दिया। ⏩' : 'Skipped 20 seconds forward. ⏩';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'skip_backward': {
+                        seekYouTube(-20);
+                        const msg = hindi ? '20 सेकंड पीछे कर दिया। ⏪' : 'Rewound 20 seconds. ⏪';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'volume_up': {
+                        state.ytVolume = Math.min(100, (state.ytVolume || 100) + 20);
+                        const vIframe = document.getElementById(state.cinemaMode ? 'cinema-player' : 'yt-player');
+                        if (vIframe && state.youtubeMode) vIframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [state.ytVolume] }), '*');
+                        const msg = hindi ? `आवाज़ बढ़ा दी। 🔊 (${state.ytVolume}%)` : `Volume raised to ${state.ytVolume}%. 🔊`;
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'volume_down': {
+                        state.ytVolume = Math.max(10, (state.ytVolume || 100) - 20);
+                        const vIframe = document.getElementById(state.cinemaMode ? 'cinema-player' : 'yt-player');
+                        if (vIframe && state.youtubeMode) vIframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [state.ytVolume] }), '*');
+                        const msg = hindi ? `आवाज़ कम कर दी। 🔉 (${state.ytVolume}%)` : `Volume lowered to ${state.ytVolume}%. 🔉`;
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'replay': {
+                        const rIframe = document.getElementById(state.cinemaMode ? 'cinema-player' : 'yt-player');
+                        if (rIframe && state.youtubeMode) {
+                            state.ytOffset = 0; state.ytStartMs = Date.now();
+                            rIframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [0, true] }), '*');
+                        }
+                        const msg = hindi ? 'शुरू से फिर चला रहा हूँ। ↩' : 'Replaying from the beginning. ↩';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'repeat_speech': {
+                        if (state.lastSpokenText) {
+                            speak(state.lastSpokenText);
+                        } else {
+                            const msg = hindi ? 'अभी तक कुछ नहीं बोला।' : 'Nothing to repeat yet.';
+                            addUIMessage('bot', msg);
+                        }
+                        return;
+                    }
+                    case 'lang_hindi': {
+                        state.userLanguage = 'hi';
+                        const msg = 'ठीक है! अब मैं हिंदी में बात करूँगा। 🙏';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'lang_english': {
+                        state.userLanguage = 'en';
+                        const msg = 'Sure! I will now speak in English. 😊';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'show_help': {
+                        const helpLines = hindi ? [
+                            '🎵 <b>संगीत/वीडियो:</b> "गाना चलाओ", "रोको", "अगला/पिछला गाना", "आवाज़ बढ़ाओ/कम करो", "20 सेकंड आगे/पीछे करो", "शुरू से चलाओ"',
+                            '🎬 <b>सिनेमा:</b> "सिनेमा मोड चालू", "सिनेमा बंद करो"',
+                            '📞 <b>कॉल:</b> "केयरटेकर को बुलाओ", "कॉल बंद करो"',
+                            '💊 <b>दवाई:</b> "दवाई दिखाओ", "रिमाइंडर दिखाओ"',
+                            '🏥 <b>सेहत:</b> "सेहत दिखाओ"',
+                            '🆘 <b>इमरजेंसी:</b> "मदद करो", "बचाओ", "एम्बुलेंस बुलाओ", "चक्कर आ रहा है"',
+                            '🔁 <b>अन्य:</b> "फिर से बोलो", "हिंदी में बोलो", "English में बोलो", "चैट साफ़ करो"',
+                        ] : [
+                            '🎵 <b>Music/Video:</b> "play a song", "pause", "next/prev song", "volume up/down", "skip forward/back 20s", "replay from start"',
+                            '🎬 <b>Cinema:</b> "cinema mode on", "exit cinema"',
+                            '📞 <b>Call:</b> "call my caretaker", "end call"',
+                            '💊 <b>Medicine:</b> "show medicines", "show reminders"',
+                            '🏥 <b>Health:</b> "show health status"',
+                            '🆘 <b>Emergency:</b> "help me", "call ambulance", "chest pain", "feeling dizzy"',
+                            '🔁 <b>Other:</b> "repeat please", "speak Hindi", "speak English", "clear chat"',
+                        ];
+                        addUIMessage('bot', helpLines.join('<br>'));
+                        speak(hindi ? 'ये रहीं सब commands। स्क्रीन पर देख सकते हैं।' : 'Here are all my commands. You can read them on screen.');
+                        return;
+                    }
+                    // ── Media shortcuts ───────────────────────────────────────────
+                    case 'play_bhajan': {
+                        const msg = hindi ? '🙏 भजन खोज रहा हूँ...' : '🙏 Finding devotional music...';
+                        addUIMessage('bot', msg); speak(msg);
+                        playYouTubeSong('bhajan aarti hindi devotional', '🙏 Bhajan', false, true); return;
+                    }
+                    case 'play_meditation_music': {
+                        const msg = hindi ? '🧘 ध्यान की संगीत लगा रहा हूँ...' : '🧘 Playing meditation music...';
+                        addUIMessage('bot', msg); speak(msg);
+                        playYouTubeSong('meditation music relaxing hindi yoga', '🧘 Meditation', false, true); return;
+                    }
+                    case 'play_classical': {
+                        const msg = hindi ? '🎻 शास्त्रीय संगीत लगा रहा हूँ...' : '🎻 Playing classical music...';
+                        addUIMessage('bot', msg); speak(msg);
+                        playYouTubeSong('indian classical music sitar raag', '🎻 Classical', false, true); return;
+                    }
+                    case 'play_ghazal': {
+                        const msg = hindi ? '🌹 ग़ज़ल सुनाता हूँ...' : '🌹 Playing ghazal...';
+                        addUIMessage('bot', msg); speak(msg);
+                        playYouTubeSong('ghazal hindi urdu soothing', '🌹 Ghazal', false, true); return;
+                    }
+                    case 'play_old_bollywood': {
+                        const msg = hindi ? '🎬 पुराने बॉलीवुड गाने लगा रहा हूँ...' : '🎬 Playing old Bollywood hits...';
+                        addUIMessage('bot', msg); speak(msg);
+                        playYouTubeSong('old bollywood classic songs 1970s hindi', '🎬 Old Bollywood', false, true); return;
+                    }
+                    case 'play_folk': {
+                        const msg = hindi ? '🎵 लोक संगीत लगा रहा हूँ...' : '🎵 Playing folk music...';
+                        addUIMessage('bot', msg); speak(msg);
+                        playYouTubeSong('lok sangeet hindi folk music rajasthani', '🎵 Folk', false, true); return;
+                    }
+                    case 'play_news': {
+                        const msg = hindi ? '📰 आज की खबर लगा रहा हूँ...' : '📰 Loading today\'s news...';
+                        addUIMessage('bot', msg); speak(msg);
+                        playYouTubeSong('aaj ki khabar hindi news today latest', '📰 News', false, true); return;
+                    }
+                    case 'play_motivational': {
+                        const msg = hindi ? '💪 मोटिवेशनल स्पीच लगा रहा हूँ...' : '💪 Playing motivational speech...';
+                        addUIMessage('bot', msg); speak(msg);
+                        playYouTubeSong('motivational speech hindi best inspiring', '💪 Motivational', false, true); return;
+                    }
+                    case 'play_sleep_music': {
+                        const msg = hindi ? '🌙 नींद के लिए संगीत लगा रहा हूँ...' : '🌙 Playing sleep music...';
+                        addUIMessage('bot', msg); speak(msg);
+                        playYouTubeSong('sleep music lullaby relaxing hindi neend', '🌙 Sleep Music', false, true); return;
+                    }
+                    case 'play_ramayana': {
+                        const msg = hindi ? '🕉️ रामायण कथा शुरू कर रहा हूँ...' : '🕉️ Starting Ramayan katha...';
+                        addUIMessage('bot', msg); speak(msg);
+                        playYouTubeSong('ramayan katha hindi shri ram', '🕉️ Ramayan', false, true); return;
+                    }
+                    case 'play_gita': {
+                        const msg = hindi ? '📖 भगवद गीता प्रवचन शुरू कर रहा हूँ...' : '📖 Starting Bhagavad Gita pravachan...';
+                        addUIMessage('bot', msg); speak(msg);
+                        playYouTubeSong('bhagavad gita pravachan hindi krishna', '📖 Gita', false, true); return;
+                    }
+                    case 'play_yoga_music': {
+                        const msg = hindi ? '🧘 योग के लिए संगीत लगा रहा हूँ...' : '🧘 Playing yoga music...';
+                        addUIMessage('bot', msg); speak(msg);
+                        playYouTubeSong('yoga music pranayam surya namaskar', '🧘 Yoga Music', false, true); return;
+                    }
+                    case 'shuffle_random': {
+                        const randomQueries = ['old hindi film songs','soothing hindi songs','instrumental hindi music','bollywood hits'];
+                        const q = randomQueries[Math.floor(Math.random() * randomQueries.length)];
+                        const msg = hindi ? '🎲 कुछ भी बजा रहा हूँ — सरप्राइज़! 🎵' : '🎲 Playing something random — surprise! 🎵';
+                        addUIMessage('bot', msg); speak(msg);
+                        playYouTubeSong(q, '🎲 Random', false, true); return;
+                    }
+                    case 'mute_media': {
+                        state._ytVolumeBeforeMute = state.ytVolume || 100;
+                        state.ytVolume = 0;
+                        const vIframe = document.getElementById(state.cinemaMode ? 'cinema-player' : 'yt-player');
+                        if (vIframe) vIframe.contentWindow.postMessage(JSON.stringify({ event:'command', func:'setVolume', args:[0] }), '*');
+                        const msg = hindi ? '🔇 म्यूट कर दिया।' : '🔇 Muted.';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'unmute_media': {
+                        state.ytVolume = state._ytVolumeBeforeMute || 80;
+                        const vIframe = document.getElementById(state.cinemaMode ? 'cinema-player' : 'yt-player');
+                        if (vIframe) vIframe.contentWindow.postMessage(JSON.stringify({ event:'command', func:'setVolume', args:[state.ytVolume] }), '*');
+                        const msg = hindi ? `🔊 अनम्यूट कर दिया।` : `🔊 Unmuted.`;
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'increase_speed': {
+                        state.ytSpeed = Math.min(2.0, (state.ytSpeed || 1.0) + 0.25);
+                        const vIframe = document.getElementById(state.cinemaMode ? 'cinema-player' : 'yt-player');
+                        if (vIframe) vIframe.contentWindow.postMessage(JSON.stringify({ event:'command', func:'setPlaybackRate', args:[state.ytSpeed] }), '*');
+                        const msg = hindi ? `⏩ स्पीड ${state.ytSpeed}x कर दी।` : `⏩ Speed set to ${state.ytSpeed}x.`;
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'decrease_speed': {
+                        state.ytSpeed = Math.max(0.25, (state.ytSpeed || 1.0) - 0.25);
+                        const vIframe = document.getElementById(state.cinemaMode ? 'cinema-player' : 'yt-player');
+                        if (vIframe) vIframe.contentWindow.postMessage(JSON.stringify({ event:'command', func:'setPlaybackRate', args:[state.ytSpeed] }), '*');
+                        const msg = hindi ? `🐢 स्पीड ${state.ytSpeed}x कर दी।` : `🐢 Speed set to ${state.ytSpeed}x.`;
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    // ── Time & Date ───────────────────────────────────────────────
+                    case 'show_time': {
+                        const now = new Date();
+                        const timeStr = now.toLocaleTimeString('hi-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+                        const msg = hindi ? `🕐 अभी ${timeStr} बजे हैं।` : `🕐 The time is ${now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}.`;
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'show_date': {
+                        const now = new Date();
+                        const days = ['रविवार','सोमवार','मंगलवार','बुधवार','गुरुवार','शुक्रवार','शनिवार'];
+                        const months = ['जनवरी','फ़रवरी','मार्च','अप्रैल','मई','जून','जुलाई','अगस्त','सितंबर','अक्टूबर','नवंबर','दिसंबर'];
+                        const msg = hindi
+                            ? `📅 आज ${days[now.getDay()]}, ${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()} है।`
+                            : `📅 Today is ${now.toLocaleDateString('en-IN', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}.`;
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'show_weather': {
+                        const wMsg = hindi ? '🌤️ मौसम की जानकारी ला रहा हूँ...' : '🌤️ Checking weather...';
+                        addUIMessage('bot', wMsg); speak(wMsg);
+                        (async () => {
+                            try {
+                                const token = getToken();
+                                const res = await fetch('http://127.0.0.1:8000/api/weather', { headers: { 'Authorization': 'Bearer ' + token } });
+                                if (res.ok) {
+                                    const data = await res.json();
+                                    const w = data.result || data;
+                                    const weatherMsg = hindi
+                                        ? `🌡️ ${w.city || 'आपके शहर'} में आज ${w.description || 'मौसम ठीक है'}, तापमान ${w.temp_c || '--'}°C है।`
+                                        : `🌡️ In ${w.city || 'your city'}: ${w.description || 'weather looks fine'}, ${w.temp_c || '--'}°C.`;
+                                    addUIMessage('bot', weatherMsg); speak(weatherMsg);
+                                } else { throw new Error('Weather API failed'); }
+                            } catch {
+                                const fallback = hindi ? '😔 अभी मौसम की जानकारी नहीं मिली। थोड़ी देर बाद कोशिश करें।' : '😔 Could not fetch weather right now.';
+                                addUIMessage('bot', fallback); speak(fallback);
+                            }
+                        })(); return;
+                    }
+                    // ── Alerts & Safety ───────────────────────────────────────────
+                    case 'trigger_alert': {
+                        state.alertActive = true;
+                        const token = getToken(); const rid = getRecipientId() || '1';
+                        fetch('http://127.0.0.1:8000/api/voice-bot/emergency', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                            body: JSON.stringify({ recipient_id: parseInt(rid), message: 'Alert triggered by voice command' })
+                        }).catch(() => {});
+                        const msg = hindi ? '🚨 केयरटेकर को अलर्ट भेज दिया! वो जल्द आएंगे।' : '🚨 Alert sent to caretaker! They will be with you shortly.';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'cancel_alert': {
+                        state.alertActive = false;
+                        const msg = hindi ? '✅ ठीक है, अलर्ट कैंसिल कर दिया। सब ठीक है! 😊' : '✅ Alert cancelled. Glad you are okay! 😊';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'show_emergency_info': {
+                        const msg = hindi
+                            ? '🆘 <b>इमरजेंसी नंबर:</b><br>🚑 एम्बुलेंस: <b>102</b><br>🚒 फ़ायर: <b>101</b><br>👮 पुलिस: <b>100</b><br>🏥 नेशनल हेल्पलाइन: <b>1800-180-1104</b>'
+                            : '🆘 <b>Emergency Numbers:</b><br>🚑 Ambulance: <b>102</b><br>🚒 Fire: <b>101</b><br>👮 Police: <b>100</b><br>🏥 National Helpline: <b>1800-180-1104</b>';
+                        addUIMessage('bot', msg);
+                        speak(hindi ? 'एम्बुलेंस के लिए 102, पुलिस के लिए 100 डायल करें।' : 'Dial 102 for ambulance, 100 for police.');
+                        return;
+                    }
+                    // ── Medicine ──────────────────────────────────────────────────
+                    case 'medicine_taken': {
+                        const msg = hindi ? '✅ अच्छा किया! दवाई लेने का नोट हो गया। 💊' : '✅ Great! Medicine intake noted. 💊';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'medicine_not_taken': {
+                        renderMedicineCard();
+                        const card = document.getElementById('medicine-card');
+                        if (card) { card.classList.remove('hidden'); card.scrollIntoView({ behavior: 'smooth' }); }
+                        const msg = hindi ? '⚠️ चिंता मत करें! अभी दवाई ले सकते हैं। देखिए कौन सी लेनी है। 💊' : '⚠️ No worries! You can take it now. Check your medicine schedule. 💊';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'next_medicine': {
+                        renderMedicineCard();
+                        const card = document.getElementById('medicine-card');
+                        if (card) { card.classList.remove('hidden'); card.scrollIntoView({ behavior: 'smooth' }); }
+                        const msg = hindi ? '💊 आपका दवाई शेड्यूल यहाँ है। अगली दोज़ का समय देखें।' : '💊 Here is your medicine schedule. Check the next dose time.';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    // ── Health & Mood ─────────────────────────────────────────────
+                    case 'i_feel_good': {
+                        setAvatarMood('happy');
+                        const msg = hindi ? '😊 बहुत अच्छा! यह सुनकर दिल खुश हो गया। ऐसे ही खुश रहिए! ❤️' : '😊 Wonderful! So happy to hear that. Keep smiling! ❤️';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'i_feel_bad': {
+                        setAvatarMood('concerned');
+                        const msg = hindi ? '💙 ओह... मैं आपके साथ हूँ। क्या हुआ, बताइए? क्या कोई गाना सुनें या बात करें?' : '💙 I\'m sorry to hear that. I\'m here with you. Want to talk about it or listen to some soothing music?';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'i_feel_pain': {
+                        setAvatarMood('concerned');
+                        const msg = hindi ? '😟 दर्द सुनकर चिंता हुई। क्या केयरटेकर को बुलाऊँ? अगर ज़्यादा दर्द है तो "मदद करो" बोलें।' : '😟 I\'m concerned about your pain. Should I call your caretaker? Say "help me" if it\'s serious.';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'show_vitals': {
+                        const tCard = document.getElementById('mood-trend-card');
+                        if (tCard) { tCard.classList.remove('hidden'); tCard.scrollIntoView({ behavior: 'smooth' }); }
+                        const msg = hindi ? '📊 आपके विटल्स और स्वास्थ्य की जानकारी यहाँ है।' : '📊 Here are your vitals and health summary.';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    // ── UI Navigation ─────────────────────────────────────────────
+                    case 'scroll_top': {
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                        const msg = hindi ? '⬆️ ऊपर आ गए।' : '⬆️ Scrolled to top.';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'scroll_bottom': {
+                        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                        const msg = hindi ? '⬇️ नीचे आ गए।' : '⬇️ Scrolled to bottom.';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'close_music_widget': {
+                        controlMusic('stop');
+                        document.getElementById('music-widget')?.classList.add('hidden');
+                        const msg = hindi ? '🎵 म्यूज़िक प्लेयर बंद कर दिया।' : '🎵 Music player closed.';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'increase_font': {
+                        _vceFontScale = Math.min(1.6, _vceFontScale + 0.1);
+                        document.getElementById('chat-messages').style.fontSize = (_vceFontScale * 100) + '%';
+                        const msg = hindi ? `🔤 फ़ॉन्ट बड़ा कर दिया।` : `🔤 Font size increased.`;
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'decrease_font': {
+                        _vceFontScale = Math.max(0.7, _vceFontScale - 0.1);
+                        document.getElementById('chat-messages').style.fontSize = (_vceFontScale * 100) + '%';
+                        const msg = hindi ? `🔤 फ़ॉन्ट छोटा कर दिया।` : `🔤 Font size decreased.`;
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    // ── Wellness ──────────────────────────────────────────────────
+                    case 'breathing_exercise': {
+                        addUIMessage('bot', VCE_BREATHING.join('<br>'));
+                        speak(hindi
+                            ? 'नाक से 4 सेकंड साँस लें, 4 सेकंड रोकें, 6 सेकंड में छोड़ें। यही 5 बार करें।'
+                            : 'Breathe in for 4 counts, hold for 4, exhale for 6. Repeat 5 times.');
+                        return;
+                    }
+                    case 'motivational_quote': {
+                        const q = VCE_QUOTES[Math.floor(Math.random() * VCE_QUOTES.length)];
+                        addUIMessage('bot', q); speak(q); return;
+                    }
+                    case 'spiritual_quote': {
+                        const d = VCE_DOHAS[Math.floor(Math.random() * VCE_DOHAS.length)];
+                        addUIMessage('bot', d); speak(d); return;
+                    }
+                    case 'tell_joke': {
+                        const j = VCE_JOKES[Math.floor(Math.random() * VCE_JOKES.length)];
+                        addUIMessage('bot', j); speak(j); return;
+                    }
+                    case 'good_morning': {
+                        const name = state.recipientName || '';
+                        const msg = hindi
+                            ? `🌅 सुप्रभात${name ? ' ' + name + ' जी' : ''}! आज का दिन बहुत अच्छा हो आपका। ☀️`
+                            : `🌅 Good morning${name ? ' ' + name : ''}! Wishing you a wonderful day ahead. ☀️`;
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'good_night': {
+                        const msg = hindi
+                            ? '🌙 शुभ रात्रि! अच्छी नींद आए, मीठे सपने देखें। कल फिर मिलेंगे। 😴'
+                            : '🌙 Good night! Sleep well and sweet dreams. See you tomorrow. 😴';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    // ── Bot interaction ────────────────────────────────────────────
+                    case 'bot_name': {
+                        const msg = hindi
+                            ? '🤖 मेरा नाम Saathi है — मतलब साथी। मैं आपकी देखभाल के लिए यहाँ हूँ। 💙'
+                            : '🤖 My name is Saathi — it means companion. I am here to take care of you. 💙';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'thanks': {
+                        const msg = hindi
+                            ? '😊 कोई बात नहीं! आपकी सेवा करके मुझे खुशी होती है। ❤️'
+                            : '😊 You are most welcome! It\'s my pleasure to be here for you. ❤️';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'stop_all': {
+                        controlMusic('stop');
+                        if (synth.speaking) synth.cancel();
+                        document.getElementById('music-widget')?.classList.add('hidden');
+                        setAvatarState('idle');
+                        const msg = hindi ? '⏹ सब बंद कर दिया। जब चाहें बात करें।' : '⏹ Everything stopped. Just say something when you need me.';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    // ── Schedule & Daily ──────────────────────────────────────────
+                    case 'show_appointments':
+                    case 'show_today_tasks': {
+                        fetchReminders();
+                        const el = document.getElementById('reminders-list');
+                        if (el) el.scrollIntoView({ behavior: 'smooth' });
+                        const msg = hindi ? '📅 आपका आज का शेड्यूल और अपॉइंटमेंट यहाँ हैं।' : '📅 Here is your schedule and appointments for today.';
+                        addUIMessage('bot', msg); speak(msg); return;
+                    }
+                    case 'daily_report': {
+                        const tCard = document.getElementById('mood-trend-card');
+                        if (tCard) { tCard.classList.remove('hidden'); tCard.scrollIntoView({ behavior: 'smooth' }); }
+                        fetchReminders();
+                        renderMedicineCard();
+                        const card = document.getElementById('medicine-card');
+                        if (card) card.classList.remove('hidden');
+                        const msg = hindi ? '📋 आपकी आज की पूरी रिपोर्ट — सेहत, दवाई, और रिमाइंडर सब यहाँ हैं।' : '📋 Your daily report — health, medicines, and reminders are all here.';
                         addUIMessage('bot', msg); speak(msg); return;
                     }
                     case 'call_caretaker': {
@@ -2097,26 +3001,7 @@
                     state.currentMood = mood;
                     setAvatarMood(mood);
 
-                    const _intent = resData.intent, _sq = resData.search_query;
-                    if (_intent === 'play_video' && _sq) {
-                        playYouTubeSong(_sq, '🎬 Video', false, true).then(() => toggleCinemaMode(true));
-                    } else if (_intent === 'play_music' && _sq) {
-                        playYouTubeSong(_sq, '🎵 Music', false, true);
-                    } else if (_intent === 'tell_story' && _sq) {
-                        playYouTubeSong(_sq, '📖 Story', false, true);
-                    } else if (_intent === 'stop') {
-                        controlMusic('stop');
-                    } else if (_intent === 'pause') {
-                        controlMusic('pause');
-                    } else if (_intent === 'resume') {
-                        controlMusic('resume');
-                    } else if (_intent === 'next') {
-                        controlMusic('next');
-                    } else if (_intent === 'previous') {
-                        controlMusic('prev');
-                    } else if (_intent === 'emergency') {
-                        triggerEmergency();
-                    }
+                    dispatchIntent(resData.intent, resData.search_query, resData.action_param);
 
                     if (triggerType === "user_initiated" && state.messages.length > 0) {
                         state.messages[state.messages.length - 1].mood = mood;
@@ -2146,6 +3031,159 @@
                     : "I'm having a little trouble right now. Would you like to hear some music instead? 🎵";
                 addUIMessage('bot', fallback);
                 speakHindi(fallback);
+            }
+        }
+
+        // ═══════════════════════════════════════════
+        // AI INTENT DISPATCHER
+        // Handles all intents returned by Gemini in
+        // both the HTTP path and the WebSocket path.
+        // ═══════════════════════════════════════════
+        function dispatchIntent(intent, sq, actionParam) {
+            if (!intent || intent === 'chat') return;
+            const param = parseFloat(actionParam) || 0;
+
+            switch (intent) {
+                case 'play_video':
+                    if (sq) playYouTubeSong(sq, '🎬 Video', false, true).then(() => toggleCinemaMode(true));
+                    break;
+                case 'play_music':
+                    if (sq) playYouTubeSong(sq, '🎵 Music', false, true);
+                    break;
+                case 'tell_story':
+                    if (sq) playYouTubeSong(sq, '📖 Story', false, true);
+                    break;
+                case 'stop':        controlMusic('stop');   break;
+                case 'pause':       controlMusic('pause');  break;
+                case 'resume':      controlMusic('resume'); break;
+                case 'next':        controlMusic('next');   break;
+                case 'previous':    controlMusic('prev');   break;
+                case 'change_video': controlMusic('next');  break;
+                case 'seek_forward':
+                    seekYouTube(param > 0 ? param : 20);
+                    break;
+                case 'seek_backward':
+                    seekYouTube(-(param > 0 ? param : 20));
+                    break;
+                case 'set_volume': {
+                    const vol = Math.min(100, Math.max(0, param || 70));
+                    state.ytVolume = vol;
+                    const vIframe = document.getElementById(state.cinemaMode ? 'cinema-player' : 'yt-player');
+                    if (vIframe && state.youtubeMode)
+                        vIframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [vol] }), '*');
+                    break;
+                }
+                case 'replay': {
+                    const rIframe = document.getElementById(state.cinemaMode ? 'cinema-player' : 'yt-player');
+                    if (rIframe && state.youtubeMode) {
+                        state.ytOffset = 0; state.ytStartMs = Date.now();
+                        rIframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [0, true] }), '*');
+                    }
+                    break;
+                }
+                case 'call_caretaker':  startVideoCall();         break;
+                case 'end_call':        endVideoCall();           break;
+                case 'cinema_on':
+                    if (state.youtubeMode) toggleCinemaMode(true);
+                    break;
+                case 'cinema_off':      toggleCinemaMode(false);  break;
+                case 'show_medicines': {
+                    renderMedicineCard();
+                    const card = document.getElementById('medicine-card');
+                    if (card) { card.classList.remove('hidden'); card.scrollIntoView({ behavior: 'smooth' }); }
+                    break;
+                }
+                case 'show_reminders': {
+                    fetchReminders();
+                    const el = document.getElementById('reminders-list');
+                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                    break;
+                }
+                case 'health_status': {
+                    const tCard = document.getElementById('mood-trend-card');
+                    if (tCard) tCard.scrollIntoView({ behavior: 'smooth' });
+                    break;
+                }
+                case 'clear_chat':
+                    setTimeout(() => {
+                        state.messages = [];
+                        document.getElementById('chat-messages').innerHTML = '';
+                    }, 600);
+                    break;
+                case 'lang_hindi':   state.userLanguage = 'hi'; break;
+                case 'lang_english': state.userLanguage = 'en'; break;
+                case 'emergency':    triggerEmergency();         break;
+                // Media shortcuts via Gemini
+                case 'play_bhajan':        playYouTubeSong('bhajan aarti hindi devotional','🙏 Bhajan',false,true); break;
+                case 'play_meditation_music': playYouTubeSong('meditation music relaxing hindi','🧘 Meditation',false,true); break;
+                case 'play_classical':     playYouTubeSong('indian classical music sitar raag','🎻 Classical',false,true); break;
+                case 'play_ghazal':        playYouTubeSong('ghazal hindi urdu soothing','🌹 Ghazal',false,true); break;
+                case 'play_old_bollywood': playYouTubeSong('old bollywood classic songs hindi','🎬 Old Bollywood',false,true); break;
+                case 'play_folk':          playYouTubeSong('lok sangeet hindi folk music','🎵 Folk',false,true); break;
+                case 'play_news':          playYouTubeSong('aaj ki khabar hindi news today','📰 News',false,true); break;
+                case 'play_motivational':  playYouTubeSong('motivational speech hindi inspiring','💪 Motivational',false,true); break;
+                case 'play_sleep_music':   playYouTubeSong('sleep music lullaby relaxing hindi','🌙 Sleep',false,true); break;
+                case 'play_ramayana':      playYouTubeSong('ramayan katha hindi shri ram','🕉️ Ramayan',false,true); break;
+                case 'play_gita':          playYouTubeSong('bhagavad gita pravachan hindi','📖 Gita',false,true); break;
+                case 'play_yoga_music':    playYouTubeSong('yoga music pranayam hindi','🧘 Yoga',false,true); break;
+                case 'shuffle_random':     controlMusic('next'); break;
+                case 'mute_media': {
+                    state._ytVolumeBeforeMute = state.ytVolume || 100; state.ytVolume = 0;
+                    const mIframe = document.getElementById(state.cinemaMode ? 'cinema-player' : 'yt-player');
+                    if (mIframe) mIframe.contentWindow.postMessage(JSON.stringify({ event:'command',func:'setVolume',args:[0] }),'*');
+                    break;
+                }
+                case 'unmute_media': {
+                    state.ytVolume = state._ytVolumeBeforeMute || 80;
+                    const mIframe = document.getElementById(state.cinemaMode ? 'cinema-player' : 'yt-player');
+                    if (mIframe) mIframe.contentWindow.postMessage(JSON.stringify({ event:'command',func:'setVolume',args:[state.ytVolume] }),'*');
+                    break;
+                }
+                case 'show_time': break;  // handled by VCE only (needs fresh Date())
+                case 'show_date': break;  // handled by VCE only (needs fresh Date())
+                case 'show_weather': break; // handled by VCE async block
+                case 'trigger_alert':   triggerEmergency(); break;
+                case 'show_emergency_info': break;
+                case 'medicine_taken': break;
+                case 'medicine_not_taken':
+                case 'next_medicine': {
+                    renderMedicineCard();
+                    const mc = document.getElementById('medicine-card');
+                    if (mc) { mc.classList.remove('hidden'); mc.scrollIntoView({ behavior: 'smooth' }); }
+                    break;
+                }
+                case 'i_feel_good':  setAvatarMood('happy');     break;
+                case 'i_feel_bad':   setAvatarMood('concerned');  break;
+                case 'i_feel_pain':  setAvatarMood('concerned');  break;
+                case 'show_vitals': {
+                    const vc = document.getElementById('mood-trend-card');
+                    if (vc) { vc.classList.remove('hidden'); vc.scrollIntoView({ behavior: 'smooth' }); }
+                    break;
+                }
+                case 'scroll_top':    window.scrollTo({ top: 0, behavior: 'smooth' }); break;
+                case 'scroll_bottom': window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); break;
+                case 'close_music_widget':
+                    controlMusic('stop');
+                    document.getElementById('music-widget')?.classList.add('hidden');
+                    break;
+                case 'show_appointments':
+                case 'show_today_tasks':
+                case 'daily_report': {
+                    fetchReminders();
+                    renderMedicineCard();
+                    const dc = document.getElementById('mood-trend-card');
+                    if (dc) { dc.classList.remove('hidden'); dc.scrollIntoView({ behavior: 'smooth' }); }
+                    break;
+                }
+                case 'stop_all':
+                    controlMusic('stop');
+                    if (synth.speaking) synth.cancel();
+                    document.getElementById('music-widget')?.classList.add('hidden');
+                    break;
+                case 'bot_name': break;
+                case 'thanks':    break;
+                case 'good_morning': break;
+                case 'good_night':   break;
             }
         }
 
@@ -2539,27 +3577,7 @@
                     setAvatarMood(mood);
 
                     // ── Handle all AI intents ──
-                    const intent = resData.intent;
-                    const sq = resData.search_query;
-                    if (intent === 'play_video' && sq) {
-                        playYouTubeSong(sq, '🎬 Video', false, true).then(() => toggleCinemaMode(true));
-                    } else if (intent === 'play_music' && sq) {
-                        playYouTubeSong(sq, '🎵 Music', false, true);
-                    } else if (intent === 'tell_story' && sq) {
-                        playYouTubeSong(sq, '📖 Story', false, true);
-                    } else if (intent === 'stop') {
-                        controlMusic('stop');
-                    } else if (intent === 'pause') {
-                        controlMusic('pause');
-                    } else if (intent === 'resume') {
-                        controlMusic('resume');
-                    } else if (intent === 'next') {
-                        controlMusic('next');
-                    } else if (intent === 'previous') {
-                        controlMusic('prev');
-                    } else if (intent === 'emergency') {
-                        triggerEmergency();
-                    }
+                    dispatchIntent(resData.intent, resData.search_query, resData.action_param);
 
                     if (state.messages.length > 0) {
                         state.messages[state.messages.length - 1].mood = mood;

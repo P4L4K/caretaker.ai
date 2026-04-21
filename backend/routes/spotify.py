@@ -106,13 +106,18 @@ def _youtube_api_search(query: str, max_results: int = 3, min_duration: int = 60
         raw = urllib.request.urlopen(req, timeout=10).read().decode()
         data = json.loads(raw)
 
+        SHORTS_KW = {'#shorts', '#short', '#reels', '#reel', 'shorts', 'reels'}
+
         candidates = []
         for item in data.get("items", []):
             video_id = item.get("id", {}).get("videoId")
             if not video_id:
                 continue
+            title = item.get("snippet", {}).get("title", query.title())
+            if any(kw in title.lower() for kw in SHORTS_KW):
+                continue
             candidates.append({
-                "name":       item.get("snippet", {}).get("title", query.title()),
+                "name":       title,
                 "artist":     item.get("snippet", {}).get("channelTitle", "YouTube"),
                 "youtube_id": video_id,
                 "url":        f"https://www.youtube.com/embed/{video_id}?autoplay=1"
@@ -184,19 +189,34 @@ def _youtube_scrape_many(query: str, suffix: str = "", max_results: int = 3) -> 
             headers={"User-Agent": "Mozilla/5.0"}
         )
         html = urllib.request.urlopen(req, timeout=10).read().decode()
-        # Find unique video IDs to avoid duplicates
-        ids = list(dict.fromkeys(re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', html)))
-        
+
+        # Exclude IDs that appear as Shorts (/shorts/<id>)
+        shorts_ids = set(re.findall(r'/shorts/([a-zA-Z0-9_-]{11})', html))
+
+        # Find all watch?v= IDs (regular videos only)
+        all_ids = list(dict.fromkeys(re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', html)))
+        ids = [vid for vid in all_ids if vid not in shorts_ids]
+
         if ids:
-            print(f"[YouTube Scrape] Found {len(ids)} candidates for: {query!r}")
+            print(f"[YouTube Scrape] {len(all_ids)} raw → {len(ids)} after shorts filter for: {query!r}")
+
+            # Try to enrich with real duration via API (filters sub-30s clips)
+            api_key = os.environ.get("YOUTUBE_API_KEY", "")
+            details = _enrich_with_details(ids[:max_results * 3], api_key) if api_key else {}
+
             results = []
-            for vid_id in ids[:max_results]:
+            for vid_id in ids:
+                if len(results) >= max_results:
+                    break
+                dur = details.get(vid_id, {}).get("duration_sec", 0)
+                if dur > 0 and dur < 30:
+                    continue
                 results.append({
                     "name": query.title() if len(results) == 0 else f"{query.title()} (Option {len(results)+1})",
                     "artist": "YouTube",
                     "youtube_id": vid_id,
                     "url": f"https://www.youtube.com/embed/{vid_id}?autoplay=1",
-                    "duration_sec": 0, "views": 0
+                    "duration_sec": dur, "views": details.get(vid_id, {}).get("views", 0)
                 })
             return results
     except Exception as e:

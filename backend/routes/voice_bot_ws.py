@@ -107,11 +107,13 @@ async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)
                         reply_text = ai_json.get("reply") or ai_json.get("message") or ai_text
                         intent = ai_json.get("intent", "chat")
                         search_query = ai_json.get("search_query", "")
+                        action_param = ai_json.get("action_param")
                         recommendation = ai_json.get("recommendation")
                     except Exception:
                         reply_text = ai_text
                         intent = "chat"
                         search_query = ""
+                        action_param = None
                         recommendation = None
 
                     save_message(recipient_id, SenderEnum.bot, reply_text, MoodEnum.neutral, trigger_type, session_id, db)
@@ -127,6 +129,7 @@ async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)
                         "reply": reply_text,
                         "intent": intent,
                         "search_query": search_query,
+                        "action_param": action_param,
                         "audio_base64": audio_base64,
                         "mood_detected": mood_str,
                         "depression_risk": is_at_risk,

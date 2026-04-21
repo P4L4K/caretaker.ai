@@ -146,11 +146,13 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
                     
                     intent = ai_json.get("intent", "chat")
                     search_query = ai_json.get("search_query", "")
+                    action_param = ai_json.get("action_param")
                 except Exception as ex:
                     print(f"Failed to parse Gemini JSON: {ex}")
                     reply_text = ai_text
                     intent = "chat"
                     search_query = ""
+                    action_param = None
                     thought = ""
 
                 save_message(payload.recipient_id, SenderEnum.bot, reply_text, MoodEnum.neutral, trigger_enum, payload.session_id, db)
@@ -179,6 +181,7 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
                         "reply": reply_text,
                         "intent": intent,
                         "search_query": search_query,
+                        "action_param": action_param,
                         "audio_base64": audio_base64,
                         "mood_detected": mood_str,
                         "depression_risk": is_at_risk,

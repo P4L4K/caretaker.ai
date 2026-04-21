@@ -18,6 +18,7 @@ This context is fed into the system prompt and recommendation engine.
 """
 
 import os
+import re
 import json
 import requests
 from datetime import datetime, timedelta
@@ -26,6 +27,28 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
 from tables.conversation_history import ConversationMessage, SenderEnum, MoodEnum
+
+# Circuit breaker: skip Gemini sentiment call after a quota failure
+# (saves the remaining quota for the main voice bot response)
+_sentiment_cb_open = False
+_sentiment_cb_until: datetime | None = None
+_SENTIMENT_CB_COOLDOWN = 300  # seconds
+
+def _sentiment_gemini_allowed() -> bool:
+    global _sentiment_cb_open, _sentiment_cb_until
+    if _sentiment_cb_open:
+        if _sentiment_cb_until and datetime.utcnow() >= _sentiment_cb_until:
+            _sentiment_cb_open = False
+            _sentiment_cb_until = None
+        else:
+            return False
+    return True
+
+def _sentiment_gemini_fail():
+    global _sentiment_cb_open, _sentiment_cb_until
+    _sentiment_cb_open = True
+    _sentiment_cb_until = datetime.utcnow() + timedelta(seconds=_SENTIMENT_CB_COOLDOWN)
+    print("[sentiment_engine] Circuit breaker OPEN — skipping Gemini for 5 min to preserve quota")
 
 
 # ─────────────────────────────────────────────
@@ -72,6 +95,32 @@ def _dominant_mood(mood_timeline: list) -> str:
     for m in mood_timeline:
         counts[m] = counts.get(m, 0) + 1
     return max(counts, key=counts.get)
+
+def _partial_json_extract(raw: str) -> dict:
+    """Field-by-field regex fallback for truncated Gemini JSON."""
+    patterns = {
+        "current_mood":        r'"current_mood"\s*:\s*"([^"]+)"',
+        "dominant_mood":       r'"dominant_mood"\s*:\s*"([^"]+)"',
+        "trend":               r'"trend"\s*:\s*"([^"]+)"',
+        "stability_score":     r'"stability_score"\s*:\s*([0-9.]+)',
+        "recommended_action":  r'"recommended_action"\s*:\s*"([^"]+)"',
+        "urgency":             r'"urgency"\s*:\s*"([^"]+)"',
+        "summary":             r'"summary"\s*:\s*"([^"]*)"',
+        "confidence":          r'"confidence"\s*:\s*([0-9.]+)',
+    }
+    result = {}
+    for key, pattern in patterns.items():
+        m = re.search(pattern, raw)
+        if m:
+            val = m.group(1)
+            if key in ("stability_score", "confidence"):
+                try:
+                    val = float(val)
+                except ValueError:
+                    pass
+            result[key] = val
+    return result if result else None
+
 
 def _recommend_action(current_mood: str, trend: str, urgency: str) -> str:
     """Rule-based recommendation before Gemini override."""
@@ -133,10 +182,9 @@ def analyze_sentiment_with_history(
 
     # 3. Gemini deep analysis — sends history + current message
     api_key = os.environ.get('GEMINI_API_KEY')
-    api_endpoint = os.environ.get('GEMINI_API_ENDPOINT')
 
     gemini_result = None
-    if api_key and (history_snippets or current_text):
+    if api_key and (history_snippets or current_text) and _sentiment_gemini_allowed():
         history_text = "\n".join(
             [f"  [{i+1}] (mood={h['mood']}) \"{h['text']}\"" for i, h in enumerate(history_snippets)]
         ) or "  (no prior messages)"
@@ -148,38 +196,28 @@ Recent conversation history (chronological, user messages only):
 
 Current message (just now): "{current_text}"
 
-Analyze the full emotional arc and respond with EXACTLY ONE JSON object and NO OTHER TEXT.
+Respond with EXACTLY ONE JSON object and NO OTHER TEXT. No markdown, no code fences.
 
-### JSON FORMAT:
-{{
-  "current_mood": "happy|sad|anxious|angry|neutral|distressed|lonely|bored|relaxed|spiritual",
-  "dominant_mood": "same options as above",
-  "trend": "improving|worsening|stable",
-  "stability_score": 0.0-1.0,
-  "recommended_action": "music|story|conversation|reminder|alert",
-  "urgency": "low|medium|high",
-  "summary": "Short Hinglish summary, max 12 words",
-  "confidence": 0.0-1.0
-}}
-
-RULES:
-- Return ONLY the JSON object. No explanation, no prefix.
-- Ensure all quotes are closed.
-- summary should be warm and human, e.g. "Thoda udaas hain, par stable hain" or "Aaj bahut khush lag rahe hain!"
+{{"current_mood":"happy|sad|anxious|angry|neutral|distressed|lonely|bored|relaxed|spiritual","dominant_mood":"same options","trend":"improving|worsening|stable","stability_score":0.0,"recommended_action":"music|story|conversation|reminder|alert","urgency":"low|medium|high","summary":"Short Hinglish summary max 10 words","confidence":0.0}}
 """
 
         try:
             data = call_gemini(
-                {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1, "maxOutputTokens": 400}},
-                timeout=12, caller="[sentiment_engine]"
+                {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1, "maxOutputTokens": 200}},
+                timeout=10, caller="[sentiment_engine]"
             )
             if data and data.get("candidates"):
                 raw = data["candidates"][0]["content"]["parts"][0]["text"].strip()
                 gemini_result = safe_json_parse(raw)
                 if not gemini_result:
-                    print(f"[sentiment_engine] JSON Parse Failed for raw: {raw}")
+                    gemini_result = _partial_json_extract(raw)
+                if not gemini_result:
+                    print(f"[sentiment_engine] JSON parse failed: {raw[:100]}")
+            else:
+                _sentiment_gemini_fail()
         except Exception as e:
             print(f"[sentiment_engine] Gemini error: {e}")
+            _sentiment_gemini_fail()
 
     # 4. Merge Gemini result with local computation
     if gemini_result:

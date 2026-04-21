@@ -124,9 +124,8 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
     gemini_payload = {
         "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser says: {user_text}"}]}],
         "generationConfig": {
-            "maxOutputTokens": 1000, 
-            "temperature": 0.7,
-            "responseMimeType": "application/json"
+            "maxOutputTokens": 1500,
+            "temperature": 0.7
         }
     }
 
@@ -137,20 +136,14 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
                 import json
                 try:
                     ai_json = json.loads(ai_text)
-                    # Prioritize "reply", fallback to "message", then "message" inside "recommendation"
                     reply_text = ai_json.get("reply")
-                    if not reply_text:
-                        # Fallback for old schema or nested recommendation
-                        rec = ai_json.get("recommendation", {})
-                        if isinstance(rec, dict):
-                            reply_text = rec.get("message")
-                        if not reply_text:
-                            reply_text = ai_json.get("message")
-                    
-                    # Absolute fallback: if still empty/none, use the raw text but this shouldn't happen
-                    if not reply_text:
-                        reply_text = ai_text
+                    thought = ai_json.get("thought", "")
+                    if thought:
+                        print(f"[Saathi Thought] {thought}")
                         
+                    if not reply_text:
+                        reply_text = ai_json.get("message") or ai_text
+                    
                     intent = ai_json.get("intent", "chat")
                     search_query = ai_json.get("search_query", "")
                 except Exception as ex:
@@ -158,6 +151,7 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
                     reply_text = ai_text
                     intent = "chat"
                     search_query = ""
+                    thought = ""
 
                 save_message(payload.recipient_id, SenderEnum.bot, reply_text, MoodEnum.neutral, trigger_enum, payload.session_id, db)
  
@@ -568,6 +562,55 @@ async def init_reminders(recipient_id: int, authorization: Optional[str] = Heade
         return ResponseSchema(code=400, status="error", message="Reminders already initialized")
     create_default_reminders(recipient_id, db)
     return ResponseSchema(code=200, status="success", message="Default reminders initialized")
+
+
+# ─────────────────────────────────────────────
+# Emergency alert
+# ─────────────────────────────────────────────
+class EmergencyRequest(BaseModel):
+    recipient_id: int
+    message: str = "Emergency alert triggered from voice bot"
+
+
+@router.post('/voice-bot/emergency', response_model=ResponseSchema)
+async def trigger_emergency(
+    payload: EmergencyRequest,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    caretaker = verify_and_get_caretaker(authorization, db)
+    recipient = db.query(CareRecipient).filter(
+        CareRecipient.id == payload.recipient_id,
+        CareRecipient.caretaker_id == caretaker.id
+    ).first()
+    if not recipient:
+        return ResponseSchema(code=404, status="error", message="Recipient not found")
+
+    save_message(
+        payload.recipient_id, SenderEnum.user, payload.message,
+        MoodEnum.distressed, TriggerTypeEnum.user_initiated, "emergency", db
+    )
+
+    alert_sent = False
+    if caretaker.email:
+        try:
+            from utils.email import send_fall_alert_email
+            from datetime import timezone as _tz
+            await send_fall_alert_email(caretaker.email, {
+                "timestamp": datetime.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
+                "fall_count": 1,
+                "location": "Voice Bot — Emergency Button",
+                "fall_details": []
+            })
+            alert_sent = True
+        except Exception as e:
+            print(f"[emergency] Email alert failed: {e}")
+
+    print(f"[EMERGENCY] Triggered for recipient {payload.recipient_id} by {caretaker.username}")
+    return ResponseSchema(
+        code=200, status="success", message="Emergency alert triggered",
+        result={"alert_sent": alert_sent, "recipient": recipient.full_name}
+    )
 
 
 # ── STANDALONE TTS ENDPOINT ──

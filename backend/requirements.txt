@@ -5,14 +5,14 @@ tensorflow-hub
 librosa
 soundfile
 joblib
-fastapi
+fastapi==0.68.2
 sqlalchemy
 python-jose[cryptography]
-pydantic[email]
+pydantic[email]==2.12.5
 psycopg2-binary
 python-multipart
 uvicorn
-fastapi-mail 
+fastapi-mail==1.6.2 
 python-dotenv
 requests
 PyPDF2
@@ -27,3 +27,5 @@ google-cloud-texttospeech
 google-generativeai
 rapidfuzz
 faiss-cpu
+torch
+ultralytics

@@ -46,7 +46,9 @@ router = APIRouter(tags=['Video Monitoring'], prefix='/video-monitoring')
 # ============================================================================
 # PERSISTENCE HANDLER
 # ============================================================================
-STATUS_FILE = Path("processing_status.json")
+# Define persistent status file path
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STATUS_FILE = Path(os.path.join(BASE_DIR, "processing_status.json"))
 
 def load_process_status():
     """Load processing status from JSON file"""

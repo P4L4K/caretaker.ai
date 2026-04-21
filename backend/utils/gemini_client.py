@@ -18,12 +18,18 @@ import re
 
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
-# Optimized model order: Stable models first, slower preview models last.
+# Optimized model order: newest/lightest first, previews/experimental last.
 FALLBACK_MODELS = [
-    "gemini-1.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
-    "gemini-1.5-pro",
-    "gemini-flash-latest"
+    "gemini-2.0-flash-lite",
+    "gemini-flash-latest",
+    "gemini-2.5-flash-preview-05-20",
+    "gemini-2.5-flash-preview-04-17",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash-exp",
+    "gemini-2.0-flash-thinking-exp-01-21",
+    "gemini-1.5-flash-8b",
 ]
 
 def safe_json_parse(text: str) -> dict | None:

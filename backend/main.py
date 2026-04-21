@@ -15,7 +15,8 @@ import time
 import re
 from typing import Dict, Optional, List
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from contextlib import asynccontextmanager
 import psutil
 from pathlib import Path
 import base64
@@ -63,7 +64,83 @@ medications_tables.Base.metadata.create_all(bind=engine)
 allergies_tables.Base.metadata.create_all(bind=engine)
 admin_tables.Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="CareTaker AI Backend")
+@asynccontextmanager
+async def lifespan(_app):
+    from sqlalchemy import String, Text, Integer, Float, Boolean, Date, DateTime, Numeric
+    TYPE_MAP = {
+        String: "VARCHAR", Text: "TEXT", Integer: "INTEGER", Float: "FLOAT",
+        Boolean: "BOOLEAN", Date: "DATE", DateTime: "TIMESTAMP", Numeric: "NUMERIC",
+    }
+    _all_bases = [
+        user_tables.Base, recordings_tables.Base, med_reports_tables.Base,
+        video_analysis_tables.Base, vital_signs_tables.Base, audio_events_tables.Base,
+        medical_conditions_tables.Base, disease_dictionary_tables.Base,
+        conversation_history_tables.Base, environment_tables.Base,
+        medications_tables.Base, allergies_tables.Base, admin_tables.Base,
+    ]
+    try:
+        _insp = inspect(engine)
+        _added = []
+        for _base in _all_bases:
+            for _tname, _table in _base.metadata.tables.items():
+                if not _insp.has_table(_tname):
+                    continue
+                _db_cols = {c["name"] for c in _insp.get_columns(_tname)}
+                for _col in _table.columns:
+                    if _col.name in _db_cols:
+                        continue
+                    _col_type = "VARCHAR"
+                    for _sa_type, _ddl in TYPE_MAP.items():
+                        if isinstance(_col.type, _sa_type):
+                            _col_type = _ddl
+                            break
+                    _default_clause = ""
+                    if _col.default is not None and hasattr(_col.default, "arg") and not callable(_col.default.arg):
+                        _v = _col.default.arg
+                        if isinstance(_v, bool):
+                            _default_clause = f" DEFAULT {'TRUE' if _v else 'FALSE'}"
+                        elif isinstance(_v, (int, float)):
+                            _default_clause = f" DEFAULT {_v}"
+                        elif isinstance(_v, str):
+                            _default_clause = f" DEFAULT '{_v}'"
+                    elif _col.nullable is False and _col_type == "BOOLEAN":
+                        _default_clause = " DEFAULT FALSE"
+                    with engine.begin() as _conn:
+                        _conn.execute(text(
+                            f"ALTER TABLE {_tname} ADD COLUMN IF NOT EXISTS {_col.name} {_col_type}{_default_clause}"
+                        ))
+                    _added.append(f"{_tname}.{_col.name}")
+        print(f"[Schema sync] Added missing columns: {', '.join(_added)}" if _added else "[Schema sync] All columns present — no changes needed.")
+    except Exception as _e:
+        print(f"[Schema sync] Warning: {_e}")
+
+    global weather_model
+    try:
+        from weather import WeatherPredictionModel as _WPM
+        weather_model = _WPM(os.getenv("WEATHER_API_KEY"), os.getenv("DEFAULT_CITY", "Jammu"))
+        print("[OK] Weather service initialized successfully")
+    except Exception as _e:
+        print(f"[ERROR] Failed to initialize weather service: {_e}")
+
+    try:
+        _seed_db = SessionLocal()
+        disease_dictionary_tables.seed_disease_dictionary(_seed_db)
+        _seed_db.close()
+        print("[OK] Disease dictionary seeded")
+    except Exception as _e:
+        print(f"[ERROR] Disease dictionary seeding failed: {_e}")
+
+    try:
+        from services.notification_scheduler import start_scheduler
+        start_scheduler()
+        print("[OK] Notification scheduler started")
+    except Exception as _e:
+        print(f"[ERROR] Notification scheduler failed to start: {_e}")
+
+    yield
+
+
+app = FastAPI(title="CareTaker AI Backend", lifespan=lifespan)
 
 # Configure CORS
 app.add_middleware(
@@ -76,33 +153,8 @@ app.add_middleware(
 )
 
 # Mount the model directory to be served at /api/model
-app.mount("/api/model", StaticFiles(directory="../model"), name="model")
+app.mount("/api/model", StaticFiles(directory=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'model'))), name="model")
 
-@app.on_event("startup")
-def ensure_recordings_schema():
-    """Ensure columns exist on startup. Uses SQLAlchemy Inspect for DB-agnostic checks."""
-    try:
-        inspector = inspect(engine)
-        
-        # 1. recordings.care_recipient_id
-        if inspector.has_table("recordings"):
-            columns = [c["name"] for c in inspector.get_columns("recordings")]
-            if "care_recipient_id" not in columns:
-                with engine.begin() as conn:
-                    conn.execute(text("ALTER TABLE recordings ADD COLUMN care_recipient_id integer"))
-                    print("Added column care_recipient_id to recordings table")
-
-        # 2. care_recipients.report_summary
-        if inspector.has_table("care_recipients"):
-            columns_cr = [c["name"] for c in inspector.get_columns("care_recipients")]
-            if "report_summary" not in columns_cr:
-                with engine.begin() as conn:
-                    conn.execute(text("ALTER TABLE care_recipients ADD COLUMN report_summary text"))
-                    print("Added column report_summary to care_recipients table")
-                    
-        print("Startup schema check completed.")
-    except Exception as e:
-        print(f"Startup schema check warning: {e}")
 
 # Serve a static folder (optional) so files like a favicon can be served
 static_path = os.path.join(os.path.dirname(__file__), 'static')
@@ -144,6 +196,8 @@ app.include_router(video_monitoring.router, prefix="/api")
 from routes import audio_events
 app.include_router(audio_events.router, prefix="/api")
 app.include_router(voice_bot.router, prefix="/api")
+from routes import voice_bot_ws
+app.include_router(voice_bot_ws.router, prefix="/api")
 from routes import vitals as vitals_routes
 app.include_router(vitals_routes.router, prefix="/api")
 from routes import medical_history as medical_history_routes
@@ -448,7 +502,7 @@ async def get_current_weather(recipient_id: Optional[int] = None, db: Session = 
             "aqi": current.get('air_quality', {}).get('us-epa-index', 0),
             "condition": current.get('condition', {}).get('text', 'Unknown'),
             "location": data.get('location', {}).get('name', target_city or weather_model.city),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "status": "success"
         }
     except Exception as e:
@@ -457,34 +511,6 @@ async def get_current_weather(recipient_id: Optional[int] = None, db: Session = 
 # Add this with your other router includes (usually where you have other app.include_router() calls)
 app.include_router(weather_router, prefix="/api")
 
-# Add this with your other startup event handlers
-@app.on_event("startup")
-async def startup_event():
-    global weather_model
-    try:
-        API_KEY = os.getenv("WEATHER_API_KEY")
-        DEFAULT_CITY = os.getenv("DEFAULT_CITY", "Jammu")
-        weather_model = WeatherPredictionModel(API_KEY, DEFAULT_CITY)
-        print("[OK] Weather service initialized successfully")
-    except Exception as e:
-        print(f"[ERROR] Failed to initialize weather service: {e}")
-
-    # Seed disease dictionary
-    try:
-        seed_db = SessionLocal()
-        disease_dictionary_tables.seed_disease_dictionary(seed_db)
-        seed_db.close()
-        print("[OK] Disease dictionary seeded")
-    except Exception as e:
-        print(f"[ERROR] Disease dictionary seeding failed: {e}")
-
-    # Start background notification scheduler (medicine reminders, stock decrement, auto-reorder)
-    try:
-        from services.notification_scheduler import start_scheduler
-        start_scheduler()
-        print("[OK] Notification scheduler started")
-    except Exception as e:
-        print(f"[ERROR] Notification scheduler failed to start: {e}")
 
 # Make sure this is at the end of the file
 # ... (existing imports)
@@ -494,7 +520,7 @@ from socket_manager import sio_server
 # ... (existing code up to app = FastAPI(...))
 
 # Mount the model directory to be served at /api/model
-app.mount("/api/model", StaticFiles(directory="../model"), name="model")
+app.mount("/api/model", StaticFiles(directory=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'model'))), name="model")
 
 # ... (rest of the routes and startup events)
 

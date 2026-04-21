@@ -301,13 +301,26 @@ async def signup(request: Register, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         error_msg = str(e)
-        # Catch unique constraint violations (duplicate phone/email)
+        # Catch unique constraint violations (duplicate phone/email/username)
         if "UniqueViolation" in error_msg or "unique constraint" in error_msg.lower():
             if "phone_number" in error_msg:
-                raise HTTPException(status_code=400, detail="A care recipient with this phone number already exists")
-            elif "email" in error_msg:
+                # Check if it was specifically a care recipient phone number conflict
+                if "ix_care_recipients_phone_number" in error_msg:
+                    raise HTTPException(status_code=400, detail="A care recipient with this phone number already exists")
+                elif "ix_caretakers_phone_number" in error_msg:
+                    raise HTTPException(status_code=400, detail="An account with this phone number already exists")
+            
+            if "ix_caretakers_email" in error_msg or "ix_care_recipients_email" in error_msg:
                 raise HTTPException(status_code=400, detail="A user with this email already exists")
+            elif "ix_caretakers_username" in error_msg:
+                raise HTTPException(status_code=400, detail="Username already exists")
             else:
+                # Fallback to generic parsing if constraint names are missed
+                if "email" in error_msg.lower() and "Key (email)=" in error_msg:
+                    raise HTTPException(status_code=400, detail="A user with this email already exists")
+                if "username" in error_msg.lower() and "Key (username)=" in error_msg:
+                    raise HTTPException(status_code=400, detail="Username already exists")
+                
                 raise HTTPException(status_code=400, detail="An account with these details already exists")
         raise HTTPException(status_code=500, detail=f"Signup failed: {error_msg}")
 
@@ -414,7 +427,29 @@ async def register_with_face(
         raise e
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+        error_msg = str(e)
+        # Catch unique constraint violations (duplicate phone/email/username)
+        if "UniqueViolation" in error_msg or "unique constraint" in error_msg.lower():
+            if "phone_number" in error_msg:
+                # Check if it was specifically a care recipient phone number conflict
+                if "ix_care_recipients_phone_number" in error_msg:
+                    raise HTTPException(status_code=400, detail="A care recipient with this phone number already exists")
+                elif "ix_caretakers_phone_number" in error_msg:
+                    raise HTTPException(status_code=400, detail="An account with this phone number already exists")
+            
+            if "ix_caretakers_email" in error_msg or "ix_care_recipients_email" in error_msg:
+                raise HTTPException(status_code=400, detail="A user with this email already exists")
+            elif "ix_caretakers_username" in error_msg:
+                raise HTTPException(status_code=400, detail="Username already exists")
+            else:
+                # Fallback to generic parsing if constraint names are missed
+                if "email" in error_msg.lower() and "Key (email)=" in error_msg:
+                    raise HTTPException(status_code=400, detail="A user with this email already exists")
+                if "username" in error_msg.lower() and "Key (username)=" in error_msg:
+                    raise HTTPException(status_code=400, detail="Username already exists")
+                
+                raise HTTPException(status_code=400, detail="An account with these details already exists")
+        raise HTTPException(status_code=500, detail=f"Registration failed: {error_msg}")
 
 
 # ---------- UPDATE FACE FOR EXISTING USER ----------
@@ -477,7 +512,7 @@ async def login(request: Login, db: Session = Depends(get_db)):
             
         print(f"User found: {user is not None}, Role: {role if user else 'N/A'}")
         
-        if not user or user.password != request.password:
+        if not user or user.password != request.password.strip():
             print(f"Login failed: Incorrect username or password for user '{request.username}'")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

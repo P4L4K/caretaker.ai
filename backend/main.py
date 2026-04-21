@@ -538,5 +538,15 @@ app = socketio.ASGIApp(sio_server, fastapi_app)
 
 if __name__ == "__main__":
     import uvicorn
+    import logging
+
+    # Suppress WinError 10054 — harmless Windows noise when browser closes WS abruptly
+    class _DropConnectionReset(logging.Filter):
+        def filter(self, record):
+            msg = record.getMessage()
+            return "_call_connection_lost" not in msg and "10054" not in msg
+
+    logging.getLogger("asyncio").addFilter(_DropConnectionReset())
+
     # process_workers=1 because TensorFlow might not like multiple processes due to GPU memory
     uvicorn.run(app, host="0.0.0.0", port=8000)

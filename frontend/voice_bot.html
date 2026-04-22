@@ -1247,8 +1247,12 @@
         async function speak(text, base64Audio = null) {
             if (synth.speaking) synth.cancel();
 
-            // Strip emoji from speech
-            const cleanText = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
+            // Strip emoji and markdown formatting so TTS reads naturally
+            let cleanText = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
+            cleanText = cleanText.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1'); // **bold** / *italic*
+            cleanText = cleanText.replace(/#{1,6}\s+/g, '').replace(/^[\-\*•]\s*/gm, '');          // ## headings / bullet points
+            cleanText = cleanText.replace(/\n{2,}/g, '. ').replace(/\n/g, ', ');                   // newlines → spoken pauses
+            cleanText = cleanText.trim();
             if (!cleanText) return;
             state.lastSpokenText = cleanText;
 
@@ -2696,8 +2700,7 @@
                     case 'show_vitals': {
                         const tCard = document.getElementById('mood-trend-card');
                         if (tCard) { tCard.classList.remove('hidden'); tCard.scrollIntoView({ behavior: 'smooth' }); }
-                        const msg = hindi ? '📊 आपके विटल्स और स्वास्थ्य की जानकारी यहाँ है।' : '📊 Here are your vitals and health summary.';
-                        addUIMessage('bot', msg); speak(msg); return;
+                        break; // AI speaks the actual vitals data
                     }
                     // ── UI Navigation ─────────────────────────────────────────────
                     case 'scroll_top': {
@@ -2798,8 +2801,7 @@
                         renderMedicineCard();
                         const card = document.getElementById('medicine-card');
                         if (card) card.classList.remove('hidden');
-                        const msg = hindi ? '📋 आपकी आज की पूरी रिपोर्ट — सेहत, दवाई, और रिमाइंडर सब यहाँ हैं।' : '📋 Your daily report — health, medicines, and reminders are all here.';
-                        addUIMessage('bot', msg); speak(msg); return;
+                        break; // AI speaks the full daily health summary
                     }
                     case 'call_caretaker': {
                         startVideoCall();
@@ -2818,8 +2820,7 @@
                         renderMedicineCard();
                         const card = document.getElementById('medicine-card');
                         if (card) { card.classList.remove('hidden'); card.scrollIntoView({ behavior: 'smooth' }); }
-                        const msg = hindi ? '💊 आपकी दवाइयाँ यहाँ हैं।' : '💊 Here are your medicines.';
-                        addUIMessage('bot', msg); speak(msg); return;
+                        break; // AI speaks the actual medicine list
                     }
                     case 'show_reminders': {
                         fetchReminders();
@@ -2837,8 +2838,7 @@
                     case 'health_status': {
                         const tCard = document.getElementById('mood-trend-card');
                         if (tCard) tCard.scrollIntoView({ behavior: 'smooth' });
-                        const msg = hindi ? '🏥 आपके स्वास्थ्य की जानकारी दिखा रहा हूँ।' : '🏥 Showing your health summary.';
-                        addUIMessage('bot', msg); speak(msg); return;
+                        break; // AI speaks the actual health status
                     }
                 }
             }

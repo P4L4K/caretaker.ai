@@ -302,6 +302,11 @@ class UnitedMonitor:
         # Only fires if the body was ALREADY showing fall characteristics
         # (tilting torso, rising LSTM score, or horizontal bbox) before vanishing.
         # Walking out of frame = body stays upright throughout → will NOT trigger.
+        #
+        # BUG FIX: Preserve the flag that may have been set by the normal fall-trigger
+        # path above (line 287). The disappearance check may additionally set it,
+        # so we OR both sources together at the end.
+        _normal_fall_fired = self._fall_event_just_fired
         self._fall_event_just_fired = False
         if (
             self._monitored_was_present and
@@ -338,6 +343,9 @@ class UnitedMonitor:
                     self._last_event_frame = self._frame_counter
                     self._disappear_fall_fired = True
                     print(f"[UnitedMonitor] Pose-aware disappearance fall: torso={avg_torso:.1f}° lstm={avg_lstm:.2f} horiz={any_horiz}")
+
+        # Merge: normal fall-trigger OR disappearance-fall both count as an event
+        self._fall_event_just_fired = _normal_fall_fired or self._fall_event_just_fired
 
         # Inactivity
         inactivity_res = self._inactivity.update([monitored_box.tolist()] if monitored_box is not None else [], now)

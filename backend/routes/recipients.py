@@ -48,40 +48,70 @@ def _run_medical_history_pipeline_v2(recipient_id: int, report_id: int, filename
         report.processing_status = ReportProcessingStatus.processing
         db.flush()
 
-        # ── 1. Text extraction ────────────────────────────────────────────────
+        # ── 1. Strategy Decision: Multimodal Vision vs Text Map-Reduce ────────
         text = ""
+        is_scanned = False
         if report.data:
             try:
+                # Try fast extraction first
                 text = extract_text_from_bytes(report.data, filename)
+                # If text is extremely short for a medical report, assume it's scanned/image-based
+                if len(text.strip()) < 250:
+                    print(f"[pipeline_v3] Text too sparse ({len(text)} chars). Switching to VISION.")
+                    is_scanned = True
             except Exception as e:
-                print(f"[pipeline_v2] Text extraction failed: {e}")
+                print(f"[pipeline_v3] Baseline extraction failed: {e}. Falling back to VISION.")
+                is_scanned = True
 
-        if not text:
-            print(f"[pipeline_v2] No text extracted from report {report_id}")
-            report.processing_status = ReportProcessingStatus.failed
-            db.commit()
-            return
-
-        # ── 2. Hybrid lab extraction (rule → fuzzy → LLM fallback) ─────────
         upload_date = report.uploaded_at.date() if report.uploaded_at else datetime.date.today()
-        hybrid_result = run_hybrid_lab_extraction(
-            text=text, report_id=report_id,
-            care_recipient_id=recipient_id, upload_date=upload_date, db=db,
-        )
-        report_date_obj = hybrid_result["report_date"]
+        
+        if is_scanned and report.data:
+            # ── 2A. VISION PIPELINE (Multimodal) ──────────────────────────────
+            from services.report_ingestion import run_vision_lab_extraction
+            hybrid_result = run_vision_lab_extraction(
+                image_bytes=report.data,
+                mime_type=report.mime_type or "image/jpeg",
+                report_id=report_id,
+                care_recipient_id=recipient_id,
+                upload_date=upload_date,
+                db=db
+            )
+            report_date_obj = hybrid_result["report_date"]
+            
+            # Since we have no text for the legacy clinical extractor, we rely on Vision's notes
+            extracted = {
+                "report_date": str(report_date_obj),
+                "diagnoses": [],
+                "resolved_diagnoses": [],
+                "lab_values": {
+                    row["metric_name"]: {"value": row["normalized_value"], "unit": row["normalized_unit"]}
+                    for row in hybrid_result["lab_rows"]
+                },
+                "medications": [],
+                "doctor_notes": hybrid_result.get("clinical_notes", "Vision-extracted report"),
+                "symptoms": [],
+                "extraction_template": "VISION_MULTIMODAL"
+            }
+        else:
+            # ── 2B. TEXT PIPELINE (Map-Reduce Hybrid) ─────────────────────────
+            from services.report_ingestion import run_hybrid_lab_extraction
+            hybrid_result = run_hybrid_lab_extraction(
+                text=text, report_id=report_id,
+                care_recipient_id=recipient_id, upload_date=upload_date, db=db,
+            )
+            report_date_obj = hybrid_result["report_date"]
+            
+            # Clinical context map-reduce
+            report_date_str = str(report_date_obj) if report_date_obj else None
+            extracted = extract_structured_report(text, report_date_hint=report_date_str)
+            extracted["lab_values"] = {
+                row["metric_name"]: {"value": row["normalized_value"], "unit": row["normalized_unit"]}
+                for row in hybrid_result["lab_rows"]
+            }
+            extracted["extraction_template"] = hybrid_result["template"]
+
         if report_date_obj:
             report.report_date = report_date_obj
-        print(f"[pipeline_v2] Lab rows saved={hybrid_result['saved_count']} "
-              f"template={hybrid_result['template']} date={report_date_obj}")
-
-        # ── 3. Gemini: diagnoses, medications, notes (NOT lab values) ──────
-        report_date_str = str(report_date_obj) if report_date_obj else None
-        extracted = extract_structured_report(text, report_date_hint=report_date_str)
-        extracted["lab_values"] = {
-            row["metric_name"]: {"value": row["normalized_value"], "unit": row["normalized_unit"]}
-            for row in hybrid_result["lab_rows"]
-        }
-        extracted["extraction_template"] = hybrid_result["template"]
         report.extracted_data = extracted
 
         # ── 4. Disease detection ──────────────────────────────────────────────
@@ -138,6 +168,8 @@ def _run_medical_history_pipeline_v2(recipient_id: int, report_id: int, filename
         try:
             from services.recommendation_engine import generate_recommendations
             generate_recommendations(recipient_id, db)
+            _process_recommendation_actions(recipient_id, db)
+
         except Exception as e:
             print(f"[pipeline_v2] recommendations failed: {e}")
 
@@ -1081,18 +1113,18 @@ async def update_allergy(recipient_id: int, all_id: int, data: AllergyInput, aut
 
 # Recommendations
 @router.get("/care-recipients/{recipient_id}/recommendations", response_model=ResponseSchema)
+@router.get("/recipients/{recipient_id}/recommendations", response_model=ResponseSchema)
 async def get_recommendations(recipient_id: int, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
     from tables.medical_recommendations import MedicalRecommendation
     recs = db.query(MedicalRecommendation).filter(
         MedicalRecommendation.care_recipient_id == recipient_id
     ).order_by(MedicalRecommendation.created_at.desc()).limit(15).all()
 
-    # Deduplicate by metric locally to only return the latest instance per metric
     latest_recs = {}
     for r in recs:
         if r.metric not in latest_recs:
             latest_recs[r.metric] = r
-
+    
     results = []
     for r in latest_recs.values():
         results.append({
@@ -1105,7 +1137,7 @@ async def get_recommendations(recipient_id: int, authorization: Optional[str] = 
             "source": r.source,
             "confidence_score": r.confidence_score,
             "actions": r.actions,
-            "created_at": r.created_at.isoformat() if r.created_at else None
+            "created_at": (r.created_at.isoformat() + "Z") if r.created_at else None
         })
 
     # Sort so critical/high come first, matching UI expectation
@@ -1114,9 +1146,56 @@ async def get_recommendations(recipient_id: int, authorization: Optional[str] = 
 
     return {"code": 200, "status": "success", "message": "Recommendations retrieved", "result": results}
 
+
+@router.post("/care-recipients/{recipient_id}/recommendations/refresh", response_model=ResponseSchema)
+async def refresh_recommendations(recipient_id: int, db: Session = Depends(get_db)):
+    """Triggers an on-demand regeneration of clinical recommendations."""
+    from services.recommendation_engine import generate_recommendations
+    try:
+        generate_recommendations(recipient_id, db)
+        _process_recommendation_actions(recipient_id, db)
+        return {"code": 200, "status": "success", "message": "Recommendations refreshed successfully"}
+    except Exception as e:
+        print(f"[rec_refresh] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/care-recipients/{recipient_id}/health-status", response_model=ResponseSchema)
 async def get_health_status(recipient_id: int, db: Session = Depends(get_db)):
     """Backend endpoint for Architect Rule #11 - State of Health categorical score."""
     from services.recommendation_engine import get_state_of_health
     status = get_state_of_health(recipient_id, db)
     return {"code": 200, "status": "success", "message": "Health status retrieved", "result": status}
+
+
+def _process_recommendation_actions(recipient_id: int, db: Session):
+    """Detects structured payloads in recent recommendations and routes to stubs."""
+    from tables.medical_recommendations import MedicalRecommendation
+    import datetime
+    
+    # Only look at recommendations from the last 10 minutes (current run)
+    since = datetime.datetime.utcnow() - datetime.timedelta(minutes=10)
+    recs = db.query(MedicalRecommendation).filter(
+        MedicalRecommendation.care_recipient_id == recipient_id,
+        MedicalRecommendation.created_at >= since,
+        MedicalRecommendation.action_payload != None
+    ).all()
+    
+    for rec in recs:
+        payload = rec.action_payload
+        if not payload:
+            continue
+        action_type = payload.get("type")
+        params = payload.get("suggested_params", {})
+        
+        print(f"[rec_actions] Processing ACTION: {action_type} for {rec.metric}")
+        
+        # REQUIRES_CONFIG: Add real API endpoints for Lab/Pharmacy integrations
+        if action_type == "lab_order":
+            # TODO: POST /api/external/diagnostics/order
+            print(f"[STUB] Created Lab Order for {rec.metric}")
+        elif action_type == "prescription":
+            # TODO: POST /api/external/pharmacy/prescription
+            print(f"[STUB] Created Prescription draft for {params.get('drug', 'medication')}")
+        elif action_type == "monitor":
+            # TODO: Trigger higher frequency IoT vitals polling
+            print(f"[STUB] Escalated monitoring frequency for Recipient {recipient_id}")

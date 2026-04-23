@@ -612,3 +612,125 @@ def chat_with_patient_ai(patient_context: dict, chat_history: list, user_message
     except Exception as e:
         print(f"[summarizer] AI Case Chat failed: {e}")
         return "An error occurred during clinical data analysis."
+
+def chunk_text(text: str, chunk_size: int = 3000, overlap: int = 200) -> list[str]:
+    """Split text into overlapping windows for processing."""
+    if not text:
+        return []
+    
+    # Use approximate word-count-based chunking
+    words = text.split()
+    chunks = []
+    
+    i = 0
+    while i < len(words):
+        chunk_words = words[i : i + chunk_size]
+        chunks.append(" ".join(chunk_words))
+        i += (chunk_size - overlap)
+        
+        # Guard against infinite loop
+        if chunk_size <= overlap:
+            break
+            
+    return chunks
+
+
+def summarize_long_text(text: str, target_words: int = 250) -> str:
+    """Process long documents via map-reduce summarization to avoid truncation context loss."""
+    if not text:
+        return ''
+        
+    # If text is short enough, just summarize directly
+    if len(text.split()) < 4000:
+        return summarize_text_via_gemini(text, target_words=target_words)
+        
+    print(f"[summarizer] Long document detected ({len(text.split())} words). Using map-reduce...")
+    
+    # Map stage: summarize each chunk
+    chunks = chunk_text(text, chunk_size=3000, overlap=300)
+    summaries = []
+    for i, chunk in enumerate(chunks):
+        print(f"[summarizer] Summarizing chunk {i+1}/{len(chunks)}...")
+        chunk_summary = extract_clinical_findings(chunk)
+        if chunk_summary:
+            summaries.append(chunk_summary)
+            
+    if not summaries:
+        return ""
+        
+    # Reduce stage: synthesize the final summary from chunk summaries
+    combined_context = "\n\n".join([f"--- Section {i+1} ---\n{s}" for i, s in enumerate(summaries)])
+    
+    # Final synthesis prompt
+    reduce_prompt = f"""You are a master clinical scribe. Below are clinical findings extracted from different sections of a large medical document.
+Integrate these findings into a single, cohesive, non-redundant clinical summary.
+
+DO NOT lose any critical diagnoses or medications mentioned in a subset of chunks.
+Synthesize the final report into clear sections.
+
+PARTIAL FINDINGS:
+{combined_context}"""
+
+    # We reuse summarize_text_via_gemini for the final synthesis
+    return summarize_text_via_gemini(reduce_prompt, target_words=target_words)
+
+def vision_extract_report(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
+    """Uses Gemini Vision to extract both structured labs and handwritten notes from a report image."""
+    import base64
+    from utils.gemini_client import call_gemini, safe_json_parse
+
+    if not image_bytes:
+        return {"lab_values": [], "clinical_notes": ""}
+
+    b64_data = base64.b64encode(image_bytes).decode("utf-8")
+
+    prompt = """You are a clinical data extractor with high-precision vision capabilities.
+Analyze this medical report image.
+
+1. Extract ALL lab values into a structured JSON array.
+2. Specifically identify any HANDWRITTEN annotations, margin notes, or doctor's script.
+3. Return a SINGLE JSON object with the following structure:
+{
+  "lab_values": [
+    {"raw_name": "Test Name", "value": 8.2, "unit": "mg/dL", "ref_low": 4.0, "ref_high": 6.0, "flag": "high"}
+  ],
+  "clinical_notes": "All handwritten text extracted here verbatim",
+  "has_handwriting": true/false
+}
+
+RULES:
+- If a value is handwritten, still include it in lab_values if it's a lab metric, BUT also put the full text in clinical_notes.
+- If unsure of a value due to blur, use null.
+- Extract clinical_notes as free-form text.
+"""
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": b64_data
+                        }
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "maxOutputTokens": 2048,
+            "temperature": 0.1
+        }
+    }
+
+    print(f"[summarizer] Calling Gemini Vision for extraction ({len(b64_data)} bytes)")
+    data = call_gemini(payload, timeout=60, caller="[summarizer/vision]")
+    
+    if data and "candidates" in data:
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        result = safe_json_parse(text)
+        if result:
+            return result
+
+    return {"lab_values": [], "clinical_notes": "", "has_handwriting": False}

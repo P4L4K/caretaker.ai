@@ -1,17 +1,13 @@
 """
-Central Gemini API client — multi-key, multi-model with automatic failover.
+Central Gemini API client.
 
 Configure via .env:
-    GEMINI_API_KEY=<primary key>
-    GEMINI_API_KEY_2=<second key>        # optional
-    GEMINI_API_KEY_3=<third key>         # optional
-    GEMINI_MODEL=gemini-1.5-flash        # primary model (switch anytime)
+    GEMINI_API_KEY=<your key>
+    GEMINI_MODEL=gemini-2.5-flash-lite   # switch model here anytime
     GEMINI_API_ENDPOINT=<optional full override URL>
 
-Failover order: try each model across ALL keys before moving to the next model.
-Example with 3 keys: key1/primary → key2/primary → key3/primary → key1/fallback1 → ...
-This finds a working key in 1-3 calls instead of burning through 12 models on key1 first.
-Free tier: ~1500 requests/day per key. Quota resets daily at midnight Pacific.
+Switch model:  just change GEMINI_MODEL in .env and restart the server.
+Available models (free tier): gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.0-flash
 """
 
 import os
@@ -22,49 +18,41 @@ import re
 
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
+# Optimized model order: Stable models first, slower preview models last.
 FALLBACK_MODELS = [
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
+    "gemini-1.5-flash",
     "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-flash-latest",
-    "gemini-2.5-pro",
+    "gemini-1.5-pro",
+    "gemini-flash-latest"
 ]
 
-# Module-level cache — 404 models are dead for the entire server session, no need to retry them
-_dead_models: set[str] = set()
-
-def _get_api_keys() -> list[str]:
-    """Collect all configured API keys in priority order."""
-    keys = []
-    # Primary key
-    primary = os.environ.get("GEMINI_API_KEY", "").strip()
-    if primary:
-        keys.append(primary)
-    # Additional keys: GEMINI_API_KEY_2, GEMINI_API_KEY_3, ... up to 10
-    for i in range(2, 11):
-        k = os.environ.get(f"GEMINI_API_KEY_{i}", "").strip()
-        if k:
-            keys.append(k)
-    return keys
-
 def safe_json_parse(text: str) -> dict | None:
-    if not text:
-        return None
+    """
+    Tries to parse text as JSON. If it fails, uses regex to extract 
+    the first JSON block { ... } and parses that.
+    """
+    if not text: return None
+    
+    # 1. Direct parse
     try:
+        # Clean up common LLM artifacts
         clean_text = text.replace("```json", "").replace("```", "").strip()
         return json.loads(clean_text)
     except:
         pass
+        
+    # 2. Regex extraction (for when LLM adds markdown or chat text)
     try:
         match = re.search(r'\{.*\}', text, re.DOTALL)
         if match:
             return json.loads(match.group())
     except:
         pass
+        
     return None
 
 def get_gemini_url(model: str, api_key: str) -> str:
+    """Build the Gemini URL for a specific model."""
     endpoint = os.environ.get("GEMINI_API_ENDPOINT")
     if endpoint:
         return f"{endpoint}?key={api_key}"
@@ -72,67 +60,67 @@ def get_gemini_url(model: str, api_key: str) -> str:
 
 def call_gemini(payload: dict, timeout: int = 30, caller: str = "") -> dict | None:
     """
-    Multi-key, multi-model failover.
-    Loop order: model-outer, key-inner — so primary model is tried on all keys
-    before falling back to the next model. Minimises wasted calls when one key
-    has quota and others are exhausted.
+    Make a Gemini API call with automatic model switching on failure.
+    Includes retry logic for transient network issues.
     """
-    api_keys = _get_api_keys()
-    if not api_keys:
-        print(f"{caller} [Gemini] ERROR: No API key set. Add GEMINI_API_KEY to .env")
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        print(f"{caller} [Gemini] ERROR: GEMINI_API_KEY is not set in .env")
         return None
 
-    primary_model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
-    models_to_try = [primary_model] + [m for m in FALLBACK_MODELS if m != primary_model]
+    # Get primary model from env
+    primary_model = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+    
+    # Create the sequence of models to try
+    models_to_try = [primary_model]
+    for model in FALLBACK_MODELS:
+        if model not in models_to_try:
+            models_to_try.append(model)
 
-    for model_index, model in enumerate(models_to_try):
-        if model in _dead_models:
-            continue
+    # Enhanced Internal retries with exponential backoff (Safety Pattern ✅ 1)
+    for i, model in enumerate(models_to_try):
+        url = get_gemini_url(model, api_key)
+        
+        for attempt in range(3): # Increased to 3 attempts
+            try:
+                resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=timeout)
 
-        for key_index, api_key in enumerate(api_keys):
-            key_label = f"key{key_index + 1}"
-            url = get_gemini_url(model, api_key)
+                if resp.status_code == 200:
+                    if i > 0:
+                        print(f"{caller} [Gemini] Success using fallback model: {model}")
+                    return resp.json()
 
-            for attempt in range(2):
-                try:
-                    resp = requests.post(
-                        url, json=payload,
-                        headers={"Content-Type": "application/json"},
-                        timeout=timeout
-                    )
-
-                    if resp.status_code == 200:
-                        if model_index > 0 or key_index > 0:
-                            print(f"{caller} [Gemini] Success — {key_label}, model: {model}")
-                        return resp.json()
-
-                    if resp.status_code in [429, 503]:
-                        print(f"{caller} [Gemini] {key_label} / '{model}' quota/busy (HTTP {resp.status_code}). Trying next key...")
-                        break  # try same model on next key
-
-                    if resp.status_code == 404:
-                        _dead_models.add(model)
-                        print(f"{caller} [Gemini] '{model}' not found — skipping for all keys (cached).")
-                        break  # skip all keys for this model
-
-                    if resp.status_code == 500 and attempt == 0:
-                        time.sleep(1)
+                # Quota errors (429) or Server Busy (503) -> Backoff then retry ONCE for same model, then switch
+                if resp.status_code in [429, 503]:
+                    if attempt < 2:
+                        wait_time = (attempt + 1) * 2
+                        print(f"{caller} [Gemini] Model '{model}' busy ({resp.status_code}). Retrying in {wait_time}s...")
+                        time.sleep(wait_time)
                         continue
+                    else:
+                        print(f"{caller} [Gemini] Model '{model}' exhausted after {attempt+1} tries. Switching...")
+                        break 
 
-                    print(f"{caller} [Gemini] HTTP {resp.status_code}: {resp.text[:300]}")
+                # Deprecated or missing model (404) -> Try next
+                if resp.status_code == 404:
+                    print(f"{caller} [Gemini] Model '{model}' not found. Skipping...")
                     break
 
-                except requests.exceptions.Timeout:
-                    print(f"{caller} [Gemini] {key_label} / '{model}' timed out. Trying next key...")
-                    break
-                except Exception as e:
-                    print(f"{caller} [Gemini] {key_label} / '{model}' connection error: {e}")
+                # Internal Error (500) -> Wait 1s and retry ONCE before switching
+                if resp.status_code == 500 and attempt == 0:
                     time.sleep(1)
                     continue
 
-            if model in _dead_models:
-                break  # stop trying other keys for a 404 model
+                print(f"{caller} [Gemini] HTTP {resp.status_code}: {resp.text[:300]}")
+                break # Non-recoverable or already retried
 
-    total_keys = len(api_keys)
-    print(f"{caller} [Gemini] All {total_keys} key(s) and all models exhausted. Add more keys or wait for quota reset (midnight PT).")
+            except requests.exceptions.Timeout:
+                print(f"{caller} [Gemini] Timeout for model '{model}'. Trying next...")
+                break # Switch model on timeout
+            except Exception as e:
+                print(f"{caller} [Gemini] Connection error with model '{model}': {e}")
+                time.sleep(1)
+                continue # Try second attempt for the same model
+
+    print(f"{caller} [Gemini] All models failed. Please check your API key and quotas.")
     return None

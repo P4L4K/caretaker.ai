@@ -11,6 +11,10 @@ from sqlalchemy import desc
 
 from tables.medical_conditions import LabValue
 from tables.medical_recommendations import MedicalRecommendation
+from tables.vital_signs import VitalSign
+from tables.audio_events import AudioEvent
+from tables.thresholds import ThresholdConfig
+from tables.users import CareRecipient
 
 # ─── Clinical Rules ─────────────────────────────────────────────────────────
 # Each rule maps an actionable condition to severity and concrete actions.
@@ -195,7 +199,50 @@ RULES = [
              ]},
         ]
     },
+    {
+        "metric": "Diastolic BP",
+        "thresholds": [
+            {"min": 120, "severity": "critical", "message": "Extremely high diastolic blood pressure (Crisis).",
+             "actions": [{"type": "doctor_visit", "text": "Seek emergency medical care immediately!"}]},
+            {"min": 90, "severity": "high", "message": "Stage 2 Hypertension (Diastolic).",
+             "actions": [{"type": "doctor_visit", "text": "Consult doctor for medication review."}, {"type": "diet", "text": "Strictly reduce sodium intake."}]},
+            {"min": 80, "severity": "medium", "message": "Stage 1 Hypertension (Diastolic).",
+             "actions": [{"type": "lifestyle", "text": "Monitor BP daily and manage weight."}]}
+        ]
+    },
+    {
+        "metric": "Heart Rate",
+        "thresholds": [
+            {"min": 120, "severity": "critical", "message": "Severe Tachycardia detected.",
+             "actions": [{"type": "doctor_visit", "text": "Seek immediate medical attention if persistent."}]},
+            {"min": 100, "severity": "high", "message": "High resting heart rate (Tachycardia).",
+             "actions": [{"type": "lifestyle", "text": "Rest and monitor; consult doctor if persistent."}]},
+            {"max": 50, "severity": "high", "message": "Low heart rate (Bradycardia).",
+             "actions": [{"type": "doctor_visit", "text": "Consult physician to rule out cardiac issues."}]}
+        ]
+    },
+    {
+        "metric": "SpO2",
+        "thresholds": [
+            {"max": 88, "severity": "critical", "message": "Critically low oxygen saturation.",
+             "actions": [{"type": "doctor_visit", "text": "URGENT: Requires immediate oxygen evaluation."}]},
+            {"max": 92, "severity": "high", "message": "Low oxygen saturation detected.",
+             "actions": [{"type": "doctor_visit", "text": "Monitor respiratory health closely; consult doctor."}]},
+            {"max": 94, "severity": "medium", "message": "Mildly low oxygen saturation.",
+             "actions": [{"type": "lifestyle", "text": "Ensure proper ventilation and check if activity-induced."}]}
+        ]
+    },
 ]
+
+# ─── Sensor Fusion Urgency Multipliers ───────────────────────────────────────
+# We apply a priority multiplier to recommendations if sensor signals show 
+# adverse trends.
+URGENCY_CONFIG = {
+    "vitals_deteriorating": 1.5,
+    "high_fall_risk": 2.0,
+    "respiratory_distress": 1.8,
+    "low_activity": 1.3
+}
 
 # ─── Combination Rules ──────────────────────────────────────────────────────
 
@@ -367,6 +414,10 @@ def prioritize_and_dedup(alerts: List[Dict], db: Session, recipient_id: int, now
             new_val = a["value"]
             if old_val is None or new_val is None or abs(new_val - old_val) / (old_val or 1) > 0.01:
                 final_alerts.append(a)
+            else:
+                # If identical, refresh the timestamp to show it was re-audited successfully
+                recent.created_at = now
+                # No need to append to final_alerts since DB is updated in-place
             
     # 3. Sort by priority
     final_alerts.sort(key=lambda x: PRIORITY.get(x["severity"], 0), reverse=True)
@@ -379,7 +430,84 @@ def prioritize_and_dedup(alerts: List[Dict], db: Session, recipient_id: int, now
     
     return capped
 
-# ─── State of Health Engine ──────────────────────────────────────────────────
+def fetch_sensor_fusion_context(recipient_id: int, db: Session, days: int = 7) -> Dict[str, Any]:
+    """Fetches trends from vitals and audio events for fusion."""
+    since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+    
+    # 1. Fetch Vitals
+    vitals = db.query(VitalSign).filter(
+        VitalSign.care_recipient_id == recipient_id,
+        VitalSign.recorded_at >= since
+    ).order_by(VitalSign.recorded_at.asc()).all()
+    
+    # 2. Fetch Audio Events (Coughs, Sneezes)
+    audio = db.query(AudioEvent).filter(
+        AudioEvent.care_recipient_id == recipient_id,
+        AudioEvent.detected_at >= since
+    ).all()
+    
+    # Simple slope calculation for HR and SpO2 with None-checks (Safety Pattern #5)
+    hr_values = [v.heart_rate for v in vitals if getattr(v, "heart_rate", None) is not None]
+    spo2_values = [v.oxygen_saturation for v in vitals if getattr(v, "oxygen_saturation", None) is not None]
+    
+    hr_trend = "stable"
+    if len(hr_values) > 3:
+        if hr_values[-1] > hr_values[0] * 1.1: hr_trend = "rising"
+        elif hr_values[-1] < hr_values[0] * 0.9: hr_trend = "falling"
+
+    spo2_trend = "stable"
+    if len(spo2_values) > 3:
+        if spo2_values[-1] < spo2_values[0] * 0.95: spo2_trend = "falling"
+
+    # Audio event safety check
+    respiratory_count = 0
+    for a in audio:
+        e_type = str(getattr(a, "event_type", "")).lower() # Safety Pattern #4
+        if "cough" in e_type or "sneeze" in e_type:
+            respiratory_count += 1
+
+    context = {
+        "vitals_count": len(vitals),
+        "hr_trend": hr_trend,
+        "spo2_trend": spo2_trend,
+        "audio_event_count": len(audio),
+        "is_respiratory_active": respiratory_count > 5
+    }
+    
+    # Debug telemetry (Safety Pattern 🧪 Step 3)
+    print(f"[sensor_fusion] Context built: HR={hr_trend}, SpO2={spo2_trend}, RespEvents={respiratory_count}")
+    return context
+
+
+def lookup_dynamic_threshold(metric: str, recipient: CareRecipient, db: Session) -> Optional[List[Dict]]:
+    """Look up patient-specific thresholds from the DB based on age and comorbidities."""
+    if not recipient:
+        return None
+        
+    age = recipient.age or 65
+    configs = db.query(ThresholdConfig).filter(
+        ThresholdConfig.metric == metric,
+        ThresholdConfig.age_min <= age,
+        ThresholdConfig.age_max >= age
+    ).all()
+    
+    # FUTURE: filter by comorbidity_tag if recipient has conditions
+    
+    if not configs:
+        return None
+        
+    return [
+        {
+            "min": getattr(c, "min_value", -float('inf')) if getattr(c, "min_value", None) is not None else -float('inf'),
+            "max": getattr(c, "max_value", float('inf')) if getattr(c, "max_value", None) is not None else float('inf'),
+            "severity": getattr(c, "severity", "medium"),
+            "message": getattr(c, "message_template", "Abnormal value detected"),
+            "actions": getattr(c, "actions", []) or [],
+            "action_payload": getattr(c, "action_payload", None)
+        }
+        for c in configs
+    ]
+
 
 def get_state_of_health(recipient_id: int, db: Session) -> Dict[str, Any]:
     """Computes a high-level health category (Architect Rule #11)."""
@@ -393,8 +521,9 @@ def get_state_of_health(recipient_id: int, db: Session) -> Dict[str, Any]:
         
     highest_sev = "low"
     for r in recs:
-        if PRIORITY[r.severity] > PRIORITY[highest_sev]:
-            highest_sev = r.severity
+        r_sev = getattr(r, "severity", "low").lower()
+        if PRIORITY.get(r_sev, 0) > PRIORITY.get(highest_sev, 0):
+            highest_sev = r_sev
             
     if highest_sev == "critical":
         return {"category": "Critical Risk", "color": "var(--danger)", "icon": "fa-exclamation-triangle", "label": "Immediate attention required"}
@@ -405,18 +534,25 @@ def get_state_of_health(recipient_id: int, db: Session) -> Dict[str, Any]:
         
     return {"category": "Good", "color": "var(--success)", "icon": "fa-check-circle", "label": "Maintain current lifestyle"}
 
+
 # ─── Main Execution Pipeline ──────────────────────────────────────────────────
 
 def generate_recommendations(recipient_id: int, db: Session):
     now = datetime.datetime.utcnow()
     
-    # 1. Fetch entire lab history
+    # 0. Fetch Context & Recipient Profile
+    recipient = db.query(CareRecipient).filter(CareRecipient.id == recipient_id).first()
+    sensor_context = fetch_sensor_fusion_context(recipient_id, db)
+    
+    # 1. Fetch entire lab history + Recent Vitals
     all_labs = db.query(LabValue).filter(LabValue.care_recipient_id == recipient_id).all()
+    all_vitals = db.query(VitalSign).filter(VitalSign.care_recipient_id == recipient_id).order_by(VitalSign.recorded_at.desc()).limit(100).all()
     
     # Group by metric
     history = {}
-    latest_labs = {}
+    latest_labs = {} # Using this for both Labs and Vitals for unified threshold evaluation
     
+    # A. Process Labs
     for lab in all_labs:
         name = lab.metric_name
         if name not in history:
@@ -425,7 +561,7 @@ def generate_recommendations(recipient_id: int, db: Session):
         recorded_at = lab.recorded_date or lab.created_at
         if isinstance(recorded_at, datetime.date) and not isinstance(recorded_at, datetime.datetime):
             recorded_at = datetime.datetime.combine(recorded_at, datetime.time.min)
-
+ 
         entry = {
             "value": lab.normalized_value or lab.metric_value,
             "unit": lab.normalized_unit or lab.unit,
@@ -436,79 +572,97 @@ def generate_recommendations(recipient_id: int, db: Session):
         
         if name not in latest_labs or entry["date"] >= latest_labs[name]["date"]:
             latest_labs[name] = entry
+            
+    # B. Process Vitals
+    VITAL_MAP = {
+        "measured_hr": "Heart Rate",
+        "measured_spo2": "SpO2",
+        "systolic_bp": "Systolic BP",
+        "diastolic_bp": "Diastolic BP",
+        "measured_temp": "Temperature"
+    }
 
+    for v in all_vitals:
+        for attr, metric_name in VITAL_MAP.items():
+            val = getattr(v, attr, None)
+            if val is not None:
+                if metric_name not in history: history[metric_name] = []
+                entry = {
+                    "value": val,
+                    "unit": "",
+                    "date": v.recorded_at,
+                    "ref": "N/A"
+                }
+                history[metric_name].append(entry)
+                if metric_name not in latest_labs or entry["date"] >= latest_labs[metric_name]["date"]:
+                    latest_labs[metric_name] = entry
+ 
     alerts = []
-
-    # 2. Evaluate Individual Rules (against LATEST lab)
-    print(f"[recommendation_engine] Processing {len(latest_labs)} metrics for recipient {recipient_id}")
+ 
+    # 2. Evaluate Clinical Thresholds (Dynamic then Static)
     for name, latest in latest_labs.items():
         val = latest["value"]
-        print(f"[recommendation_engine] Checking metric: {name} = {val} {latest.get('unit')}")
         
-        rule_matched = False
-        for rule in RULES:
-            if rule["metric"] == name:
-                matched = False
-                for t in rule["thresholds"]:
-                    hit = False
-                    if "min" in t and val >= t["min"]: hit = True
-                    if "max" in t and val <= t["max"]: hit = True
-                    
-                    if hit:
-                        alert = {
-                            "metric": name,
-                            "severity": t["severity"],
-                            "message": t["message"],
-                            "actions": t["actions"],
-                            "value": val,
-                            "reference": latest["ref"],
-                            "source": "rule"
-                        }
-                        # Trend inspection
-                        trend = detect_trend(name, history[name])
-                        if trend == "increasing_bad":
-                            alert["message"] += " Condition is worsening over recent reports."
-                            alert["source"] = "trend"
-                        elif trend == "decreasing_bad":
-                            alert["message"] += " Condition is deteriorating over recent reports."
-                            alert["source"] = "trend"
-                            
-                        alerts.append(alert)
-                        matched = True
-                        rule_matched = True
-                        print(f"[recommendation_engine] Matched rule for {name} (severity: {t['severity']})")
-                        break # Only trigger highest matching severity per rule
-                        
-                if matched:
+        # Priority 1: Dynamic DB Thresholds
+        thresholds = lookup_dynamic_threshold(name, recipient, db)
+        is_dynamic = True
+        
+        # Priority 2: Static Fallback rules
+        if not thresholds:
+            is_dynamic = False
+            for rule in RULES:
+                if rule["metric"] == name:
+                    thresholds = rule["thresholds"]
                     break
-
-        # Fallback: If no clinical rule matched, but lab was flagged as abnormal
-        # check if it originated from a recent abnormal LabValue
-        if not rule_matched:
-            # We look back at the DB record for this specific metric
-            lab_record = db.query(LabValue).filter(
-                LabValue.care_recipient_id == recipient_id,
-                LabValue.metric_name == name
-            ).order_by(LabValue.recorded_date.desc()).first()
-            
-            if lab_record and lab_record.is_abnormal:
-                print(f"[recommendation_engine] Fallback: Abnormal lab detected for UNKNOWN metric {name}")
-                alerts.append({
-                    "metric": name,
-                    "severity": "medium",
-                    "message": f"Your {name} level ({val} {latest.get('unit')}) is outside the normal reference range.",
-                    "actions": [{"type": "doctor_visit", "text": "Consult doctor about abnormal lab results."}],
-                    "value": val,
-                    "reference": latest["ref"],
-                    "source": "abnormal_flag"
-                })
+                    
+        if thresholds:
+            for t in thresholds:
+                hit = False
+                if "min" in t and val >= t["min"]: hit = True
+                if "max" in t and val <= t["max"]: hit = True
+                
+                if hit:
+                    # Sensor Fusion Multiplier
+                    severity = t.get("severity", "medium")
+                    prio_score = PRIORITY.get(severity, 0)
+                    
+                    if sensor_context.get("hr_trend") == "rising" and name in ["Systolic BP", "HbA1c"]:
+                        prio_score *= URGENCY_CONFIG.get("vitals_deteriorating", 1.2)
+                        print(f"[recommendation_engine] URGENCY BOOST: {name} severity boosted due to rising HR trend")
+                    if sensor_context.get("is_respiratory_active") and name == "Hemoglobin":
+                        prio_score *= URGENCY_CONFIG.get("respiratory_distress", 1.3)
+                        print(f"[recommendation_engine] URGENCY BOOST: {name} severity boosted due to respiratory events")
+                        
+                    # Re-map back to severity string if boosted
+                    if prio_score >= 4: severity = "critical"
+                    elif prio_score >= 3: severity = "high"
+                    
+                    alert = {
+                        "metric": name,
+                        "severity": severity,
+                        "message": t.get("message") or t.get("message_template", ""),
+                        "actions": t.get("actions", []),
+                        "action_payload": t.get("action_payload"),
+                        "value": val,
+                        "reference": latest.get("ref", "N/A"),
+                        "source": "dynamic_config" if is_dynamic else "static_rule"
+                    }
+                    
+                    # Trend inspection
+                    trend = detect_trend(name, history[name])
+                    if trend:
+                        alert["message"] += f" (Condition shows worsening trend over 90 days)"
+                        alert["source"] = "trend"
+                        
+                    alerts.append(alert)
+                    break 
 
     # 3. Evaluate Combo Rules
     alerts.extend(evaluate_combinations(latest_labs))
     
     # 4. Evaluate Missing Tests
     alerts.extend(evaluate_missing_tests(history, now))
-
+ 
     # 5. Safety Filter
     safe_alerts = safety_filter(alerts)
     
@@ -527,9 +681,10 @@ def generate_recommendations(recipient_id: int, db: Session):
             source=a.get("source", "rule"),
             confidence_score=1.0, # Rule-based deterministic
             actions=a["actions"],
+            action_payload=a.get("action_payload"),
             created_at=now
         )
         db.add(rec)
         
     db.commit()
-    print(f"[recommendation_engine] Generated {len(final_alerts)} validated clinical recommendations.")
+    print(f"[recommendation_engine] Generated {len(final_alerts)} hardened clinical recommendations.")

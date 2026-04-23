@@ -453,3 +453,74 @@ def _has_potential_data(line: str) -> bool:
     if len(stripped) < 5 or len(stripped) > 200:
         return False
     return bool(re.search(r"\d", stripped))
+
+def parse_report_map_reduce(raw_text: str) -> dict:
+    """Map-reduce version of parse_report for large documents.
+    1. Chunk text (3000 words, 200 overlap)
+    2. Extract labs from each chunk independently
+    3. Merge results with deduplication and conflict detection
+    """
+    from utils.summarizer import chunk_text
+    
+    words = raw_text.split()
+    if len(words) < 4000:
+        return parse_report(raw_text)
+        
+    print(f"[lab_parser] Large document ({len(words)} words). Using map-reduce extraction...")
+    chunks = chunk_text(raw_text, chunk_size=3000, overlap=300)
+    
+    all_chunks_results = []
+    all_templates = []
+    all_sections = []
+    
+    for i, chunk in enumerate(chunks):
+        print(f"[lab_parser] Processing chunk {i+1}/{len(chunks)}...")
+        res = parse_report(chunk)
+        all_chunks_results.append(res["rows"])
+        all_templates.append(res["template"])
+        all_sections.extend(res["section_labels"])
+        
+    # Merge
+    merged_rows, conflicts = merge_lab_results(all_chunks_results)
+    
+    # Use most frequent template
+    from collections import Counter
+    template = Counter(all_templates).most_common(1)[0][0] if all_templates else "GENERIC"
+    
+    return {
+        "template":       template,
+        "rows":           merged_rows,
+        "conflicts":      conflicts,
+        "unresolved":     [], # In map-reduce we don't return raw unresolved lines easily
+        "section_labels": list(dict.fromkeys(all_sections)),
+    }
+
+
+def merge_lab_results(chunks_rows: list[list[dict]]) -> tuple[list[dict], list[dict]]:
+    """Merge rows from multiple chunks. 
+    Deduplicates by lab_name.
+    If same lab has different values, flags as conflict.
+    """
+    merged: dict[str, dict] = {}
+    conflicts: list[dict] = []
+    
+    for chunk in chunks_rows:
+        for row in chunk:
+            name = row["raw_name"].lower().strip()
+            val = row["value"]
+            
+            if name in merged:
+                # Check for conflict
+                if abs(merged[name]["value"] - val) > 0.001:
+                    print(f"[lab_parser] CONFLICT for {name}: {merged[name]['value']} vs {val}")
+                    conflicts.append({
+                        "metric": name,
+                        "values": [merged[name]["value"], val],
+                        "source_texts": [merged[name].get("source_text"), row.get("source_text")]
+                    })
+                # Keep the first one found (or we could keep highest confidence)
+                continue
+            
+            merged[name] = row
+            
+    return list(merged.values()), conflicts

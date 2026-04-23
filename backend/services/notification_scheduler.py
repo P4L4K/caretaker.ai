@@ -5,6 +5,7 @@ Runs periodic tasks:
 1. Medicine reminders    — checks active meds every minute, sends email at scheduled times
 2. Medication expiry     — marks completed if duration_days has passed, sends completion email
 3. Report reminders      — weekly check, emails caretaker if no report for 30+ days
+4. Daily Recommendations — re-runs clinical logic for all recipients every 24h
 """
 
 import threading
@@ -300,6 +301,30 @@ def check_auto_reorder():
         db.close()
 
 
+def run_daily_recommendations():
+    """
+    Reruns the clinical recommendation engine for every care recipient.
+    Ensures that even without new reports, recommendations adapt to 
+    changing vitals and audio events.
+    """
+    db = _get_db()
+    try:
+        from tables.users import CareRecipient
+        from services.recommendation_engine import generate_recommendations
+        
+        recipients = db.query(CareRecipient).all()
+        for recipient in recipients:
+            try:
+                generate_recommendations(recipient.id, db)
+                print(f"[scheduler] Regenerated recommendations for {recipient.full_name} (ID: {recipient.id})")
+            except Exception as e:
+                print(f"[scheduler] Failed recommendations for recipient {recipient.id}: {e}")
+    except Exception as e:
+        print(f"[scheduler] Daily recommendations task failed: {e}")
+    finally:
+        db.close()
+
+
 def _scheduler_loop():
     """Main scheduler loop — runs every 60 seconds."""
     print("[scheduler] [START] Background notification scheduler started")
@@ -309,6 +334,7 @@ def _scheduler_loop():
     last_report_check = None
     last_stock_decrement = None
     last_auto_reorder_check = None
+    last_recommendation_run = None
 
     while not _stop_event.is_set():
         now = datetime.datetime.now()
@@ -351,6 +377,14 @@ def _scheduler_loop():
                 last_auto_reorder_check = today
             except Exception as e:
                 print(f"[scheduler] Auto-reorder loop error: {e}")
+
+        # Daily Recommendations — once per day
+        if last_recommendation_run != today:
+            try:
+                run_daily_recommendations()
+                last_recommendation_run = today
+            except Exception as e:
+                print(f"[scheduler] Daily recommendations loop error: {e}")
 
         # Sleep 60 seconds (checking stop every second for clean shutdown)
         for _ in range(60):

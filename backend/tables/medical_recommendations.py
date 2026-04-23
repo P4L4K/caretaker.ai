@@ -29,6 +29,9 @@ class MedicalRecommendation(Base):
     
     # List of grouped actions. Each action dict should have {"type": "doctor_visit", "text": "Consult doctor"}
     actions = Column(JSON, default=list)
+    
+    # Structured data for automated backend processing (e.g. specific drug names, test types)
+    action_payload = Column(JSON, nullable=True)
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     

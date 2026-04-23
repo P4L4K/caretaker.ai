@@ -1,18 +1,13 @@
-"""Report Ingestion Service v2 — Hybrid Pipeline.
+"""Report Ingestion Service v3 — Hardened Pipeline.
 
 Pipeline order:
-  1. Text extraction          (pdfplumber / OCR — callers responsibility)
-  2. Date extraction          (deterministic regex → date_extractor)
-  3. Document cleaning        (dedup, skip-lines, row reconstruction → document_cleaner)
-  4. Lab parsing              (template detect → section split → rule/fuzzy extraction → LLM fallback → lab_parser)
-  5. Normalization/Validation (canonical names, unit conversion, physiological guards → lab_normalizer)
-  6. LabValue persistence     (save to DB with source_text + confidence_score)
-  7. Legacy Gemini extraction (for diagnoses, medications, doctor_notes — still useful)
-  8. RAG indexing             (async — non-blocking → rag_service)
-
-The old `extract_structured_report` function is kept for backwards compatibility but
-now only handles diagnoses/medications/notes (NOT lab values — those come from the
-new hybrid pipeline).
+  1. Extraction Strategy Selection (Text vs Vision)
+  2. Map-Reduce Text extraction (for large docs)
+  3. Handwriting pass (via Vision)
+  4. Hybrid Lab Extraction (Regex + LLM Map-Reduce)
+  5. Clinical Context Map-Reduce (Diagnoses/Meds/Notes)
+  6. Normalization/Validation
+  7. Persistence & Insights
 """
 from __future__ import annotations
 
@@ -63,22 +58,27 @@ def run_hybrid_lab_extraction(
     """
     from services.date_extractor import extract_date_from_text
     from services.document_cleaner import clean_document
-    from services.lab_parser import parse_report
+    from services.lab_parser import parse_report, parse_report_map_reduce
     from services.lab_normalizer import normalize_and_validate
 
     # ── Step 1: Deterministic date extraction ─────────────────────────────────
     report_date = extract_date_from_text(text, fallback=upload_date or date.today())
-    print(f"[ingestion_v2] Report date: {report_date}")
+    print(f"[ingestion_v3] Report date: {report_date}")
 
-    # ── Step 2: Parse (clean + section + extract + LLM fallback) ─────────────
-    parsed = parse_report(text)
+    # ── Step 2: Parse (clean + section + extract + LLM fallback Map-Reduce) ───
+    words = text.split()
+    if len(words) > 4000:
+        parsed = parse_report_map_reduce(text)
+    else:
+        parsed = parse_report(text)
+        
     template   = parsed["template"]
     raw_rows   = parsed["rows"]
-    unresolved = parsed["unresolved"]
+    unresolved = parsed.get("unresolved", [])
     sections   = parsed["section_labels"]
     cleaned    = clean_document(text)
 
-    print(f"[ingestion_v2] Template={template}, raw_rows={len(raw_rows)}")
+    print(f"[ingestion_v3] Template={template}, raw_rows={len(raw_rows)}")
 
     # ── Step 3: Normalize + validate each row ─────────────────────────────────
     validated_rows: list[dict] = []
@@ -208,11 +208,102 @@ def _save_lab_values(
     return saved
 
 
-# ─── Legacy Gemini Extraction (Diagnoses, Medications, Notes) ─────────────────
-# This is now ONLY responsible for non-numeric clinical context extraction.
-# Lab values are fully handled by the hybrid pipeline above.
+def run_vision_lab_extraction(
+    image_bytes: bytes,
+    mime_type: str,
+    report_id: int,
+    care_recipient_id: int,
+    upload_date: Optional[date] = None,
+    db=None,
+) -> dict:
+    """Run extraction via Gemini Vision (Multimodal) for scanned/image reports."""
+    from utils.summarizer import vision_extract_report
+    from services.lab_normalizer import normalize_and_validate
+    
+    print(f"[ingestion_v3] Using Vision pipeline for report {report_id}...")
+    extracted = vision_extract_report(image_bytes, mime_type)
+    
+    raw_rows = extracted.get("lab_values", [])
+    report_date = upload_date or date.today()
+    
+    validated_rows = []
+    for row in raw_rows:
+        norm = normalize_and_validate(
+            raw_name=row.get("raw_name", ""),
+            raw_value=row.get("value", 0.0),
+            raw_unit=row.get("unit", ""),
+            source="vision",
+            db=db
+        )
+        if norm:
+            norm.update({
+                "source_text":   f"Vision extraction: {row.get('flag', 'normal')}",
+                "ref_low":       row.get("ref_low"),
+                "ref_high":      row.get("ref_high"),
+                "section":       "VISION",
+                "report_date":   report_date,
+                "raw_metric_name": row.get("raw_name"),
+            })
+            validated_rows.append(norm)
+
+    saved_count = 0
+    if db is not None and validated_rows:
+        saved_count = _save_lab_values(db, validated_rows, report_id, care_recipient_id, report_date)
+
+    return {
+        "report_date":      report_date,
+        "template":         "VISION_MULTIMODAL",
+        "lab_rows":         validated_rows,
+        "clinical_notes":   extracted.get("clinical_notes", ""),
+        "sections":         ["VISION"],
+        "saved_count":      saved_count
+    }
+
+
+# ─── Clinical Context Extraction (Diagnoses, Medications, Notes) ──────────────
+# Handles map-reduce to ensure no clinical context is lost in large docs.
 
 def extract_structured_report(text: str, report_date_hint: str = None) -> dict:
+    """Legacy wrapper / entry point for clinical context extraction."""
+    words = (text or "").split()
+    if len(words) > 5000:
+        return extract_structured_report_map_reduce(text, report_date_hint)
+    return _extract_structured_report_single_chunk(text, report_date_hint)
+
+
+def extract_structured_report_map_reduce(text: str, report_date_hint: str = None) -> dict:
+    """Chunked clinical context extraction."""
+    from utils.summarizer import chunk_text
+    chunks = chunk_text(text, chunk_size=3000, overlap=300)
+    
+    all_diagnoses = set()
+    all_resolved = set()
+    all_medications = set()
+    all_symptoms = set()
+    all_notes = []
+    
+    print(f"[ingestion_v3] Clinical context map-reduce ({len(chunks)} chunks)")
+    for i, chunk in enumerate(chunks):
+        res = _extract_structured_report_single_chunk(chunk, report_date_hint)
+        all_diagnoses.update(res.get("diagnoses", []))
+        all_resolved.update(res.get("resolved_diagnoses", []))
+        all_medications.update(res.get("medications", []))
+        all_symptoms.update(res.get("symptoms", []))
+        if res.get("doctor_notes"):
+            all_notes.append(res["doctor_notes"])
+            
+    return {
+        "report_date":        report_date_hint or str(date.today()),
+        "diagnoses":          list(all_diagnoses),
+        "resolved_diagnoses": list(all_resolved),
+        "lab_values":         {},
+        "medications":        list(all_medications),
+        "doctor_notes":       " | ".join(all_notes),
+        "symptoms":           list(all_symptoms)
+    }
+
+
+def _extract_structured_report_single_chunk(text: str, report_date_hint: str = None) -> dict:
     """Extract diagnoses, medications, doctor_notes, and symptoms via Gemini.
 
     Lab values are no longer extracted here — they come from run_hybrid_lab_extraction().

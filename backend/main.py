@@ -40,6 +40,7 @@ import tables.environment as environment_tables
 import tables.medications as medications_tables
 import tables.allergies as allergies_tables
 import tables.admin as admin_tables
+import tables.thresholds as thresholds_tables
 
 # Import routes
 import routes.users as user_routes
@@ -63,6 +64,7 @@ environment_tables.Base.metadata.create_all(bind=engine)
 medications_tables.Base.metadata.create_all(bind=engine)
 allergies_tables.Base.metadata.create_all(bind=engine)
 admin_tables.Base.metadata.create_all(bind=engine)
+thresholds_tables.Base.metadata.create_all(bind=engine)
 
 @asynccontextmanager
 async def lifespan(_app):

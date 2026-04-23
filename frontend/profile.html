@@ -469,6 +469,11 @@
         <div class="card col-span-6">
             <div class="card-header">
                 <h2><i class="fas fa-user-md"></i> Actionable Recommendations</h2>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-sm btn-outline" id="btnRefreshRecs" onclick="refreshRecommendations()" title="Trigger intelligent re-analysis of all health data.">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
             </div>
             <div id="recommendationsList" style="max-height: 400px; overflow-y: auto;"></div>
         </div>
@@ -915,14 +920,19 @@
         function timeAgo(dateString) {
             if (!dateString) return 'Just now';
             const date = new Date(dateString);
-            const seconds = Math.floor((new Date() - date) / 1000);
-            if (seconds < 60) return 'Just now';
+            const now = new Date();
+            const seconds = Math.floor((now - date) / 1000);
+            
+            // Format absolute time for comparison/display
+            const absTime = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+            if (seconds < 60) return `Just now (${absTime})`;
             const minutes = Math.floor(seconds / 60);
-            if (minutes < 60) return `${minutes}m ago`;
+            if (minutes < 60) return `${minutes}m ago (${absTime})`;
             const hours = Math.floor(minutes / 60);
-            if (hours < 24) return `${hours}h ago`;
+            if (hours < 24) return `${hours}h ago (${absTime})`;
             const days = Math.floor(hours / 24);
-            return `${days}d ago`;
+            return `${days}d ago (${absTime})`;
         }
 
         // Section: Actionable Recommendations
@@ -1043,6 +1053,34 @@
             } catch (err) {
                 console.error(err);
                 el.innerHTML = '<div class="empty-state">Unable to load recommendations.</div>';
+            }
+        }
+
+        async function refreshRecommendations() {
+            const btn = document.getElementById('btnRefreshRecs');
+            const el = document.getElementById('recommendationsList');
+            if (!btn) return;
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
+            el.innerHTML = '<div class="empty-state"><i class="fas fa-brain fa-pulse"></i> AI is reviewing recent vitals and audio events...</div>';
+
+            try {
+                const res = await fetch(`${API_BASE}/care-recipients/${recipientId}/recommendations/refresh`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (!res.ok) throw new Error('Refresher failed');
+                
+                // Reload list
+                await loadRecommendations();
+            } catch (err) {
+                console.error(err);
+                alert('Analysis failed. Please check backend connection.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
             }
         }
 

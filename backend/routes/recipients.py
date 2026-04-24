@@ -500,6 +500,28 @@ def summarize_recipient_reports(recipient_id: int, authorization: Optional[str] 
         raise HTTPException(status_code=500, detail=f"Failed to summarize reports: {e}")
 
 
+@router.delete('/recipients/{recipient_id}/alerts/{alert_id}', response_model=ResponseSchema)
+def remove_alert(recipient_id: int, alert_id: int, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    """Delete a medical alert."""
+    username = _get_username_from_auth(authorization)
+    if not username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid token")
+
+    caretaker = UsersRepo.find_by_username(db, CareTaker, username)
+    recipient = db.query(CareRecipient).filter(CareRecipient.id == recipient_id, CareRecipient.caretaker_id == caretaker.id).first()
+    if not recipient:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipient not found")
+
+    from tables.medical_conditions import MedicalAlert
+    alert = db.query(MedicalAlert).filter_by(id=alert_id, care_recipient_id=recipient_id).first()
+    if not alert:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+
+    db.delete(alert)
+    db.commit()
+    return ResponseSchema(code=200, status='success', message='Alert deleted successfully')
+
+
 @router.get('/recipients/{recipient_id}/reports/{report_id}/download')
 def download_report(recipient_id: int, report_id: int, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
     """Stream an individual report back to the authenticated caretaker if they own the recipient."""

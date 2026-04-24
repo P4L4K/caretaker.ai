@@ -88,6 +88,7 @@ async def profile(authorization: Optional[str] = Header(None), db: Session = Dep
                     }
 
                 # Fetch active medications for voice bot medicine reminders
+                from tables.medications import Medication, MedicationStatus
                 active_meds = db.query(Medication).filter(
                     Medication.care_recipient_id == r.id,
                     Medication.status == MedicationStatus.active
@@ -100,6 +101,23 @@ async def profile(authorization: Optional[str] = Header(None), db: Session = Dep
                         'schedule_time': m.schedule_time
                     }
                     for m in active_meds
+                ]
+
+                # Fetch recent unread alerts for the notification center
+                from tables.medical_conditions import MedicalAlert
+                recent_alerts = db.query(MedicalAlert).filter(
+                    MedicalAlert.care_recipient_id == r.id,
+                    MedicalAlert.is_read == False
+                ).order_by(desc(MedicalAlert.created_at)).limit(5).all()
+                alerts_data = [
+                    {
+                        'id': a.id,
+                        'message': a.message,
+                        'severity': a.severity.value if a.severity else None,
+                        'created_at': a.created_at.isoformat() if a.created_at else None,
+                        'is_read': a.is_read
+                    }
+                    for a in recent_alerts
                 ]
 
                 recipients.append({
@@ -116,7 +134,9 @@ async def profile(authorization: Optional[str] = Header(None), db: Session = Dep
                     'weight': r.weight,
                     'blood_group': r.blood_group,
                     'emergency_contact': r.emergency_contact,
-                    'medications': meds_data
+                    'medications': meds_data,
+                    'alerts': alerts_data,
+                    'risk_score': r.risk_score
                 })
 
             return {

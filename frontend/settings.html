@@ -23,6 +23,10 @@
             font-family: 'Inter', system-ui, -apple-system, sans-serif;
         }
 
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             margin: 0;
             min-height: 100vh;
@@ -322,14 +326,141 @@
             background: rgba(251, 113, 133, 0.15);
             color: #dc2626;
         }
+
+        /* Mobile Optimization */
+        @media (max-width: 768px) {
+            body {
+                padding: 20px 12px;
+            }
+
+            header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+                margin-bottom: 25px;
+            }
+
+            header h1 {
+                margin: 0;
+                font-size: 1.8rem;
+            }
+
+            .panel {
+                padding: 24px 16px;
+                border-radius: 24px;
+            }
+
+            .form-grid {
+                grid-template-columns: 1fr;
+                gap: 18px;
+            }
+
+            .recipient-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+
+            .action-btns {
+                width: 100%;
+                justify-content: flex-end;
+            }
+
+            .btn-row {
+                flex-direction: column-reverse;
+                width: 100%;
+            }
+
+            .primary-btn, .back-btn {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .modal-content {
+                padding: 24px 16px;
+                width: 95%;
+            }
+        }
+        /* Global Button System */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 16px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 500;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background-color: #2563eb;
+            color: white;
+        }
+        .btn-primary:hover {
+            background-color: #1d4ed8;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+        }
+
+        .btn-secondary {
+            background-color: #f3f4f6;
+            color: #374151;
+        }
+        .btn-secondary:hover {
+            background-color: #e5e7eb;
+        }
+
+        .btn-danger {
+            background-color: #ef4444;
+            color: white;
+        }
+        .btn-danger:hover {
+            background-color: #dc2626;
+        }
+
+        .btn-icon {
+            background: transparent;
+            padding: 6px;
+            color: inherit;
+        }
+        .btn-icon:hover {
+            background: rgba(0,0,0,0.05);
+            border-radius: 8px;
+        }
+
+        .btn-sm {
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+        .btn-lg {
+            padding: 12px 20px;
+            font-size: 16px;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        @media (max-width: 768px) {
+            .btn-full {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 
 <body>
     <div class="settings-container">
         <header>
-            <h1>Settings</h1>
-            <a href="profile.html" class="back-btn"><i class="fas fa-arrow-left"></i> Back to Hub</a>
+            <a href="dashboard.html" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Back to Hub</a>
+            <h1 style="margin: 0; font-size: 1.8rem;">Account Settings</h1>
         </header>
 
         <!-- Caretaker Panel -->
@@ -359,7 +490,7 @@
                     </div>
                 </div>
                 <div class="btn-row">
-                    <button type="submit" class="primary-btn">Update Profile</button>
+                    <button type="submit" class="btn btn-primary">Update Profile</button>
                 </div>
             </form>
         </section>
@@ -368,7 +499,7 @@
         <section class="panel">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
                 <h2 style="margin:0;"><i class="fas fa-user-friends"></i> Seniors</h2>
-                <button class="primary-btn" onclick="openRecipientModal()"><i class="fas fa-plus"></i> Add New</button>
+                <button class="btn btn-primary" onclick="openRecipientModal()"><i class="fas fa-plus"></i> Add New</button>
             </div>
             <div class="recipient-list" id="recipientList">
                 <!-- Javascript populated -->
@@ -411,7 +542,7 @@
                             style="height: 100%; background: var(--accent); width: 0%; transition: width 0.3s;"></div>
                     </div>
                     <div style="margin-top: 15px; display: flex; justify-content: flex-end;">
-                        <button id="uploadReportBtn" class="primary-btn" disabled style="padding: 10px 24px;">
+                        <button id="uploadReportBtn" class="btn btn-primary" disabled>
                             <i class="fas fa-upload"></i> Upload Report
                         </button>
                     </div>
@@ -456,9 +587,7 @@
             <h3>Danger Zone</h3>
             <p>Once you delete your account, there is no going back. All patient data, reports, and recordings will be
                 permanently removed.</p>
-            <button class="primary-btn"
-                style="background: var(--danger); box-shadow: 0 4px 12px rgba(251, 113, 133, 0.3);"
-                onclick="confirmDeleteAccount()">Delete My Account</button>
+            <button class="btn btn-danger" onclick="confirmDeleteAccount()">Delete My Account</button>
         </section>
     </div>
 
@@ -527,8 +656,8 @@
                     </div>
                 </div>
                 <div class="btn-row">
-                    <button type="button" class="back-btn" onclick="closeRecipientModal()">Cancel</button>
-                    <button type="submit" class="primary-btn" id="modalSubmitBtn">Save Recipient</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeRecipientModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="modalSubmitBtn">Save Recipient</button>
                 </div>
             </form>
         </div>
@@ -586,8 +715,8 @@
                         <p>${r.age} yrs · ${r.gender || 'N/A'} · ${r.respiratory_condition_status ? 'Respiratory Care' : 'General Care'}</p>
                     </div>
                     <div class="action-btns">
-                        <button class="icon-btn edit-btn" onclick="openRecipientModal(${r.id})" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button class="icon-btn delete-btn" onclick="deleteRecipient(${r.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                        <button class="btn btn-icon" onclick="openRecipientModal(${r.id})" title="Edit"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-icon btn-danger" onclick="deleteRecipient(${r.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 `;
                 list.appendChild(item);
@@ -819,8 +948,8 @@
                         <p style="font-size: 0.75rem;">Uploaded: ${new Date(r.uploaded_at).toLocaleDateString()} ${r.report_date ? `| Report Date: ${r.report_date}` : ''}</p>
                     </div>
                     <div class="action-btns">
-                        <button class="icon-btn" style="color: var(--accent);" onclick="downloadReport(${r.id}, '${r.filename}')" title="Download"><i class="fas fa-download"></i></button>
-                        <button class="icon-btn delete-btn" onclick="deleteReport(${r.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                        <button class="btn btn-icon" style="color: var(--accent);" onclick="downloadReport(${r.id}, '${r.filename}')" title="Download"><i class="fas fa-download"></i></button>
+                        <button class="btn btn-icon btn-danger" onclick="deleteReport(${r.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 `;
                 el.appendChild(card);

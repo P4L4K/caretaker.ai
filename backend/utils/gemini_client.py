@@ -58,18 +58,18 @@ def get_gemini_url(model: str, api_key: str) -> str:
         return f"{endpoint}?key={api_key}"
     return f"{BASE_URL}/{model}:generateContent?key={api_key}"
 
-def call_gemini(payload: dict, timeout: int = 30, caller: str = "") -> dict | None:
+def call_gemini(payload: dict, timeout: int = 30, caller: str = "", model_override: str = None) -> dict | None:
     """
     Make a Gemini API call with automatic model switching on failure.
-    Includes retry logic for transient network issues.
+    If model_override is provided, it attempts that model first.
     """
     api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
         print(f"{caller} [Gemini] ERROR: GEMINI_API_KEY is not set in .env")
         return None
 
-    # Get primary model from env
-    primary_model = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+    # Get primary model from override or env
+    primary_model = model_override or os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
     
     # Create the sequence of models to try
     models_to_try = [primary_model]
@@ -124,3 +124,26 @@ def call_gemini(payload: dict, timeout: int = 30, caller: str = "") -> dict | No
 
     print(f"{caller} [Gemini] All models failed. Please check your API key and quotas.")
     return None
+
+def get_embedding(text: str, model: str = "text-embedding-004") -> list[float] | None:
+    """
+    Get vector embedding for a piece of text.
+    Uses text-embedding-004 (Gemini Embedding 2).
+    """
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key: return None
+    
+    url = f"{BASE_URL}/{model}:embedContent?key={api_key}"
+    payload = {
+        "model": f"models/{model}",
+        "content": {"parts": [{"text": text}]}
+    }
+    
+    try:
+        resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
+        if resp.status_code == 200:
+            return resp.json().get("embedding", {}).get("values")
+        return None
+    except Exception as e:
+        print(f"[Embedding] Error: {e}")
+        return None

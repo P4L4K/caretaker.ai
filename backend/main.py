@@ -38,6 +38,7 @@ import tables.disease_dictionary as disease_dictionary_tables
 import tables.conversation_history as conversation_history_tables
 import tables.environment as environment_tables
 import tables.medications as medications_tables
+import tables.medication_dose_logs as medication_dose_logs_tables
 import tables.allergies as allergies_tables
 import tables.admin as admin_tables
 import tables.thresholds as thresholds_tables
@@ -62,6 +63,7 @@ conversation_history_tables.Base.metadata.create_all(bind=engine)
 # VoiceBotPreferences is defined in conversation_history — already covered above
 environment_tables.Base.metadata.create_all(bind=engine)
 medications_tables.Base.metadata.create_all(bind=engine)
+medication_dose_logs_tables.Base.metadata.create_all(bind=engine)
 allergies_tables.Base.metadata.create_all(bind=engine)
 admin_tables.Base.metadata.create_all(bind=engine)
 thresholds_tables.Base.metadata.create_all(bind=engine)
@@ -78,7 +80,8 @@ async def lifespan(_app):
         video_analysis_tables.Base, vital_signs_tables.Base, audio_events_tables.Base,
         medical_conditions_tables.Base, disease_dictionary_tables.Base,
         conversation_history_tables.Base, environment_tables.Base,
-        medications_tables.Base, allergies_tables.Base, admin_tables.Base,
+        medications_tables.Base, medication_dose_logs_tables.Base,
+        allergies_tables.Base, admin_tables.Base,
     ]
     try:
         _insp = inspect(engine)
@@ -216,6 +219,9 @@ app.include_router(spotify_routes.router, prefix="/api")
 
 from routes import admin as admin_routes
 app.include_router(admin_routes.router)
+
+from routes import medications as medications_routes
+app.include_router(medications_routes.router, prefix="/api")
 
 # Debug: Print all registered routes
 print("\n=== Registered Routes ===")

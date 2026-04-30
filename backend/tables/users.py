@@ -111,5 +111,6 @@ class CareRecipient(Base):
     # New Profile relations
     active_medications = relationship('Medication', back_populates='care_recipient', cascade='all, delete-orphan')
     medication_history = relationship('MedicationHistory', back_populates='care_recipient', cascade='all, delete-orphan')
+    dose_logs = relationship('MedicationDoseLog', back_populates='care_recipient', cascade='all, delete-orphan')
     allergies = relationship('Allergy', back_populates='care_recipient', cascade='all, delete-orphan')
     lab_orders = relationship('LabOrderDetail', back_populates='care_recipient', cascade='all, delete-orphan')

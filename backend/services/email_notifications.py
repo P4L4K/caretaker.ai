@@ -160,3 +160,140 @@ def send_auto_reorder_notification(to_email: str, recipient_name: str, medicine_
     </div>
     """
     return send_email(to_email, subject, html)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NEW: Dose Confirmation Email  (actionable — caretaker clicks TAKEN / MISSED)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def send_dose_confirmation_email(
+    to_email: str,
+    recipient_name: str,
+    medicine_name: str,
+    dosage: str,
+    schedule_time: str,
+    dose_log_id: int,
+    token: str,
+) -> bool:
+    """
+    Send a medicine confirmation email with two actionable buttons:
+      - ✔ Mark as TAKEN  → GET /api/confirm-dose-email?token=TOKEN&action=TAKEN
+      - ✖ Mark as NOT TAKEN → GET /api/confirm-dose-email?token=TOKEN&action=MISSED
+
+    The token is a UUID4 tied to this specific dose log.  Both links are safe
+    to embed in email clients because they use plain GET requests.
+    """
+    import os
+    base_url = os.getenv("BASE_URL", "http://localhost:8000")
+    taken_url  = f"{base_url}/api/confirm-dose-email?token={token}&action=TAKEN"
+    missed_url = f"{base_url}/api/confirm-dose-email?token={token}&action=MISSED"
+
+    subject = f"💊 Confirm Medicine: {medicine_name} for {recipient_name}"
+    html = f"""
+    <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:520px;margin:0 auto;padding:28px;border-radius:16px;border:1px solid #e2e8f0;background:#fff;">
+
+        <!-- Header -->
+        <div style="text-align:center;margin-bottom:24px;">
+            <span style="font-size:52px;">💊</span>
+            <h2 style="color:#1e3a8a;margin:10px 0 4px;font-size:1.4rem;">Medicine Confirmation Required</h2>
+            <p style="color:#64748b;margin:0;font-size:0.9rem;">Please confirm whether the dose was taken</p>
+        </div>
+
+        <!-- Info Card -->
+        <div style="background:linear-gradient(135deg,#eff6ff,#e0f2fe);padding:20px;border-radius:12px;margin-bottom:24px;">
+            <table style="width:100%;border-collapse:collapse;">
+                <tr><td style="padding:4px 0;color:#64748b;font-size:0.9rem;width:120px;"><strong>Patient</strong></td>
+                    <td style="color:#0f172a;font-size:0.9rem;">{recipient_name}</td></tr>
+                <tr><td style="padding:4px 0;color:#64748b;font-size:0.9rem;"><strong>Medicine</strong></td>
+                    <td style="color:#0f172a;font-size:0.9rem;font-weight:700;">{medicine_name}</td></tr>
+                <tr><td style="padding:4px 0;color:#64748b;font-size:0.9rem;"><strong>Dosage</strong></td>
+                    <td style="color:#0f172a;font-size:0.9rem;">{dosage or 'As prescribed'}</td></tr>
+                <tr><td style="padding:4px 0;color:#64748b;font-size:0.9rem;"><strong>Scheduled</strong></td>
+                    <td style="color:#0f172a;font-size:0.9rem;">{schedule_time}</td></tr>
+            </table>
+        </div>
+
+        <!-- Action Buttons -->
+        <div style="display:flex;gap:12px;justify-content:center;margin-bottom:20px;">
+            <a href="{taken_url}"
+               style="display:inline-block;background:linear-gradient(135deg,#10b981,#059669);color:white;
+                      padding:14px 28px;border-radius:10px;text-decoration:none;font-weight:700;
+                      font-size:1rem;text-align:center;min-width:160px;">
+                ✔&nbsp; Mark as TAKEN
+            </a>
+            <a href="{missed_url}"
+               style="display:inline-block;background:#fff;color:#ef4444;border:2px solid #ef4444;
+                      padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;
+                      font-size:1rem;text-align:center;min-width:160px;">
+                ✖&nbsp; Not Taken
+            </a>
+        </div>
+
+        <!-- Footer -->
+        <p style="color:#94a3b8;font-size:0.78rem;text-align:center;margin:0;">
+            This link expires after 24 hours.<br>
+            Do not forward this email — the confirmation link is unique to this dose.
+        </p>
+    </div>
+    """
+    return send_email(to_email, subject, html)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NEW: Missed Dose Escalation Email  (urgent alert to caretaker)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def send_missed_dose_escalation(
+    to_email: str,
+    recipient_name: str,
+    medicine_name: str,
+    dosage: str,
+    scheduled_time: str,
+) -> bool:
+    """
+    Send an urgent escalation email when the system auto-marks a dose as MISSED
+    (no confirmation received within 60 minutes of the scheduled time).
+    """
+    subject = f"🚨 MISSED DOSE ALERT: {medicine_name} — {recipient_name}"
+    html = f"""
+    <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:520px;margin:0 auto;padding:28px;border-radius:16px;border:2px solid #ef4444;background:#fff;">
+
+        <!-- Urgent Header -->
+        <div style="background:linear-gradient(135deg,#ef4444,#dc2626);border-radius:12px;padding:20px;text-align:center;margin-bottom:24px;">
+            <span style="font-size:48px;">🚨</span>
+            <h2 style="color:white;margin:8px 0 4px;font-size:1.4rem;">Missed Dose Alert</h2>
+            <p style="color:rgba(255,255,255,0.85);margin:0;font-size:0.9rem;">Immediate attention required</p>
+        </div>
+
+        <!-- Info Card -->
+        <div style="background:#fff5f5;padding:20px;border-radius:12px;border:1px solid #fecaca;margin-bottom:20px;">
+            <table style="width:100%;border-collapse:collapse;">
+                <tr><td style="padding:5px 0;color:#64748b;font-size:0.9rem;width:120px;"><strong>Patient</strong></td>
+                    <td style="color:#0f172a;font-size:0.9rem;font-weight:600;">{recipient_name}</td></tr>
+                <tr><td style="padding:5px 0;color:#64748b;font-size:0.9rem;"><strong>Medicine</strong></td>
+                    <td style="color:#0f172a;font-size:0.9rem;font-weight:700;">{medicine_name}</td></tr>
+                <tr><td style="padding:5px 0;color:#64748b;font-size:0.9rem;"><strong>Dosage</strong></td>
+                    <td style="color:#0f172a;font-size:0.9rem;">{dosage or 'As prescribed'}</td></tr>
+                <tr><td style="padding:5px 0;color:#64748b;font-size:0.9rem;"><strong>Scheduled</strong></td>
+                    <td style="color:#c53030;font-size:0.9rem;font-weight:700;">{scheduled_time}</td></tr>
+            </table>
+        </div>
+
+        <!-- Body Message -->
+        <p style="color:#1e293b;font-size:1rem;font-weight:600;margin-bottom:8px;">
+            ⚠️ {recipient_name} has <span style="color:#ef4444;">not confirmed</span> taking
+            <strong>{medicine_name}</strong> scheduled at <strong>{scheduled_time}</strong>.
+        </p>
+        <p style="color:#475569;font-size:0.9rem;margin-bottom:20px;">
+            This dose has been automatically marked as <strong>MISSED</strong>.
+            Please contact the patient immediately and verify their status.
+        </p>
+
+        <!-- Footer -->
+        <p style="color:#94a3b8;font-size:0.78rem;text-align:center;margin:0;">
+            CareTaker AI — Automated Escalation Alert
+        </p>
+    </div>
+    """
+    return send_email(to_email, subject, html)
+

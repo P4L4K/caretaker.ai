@@ -147,6 +147,89 @@ async def voice_bot_chat(payload: ChatRequest, authorization: Optional[str] = He
                     intent = ai_json.get("intent", "chat")
                     search_query = ai_json.get("search_query", "")
                     action_param = ai_json.get("action_param")
+                    medicine_name_from_ai = ai_json.get("medicine_name", "")
+                    escalate_flag = ai_json.get("escalate", False)
+
+                    # ── DOSE LOG INTEGRATION (Voice Channel) ──────────────────────────
+                    # If Saathi confirms or misses a dose, write to MedicationDoseLog
+                    # via the same shared pipeline used by dashboard and email channels.
+                    if intent in ("medicine_taken", "medicine_missed"):
+                        _voice_action = "TAKEN" if intent == "medicine_taken" else "MISSED"
+                        try:
+                            from tables.medication_dose_logs import (
+                                MedicationDoseLog, DoseStatusEnum, ConfirmationSourceEnum
+                            )
+                            from tables.medications import Medication, MedicationStatus
+
+                            # Find the most recent PENDING dose log for this recipient.
+                            # If medicine_name was extracted by AI, prefer matching that drug.
+                            pending_q = db.query(MedicationDoseLog).filter(
+                                MedicationDoseLog.care_recipient_id == payload.recipient_id,
+                                MedicationDoseLog.status == DoseStatusEnum.PENDING,
+                            )
+                            if medicine_name_from_ai:
+                                # Join medications table to filter by name (case-insensitive)
+                                pending_q = pending_q.join(
+                                    Medication,
+                                    Medication.medication_id == MedicationDoseLog.medication_id
+                                ).filter(
+                                    Medication.medicine_name.ilike(f"%{medicine_name_from_ai}%")
+                                )
+
+                            # Pick the most overdue pending log (oldest scheduled_time first)
+                            pending_log = pending_q.order_by(
+                                MedicationDoseLog.scheduled_time.asc()
+                            ).first()
+
+                            if pending_log:
+                                pending_log.status             = DoseStatusEnum(_voice_action)
+                                pending_log.confirmation_source = ConfirmationSourceEnum.VOICE
+                                pending_log.confirmed_at        = datetime.utcnow()
+
+                                new_stock = None
+                                if _voice_action == "TAKEN":
+                                    med = db.query(Medication).filter(
+                                        Medication.medication_id == pending_log.medication_id
+                                    ).with_for_update().first()
+                                    if med:
+                                        old = med.current_stock or 0
+                                        daily = med.doses_per_day or 1
+                                        new_stock = max(0, old - daily)
+                                        med.current_stock = new_stock
+
+                                db.commit()
+                                print(f"[voice_bot] Dose log {pending_log.id} marked "
+                                      f"{_voice_action} via VOICE for recipient {payload.recipient_id}")
+
+                                # Push dashboard sync
+                                try:
+                                    import asyncio
+                                    from socket_manager import sio_server
+                                    loop = asyncio.get_event_loop()
+                                    _payload = {
+                                        "dose_log_id": pending_log.id,
+                                        "action":      _voice_action,
+                                        "new_stock":   new_stock,
+                                    }
+                                    if loop.is_running():
+                                        asyncio.run_coroutine_threadsafe(
+                                            sio_server.emit("dose_confirmed", _payload), loop
+                                        )
+                                    else:
+                                        loop.run_until_complete(
+                                            sio_server.emit("dose_confirmed", _payload)
+                                        )
+                                except Exception as _se:
+                                    print(f"[voice_bot] Socket.IO push failed: {_se}")
+                            else:
+                                print(f"[voice_bot] No PENDING dose log found for recipient "
+                                      f"{payload.recipient_id} (medicine='{medicine_name_from_ai}')")
+
+                        except Exception as _de:
+                            print(f"[voice_bot] Dose log update failed: {_de}")
+                            # Non-fatal — voice response still returns normally
+                    # ── END DOSE LOG INTEGRATION ──────────────────────────────────────
+
                 except Exception as ex:
                     print(f"Failed to parse Gemini JSON: {ex}")
                     reply_text = ai_text

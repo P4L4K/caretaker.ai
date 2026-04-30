@@ -815,12 +815,167 @@
         }
 
         @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
 
-            100% {
-                transform: rotate(360deg);
+        /* ─── Dose Confirmation Section ─── */
+        .dose-confirm-section {
+            background: linear-gradient(135deg, #fff7ed, #fff);
+            border: 2px solid #fed7aa;
+            border-radius: 24px;
+            padding: 24px;
+            margin-bottom: 28px;
+            animation: slideUp 0.5s ease;
+        }
+
+        .dose-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 18px;
+        }
+
+        .dose-section-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: #92400e;
+        }
+
+        .dose-urgent-badge {
+            background: #f97316;
+            color: white;
+            font-size: 0.7rem;
+            font-weight: 800;
+            padding: 3px 10px;
+            border-radius: 99px;
+            letter-spacing: 0.04em;
+        }
+
+        .dose-cards-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .dose-card {
+            background: white;
+            border-radius: 16px;
+            padding: 18px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            border: 1px solid #fed7aa;
+            box-shadow: 0 4px 12px rgba(249, 115, 22, 0.06);
+            transition: transform 0.2s ease, opacity 0.35s ease, max-height 0.35s ease;
+            overflow: hidden;
+        }
+
+        .dose-card.removing {
+            opacity: 0;
+            transform: translateX(40px);
+            max-height: 0;
+            padding: 0;
+            margin: 0;
+        }
+
+        .dose-pill-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, #fb923c, #f97316);
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+            flex-shrink: 0;
+        }
+
+        .dose-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .dose-med-name {
+            font-weight: 700;
+            font-size: 1rem;
+            color: #1e293b;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .dose-meta {
+            font-size: 0.78rem;
+            color: #64748b;
+            margin-top: 2px;
+        }
+
+        .dose-actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .dose-btn {
+            padding: 9px 18px;
+            border-radius: 10px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .dose-btn.taken {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+        }
+
+        .dose-btn.taken:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+
+        .dose-btn.missed {
+            background: white;
+            color: #ef4444;
+            border: 2px solid #fca5a5;
+        }
+
+        .dose-btn.missed:hover {
+            background: #fff1f1;
+            border-color: #ef4444;
+        }
+
+        .dose-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .dose-empty-state {
+            text-align: center;
+            padding: 32px 20px;
+            color: #64748b;
+        }
+
+        .dose-empty-state .check-icon {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        @media (max-width: 600px) {
+            .dose-card {
+                flex-wrap: wrap;
+            }
+            .dose-actions {
+                width: 100%;
+                justify-content: flex-end;
             }
         }
 
@@ -1570,6 +1725,21 @@
                 </div>
             </form>
         </div>
+    </div>
+
+    <!-- ╔══════════════════════════════════════════╗ -->
+    <!-- ║   PENDING DOSE CONFIRMATIONS SECTION    ║ -->
+    <!-- ╚══════════════════════════════════════════╝ -->
+    <!-- Injected by CareTaker.ai confirmation-based inventory system -->
+    <!-- Hidden when empty; shown dynamically via JS + Socket.IO      -->
+    <div id="doseConfirmSection" class="dose-confirm-section" style="display:none;">
+        <div class="dose-section-header">
+            <div class="dose-section-title">
+                💊 Pending Dose Confirmations
+                <span id="doseConfirmBadge" class="dose-urgent-badge">0 PENDING</span>
+            </div>
+        </div>
+        <div id="doseConfirmList" class="dose-cards-list"></div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
@@ -3661,6 +3831,184 @@
             // Re-fetch analytics immediately to update dashboard in real-time
             fetchAudioAnalytics();
         });
+
+        // ══════════════════════════════════════════════════════════════
+        //  DOSE CONFIRMATION SYSTEM
+        //  Source: confirmation-based medicine inventory (CareTaker.ai)
+        // ══════════════════════════════════════════════════════════════
+
+        let _pendingDoseIds = new Set(); // track IDs currently on screen
+
+        /**
+         * Format an ISO datetime string into a readable local time.
+         */
+        function _formatDoseTime(iso) {
+            try {
+                const d = new Date(iso);
+                return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            } catch { return iso; }
+        }
+
+        /**
+         * Render a single dose confirmation card into the list.
+         * Safe to call multiple times — deduplicates via dose_log_id.
+         */
+        function _addDoseCard(dose) {
+            const list = document.getElementById('doseConfirmList');
+            if (!list) return;
+            if (_pendingDoseIds.has(dose.dose_log_id)) return; // already on screen
+            _pendingDoseIds.add(dose.dose_log_id);
+
+            const card = document.createElement('div');
+            card.className = 'dose-card';
+            card.id = `dose-card-${dose.dose_log_id}`;
+            card.innerHTML = `
+                <div class="dose-pill-icon">💊</div>
+                <div class="dose-info">
+                    <div class="dose-med-name">${dose.medicine_name}${
+                        dose.dosage ? ` <span style="font-weight:500;color:#64748b;">(${dose.dosage})</span>` : ''
+                    }</div>
+                    <div class="dose-meta">
+                        <i class="fas fa-user-circle" style="margin-right:4px;"></i>${dose.recipient_name}
+                        &nbsp;·&nbsp;
+                        <i class="fas fa-clock" style="margin-right:4px;"></i>Scheduled: ${_formatDoseTime(dose.scheduled_time)}
+                    </div>
+                </div>
+                <div class="dose-actions">
+                    <button class="dose-btn taken" id="taken-btn-${dose.dose_log_id}"
+                        onclick="confirmDose(${dose.dose_log_id}, 'TAKEN')">
+                        ✔ Taken
+                    </button>
+                    <button class="dose-btn missed" id="missed-btn-${dose.dose_log_id}"
+                        onclick="confirmDose(${dose.dose_log_id}, 'MISSED')">
+                        ✖ Not Taken
+                    </button>
+                </div>
+            `;
+            list.appendChild(card);
+            _updateDoseSection();
+        }
+
+        /**
+         * Remove a dose card smoothly after confirmation.
+         */
+        function _removeDoseCard(doseLogId) {
+            const card = document.getElementById(`dose-card-${doseLogId}`);
+            if (!card) return;
+            card.classList.add('removing');
+            setTimeout(() => {
+                card.remove();
+                _pendingDoseIds.delete(doseLogId);
+                _updateDoseSection();
+            }, 380);
+        }
+
+        /**
+         * Show/hide the section and update the badge count.
+         */
+        function _updateDoseSection() {
+            const section = document.getElementById('doseConfirmSection');
+            const badge   = document.getElementById('doseConfirmBadge');
+            const count   = _pendingDoseIds.size;
+
+            if (!section) return;
+            section.style.display = count > 0 ? 'block' : 'none';
+            if (badge) badge.textContent = `${count} PENDING`;
+        }
+
+        /**
+         * Poll the backend for PENDING doses every 30 seconds.
+         * This is the fallback when Socket.IO push is not available.
+         */
+        async function loadPendingDoses() {
+            try {
+                const res = await fetch(`${API_BASE}/pending-doses`, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!res.ok) return;
+                const doses = await res.json();
+
+                // Add new cards (dedup handled inside _addDoseCard)
+                doses.forEach(d => _addDoseCard(d));
+
+                // Remove cards no longer PENDING (confirmed elsewhere)
+                const liveIds = new Set(doses.map(d => d.dose_log_id));
+                [..._pendingDoseIds].forEach(id => {
+                    if (!liveIds.has(id)) _removeDoseCard(id);
+                });
+            } catch(e) {
+                console.warn('[DoseConfirm] Poll failed:', e);
+            }
+        }
+
+        /**
+         * Confirm (TAKEN / MISSED) a dose log via the dashboard API.
+         * Idempotent — if already confirmed, the backend returns 409 and we
+         * just remove the card gracefully.
+         */
+        async function confirmDose(doseLogId, action) {
+            // Disable both buttons immediately to prevent double-clicks
+            const takenBtn  = document.getElementById(`taken-btn-${doseLogId}`);
+            const missedBtn = document.getElementById(`missed-btn-${doseLogId}`);
+            if (takenBtn)  { takenBtn.disabled  = true; takenBtn.textContent  = '…'; }
+            if (missedBtn) { missedBtn.disabled = true; missedBtn.textContent = '…'; }
+
+            try {
+                const res = await fetch(`${API_BASE}/confirm-dose`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ dose_log_id: doseLogId, action })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    _removeDoseCard(doseLogId);
+                    const label = action === 'TAKEN' ? '✔ Dose confirmed as taken' : '⚠ Dose marked as not taken';
+                    const type  = action === 'TAKEN' ? 'success' : 'warning';
+                    showToast(label, type);
+                } else if (res.status === 409) {
+                    // Already confirmed (race with email link)
+                    _removeDoseCard(doseLogId);
+                    showToast('Dose already recorded.', 'success');
+                } else {
+                    // Re-enable buttons on error
+                    if (takenBtn)  { takenBtn.disabled  = false; takenBtn.textContent  = '✔ Taken'; }
+                    if (missedBtn) { missedBtn.disabled = false; missedBtn.textContent = '✖ Not Taken'; }
+                    showToast('Could not confirm dose. Please try again.', 'error');
+                }
+            } catch (e) {
+                console.error('[DoseConfirm] Error:', e);
+                if (takenBtn)  { takenBtn.disabled  = false; takenBtn.textContent  = '✔ Taken'; }
+                if (missedBtn) { missedBtn.disabled = false; missedBtn.textContent = '✖ Not Taken'; }
+                showToast('Network error. Please check connection.', 'error');
+            }
+        }
+
+        // ── Socket.IO real-time listeners ──
+        // new_dose_pending  → add card instantly when scheduler fires
+        audioSocket.on('new_dose_pending', (data) => {
+            _addDoseCard({
+                dose_log_id:    data.dose_log_id,
+                medicine_name:  data.medicine_name,
+                dosage:         data.dosage || '',
+                scheduled_time: data.scheduled_time,
+                recipient_name: data.recipient_name || '',
+                recipient_id:   data.recipient_id
+            });
+        });
+
+        // dose_confirmed → remove card when confirmed from any channel (email/voice/dashboard)
+        audioSocket.on('dose_confirmed', (data) => {
+            _removeDoseCard(data.dose_log_id);
+        });
+
+        // ── Initial load + 30-second polling fallback ──
+        loadPendingDoses();
+        setInterval(loadPendingDoses, 30000);
+
     </script>
     <!-- Chart.js for Audio Analytics -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>

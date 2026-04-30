@@ -1029,20 +1029,117 @@
             pointer-events: none;
         }
 
-        @media (max-width: 768px) {
-            .btn-full {
-                width: 100%;
-            }
-            .header-top {
-                flex-wrap: wrap;
-                justify-content: center;
-                text-align: center;
-            }
-            .header-actions-wrap {
-                flex-wrap: wrap;
-                justify-content: center;
-                width: 100%;
-            }
+        /* v3 Recommendation Redesign */
+        .rec-zone { margin-bottom: 32px; }
+        .rec-zone-title { 
+            font-size: 0.75rem; 
+            font-weight: 800; 
+            color: var(--text-muted); 
+            text-transform: uppercase; 
+            letter-spacing: 1.5px; 
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .rec-card-premium {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 20px;
+            padding: 24px;
+            margin-bottom: 16px;
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.07);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        .rec-card-premium:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(31, 38, 135, 0.12);
+            background: rgba(255, 255, 255, 0.85);
+        }
+        .rec-card-premium.critical { border-left: 6px solid var(--critical); }
+        .rec-card-premium.high { border-left: 6px solid var(--warning); }
+        .rec-card-premium.medium { border-left: 6px solid var(--normal); }
+        .rec-card-premium.low { border-left: 6px solid var(--text-muted); }
+        
+        .rec-title-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+        .rec-main-title { font-size: 1.25rem; font-weight: 800; color: #1E3A8A; line-height: 1.2; }
+        .rec-urgency-badge { 
+            font-size: 0.65rem; 
+            font-weight: 800; 
+            padding: 4px 10px; 
+            border-radius: 20px; 
+            text-transform: uppercase;
+        }
+        .urgency-now { background: #fee2e2; color: #dc2626; }
+        .urgency-today { background: #fef3c7; color: #d97706; }
+        
+        .rec-today-actions {
+            background: rgba(241, 245, 249, 0.5);
+            border-radius: 12px;
+            padding: 16px;
+            margin: 16px 0;
+        }
+        .action-item-v3 {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            font-size: 0.95rem;
+            color: var(--text-main);
+            font-weight: 600;
+        }
+        .action-item-v3:last-child { border-bottom: none; }
+        .action-icon { color: var(--accent); font-size: 1rem; width: 20px; text-align: center; }
+        
+        .rec-meta-grid { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 16px; 
+            margin-top: 16px; 
+            font-size: 0.85rem; 
+        }
+        .meta-box { background: white; padding: 12px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.03); }
+        .meta-label { font-size: 0.65rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px; }
+        .meta-value { font-weight: 700; color: var(--text-main); }
+
+        .btn-resolve {
+            background: #1E3A8A;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            justify-content: center;
+            margin-top: 16px;
+        }
+        .btn-resolve:hover { background: #1e40af; transform: scale(1.02); }
+        .btn-resolve:active { transform: scale(0.98); }
+        
+        .history-card { 
+            opacity: 0.7; 
+            filter: grayscale(0.5); 
+            transform: scale(0.98);
+        }
+        .history-card:hover { opacity: 1; filter: grayscale(0); transform: scale(1); }
+        
+        .glass-tag {
+            background: rgba(255,255,255,0.4);
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: #475569;
         }
     </style>
 </head>
@@ -1359,24 +1456,56 @@
                     </div>
                 </div>
 
-                <!-- TAB: INTELLIGENCE -->
+                <!-- TAB: INTELLIGENCE (v3 Redesign) -->
                 <div id="tab-intelligence" class="tab-pane">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px;">
+                        <div>
+                            <h2 style="font-size: 1.8rem; font-weight: 800; color: #1E3A8A; margin: 0;">Clinical Intelligence Hub</h2>
+                            <p style="color: var(--text-muted); font-weight: 500; margin-top: 4px;">Grouped by health domains for clarity</p>
+                        </div>
+                        <div style="display: flex; gap: 12px;">
+                            <button class="btn btn-outline" id="btnRefreshRecs" onclick="refreshRecommendations()" style="border-radius: 12px; font-weight: 700;">
+                                <i class="fas fa-sync-alt"></i> Force AI Refresh
+                            </button>
+                        </div>
+                    </div>
+
                     <div class="dashboard-grid">
-                        <div class="col-6">
-                            <div class="card">
-                                <div class="card-header">
-                                    <h2><i class="fas fa-user-md"></i> Actionable Insights</h2>
-                                    <button class="btn btn-sm btn-outline" id="btnRefreshRecs" onclick="refreshRecommendations()"><i class="fas fa-sync-alt"></i> Refresh</button>
-                                </div>
-                                <div id="recommendationsList" class="scroll-area"></div>
+                        <!-- Left Column: Active Recommendations (Zone 1 & 2) -->
+                        <div class="col-8">
+                            <!-- Zone 1: Today's High-Focus Actions -->
+                            <div class="rec-zone">
+                                <div class="rec-zone-title"><i class="fas fa-bolt" style="color: #f59e0b;"></i> Today's Focus</div>
+                                <div id="zone-urgent-recs"></div>
+                            </div>
+
+                            <!-- Zone 2: Deep Context & Health Monitoring -->
+                            <div class="rec-zone">
+                                <div class="rec-zone-title"><i class="fas fa-microscope" style="color: #3b82f6;"></i> Deep Context & Monitoring</div>
+                                <div id="zone-monitoring-recs"></div>
+                            </div>
+                            
+                            <div id="recsEmptyState" class="empty-state" style="display:none; padding: 60px;">
+                                <i class="fas fa-check-circle" style="font-size: 3rem; color: var(--normal); margin-bottom: 16px;"></i>
+                                <h3>All caught up!</h3>
+                                <p>No active clinical interventions required at this moment.</p>
                             </div>
                         </div>
-                        <div class="col-6">
-                            <div class="card">
+
+                        <!-- Right Column: Alert Feed & History (Zone 3) -->
+                        <div class="col-4">
+                            <!-- Zone 3: Treatment History & Archive -->
+                            <div class="rec-zone">
+                                <div class="rec-zone-title"><i class="fas fa-history"></i> Treatment History</div>
+                                <div id="zone-history-recs" style="max-height: 400px; overflow-y: auto; padding-right: 8px;"></div>
+                            </div>
+
+                            <!-- Legacy Alerts Section -->
+                            <div class="card" style="margin-top: 24px; border-radius: 20px;">
                                 <div class="card-header">
-                                    <h2><i class="fas fa-bell"></i> Full Clinical Alerts</h2>
+                                    <h2 style="font-size: 1rem;"><i class="fas fa-bell"></i> System Alert Log</h2>
                                 </div>
-                                <div id="alertsList" class="scroll-area"></div>
+                                <div id="alertsList" class="scroll-area" style="max-height: 400px;"></div>
                             </div>
                         </div>
                     </div>
@@ -2647,9 +2776,13 @@
             return `${days}d ago (${absTime})`;
         }
 
-        // Section: Actionable Recommendations
+        // Section: Actionable Recommendations (v3 Redesign)
         async function loadRecommendations() {
-            const el = document.getElementById('recommendationsList');
+            const zUrgent = document.getElementById('zone-urgent-recs');
+            const zMonitor = document.getElementById('zone-monitoring-recs');
+            const zHistory = document.getElementById('zone-history-recs');
+            const emptyState = document.getElementById('recsEmptyState');
+
             try {
                 const res = await fetch(`${API_BASE}/care-recipients/${recipientId}/recommendations`, {
                     headers: { 'Authorization': `Bearer ${token}` }
@@ -2658,82 +2791,105 @@
                 const data = await res.json();
                 const items = data.result || [];
 
-                // Health State Summary removed as per user request
-
                 if (!items.length) {
-                    el.innerHTML = '<div class="empty-state">No active recommendations.</div>';
+                    emptyState.style.display = 'block';
+                    zUrgent.innerHTML = ''; zMonitor.innerHTML = ''; zHistory.innerHTML = '';
                     return;
                 }
+                emptyState.style.display = 'none';
 
-                const colors = { critical: '#fef2f2', high: '#fffbeb', medium: '#f0fdf4', suggestion: '#f8fafc', low: '#f8fafc' };
-                const borders = { critical: '#ef4444', high: '#f59e0b', medium: '#22c55e', suggestion: '#3b82f6', low: '#94a3b8' };
-                const iconColors = { critical: '#ef4444', high: '#f59e0b', medium: '#22c55e', suggestion: '#3b82f6', low: '#94a3b8' };
-                const icons = { critical: 'fa-exclamation-triangle', high: 'fa-bolt', medium: 'fa-info-circle', suggestion: 'fa-lightbulb', low: 'fa-info-circle' };
-
-                el.innerHTML = items.map(r => {
-                    const iconColors = { critical: '#ef4444', high: '#f59e0b', medium: '#22c55e', suggestion: '#3b82f6', low: '#94a3b8' };
-                    const icons = { critical: 'fa-exclamation-triangle', high: 'fa-bolt', medium: 'fa-info-circle', suggestion: 'fa-lightbulb', low: 'fa-info-circle' };
-                    const colors = { critical: '#fef2f2', high: '#fffbeb', medium: '#f0fdf4', suggestion: '#f8fafc', low: '#f8fafc' };
-                    const borders = { critical: '#ef4444', high: '#f59e0b', medium: '#22c55e', suggestion: '#3b82f6', low: '#94a3b8' };
-
-                    // Group actions by category
-                    const grouped = { doctor: [], lifestyle: [], tests: [] };
-                    (r.actions || []).forEach(a => {
-                        if (a.type === 'doctor_visit') grouped.doctor.push(a);
-                        else if (a.type === 'test') grouped.tests.push(a);
-                        else grouped.lifestyle.push(a);
-                    });
-
-                    const renderGroup = (list, title, gIcon) => {
-                        if (!list.length) return '';
-                        return `
-                            <div style="margin-top:8px;">
-                                <div style="font-size:0.65rem; font-weight:700; text-transform:uppercase; color:var(--text-muted); margin-bottom:2px; display:flex; align-items:center; gap:4px;">
-                                    <i class="fas ${gIcon}"></i> ${title}
-                                </div>
-                                <ul style="list-style:none; padding:0; margin:0;">
-                                    ${list.map(a => {
-                                        let aIcon = 'fa-check';
-                                        if (a.type === 'doctor_visit') aIcon = 'fa-stethoscope';
-                                        else if (a.type === 'diet') aIcon = 'fa-apple-alt';
-                                        else if (a.type === 'lifestyle') aIcon = 'fa-running';
-                                        else if (a.type === 'test') aIcon = 'fa-vial';
-                                        else if (a.type === 'home_remedy') aIcon = 'fa-leaf';
-                                        return `<li style="margin-top:2px; font-size: 0.75rem; color: var(--text-main); display:flex; align-items:flex-start; gap:6px;">
-                                                    <i class="fas ${aIcon}" style="color:${iconColors[r.severity]}; margin-top:2px; width:14px;"></i> 
-                                                    <span>${a.text} ${a.evidence ? `<i class="fas fa-info-circle" style="font-size:0.6rem; opacity:0.5;" title="Evidence: ${a.evidence}"></i>` : ''}</span>
-                                                </li>`;
-                                    }).join('')}
-                                </ul>
-                            </div>
-                        `;
-                    };
+                const renderCard = (r, isHistory = false) => {
+                    const urgencyClass = (r.time_window || '').toLowerCase().includes('now') ? 'urgency-now' : 'urgency-today';
+                    const urgencyLabel = r.time_window || (r.severity === 'critical' ? 'Now' : 'Today');
+                    
+                    const actionsHtml = (r.today_actions || []).map(a => `
+                        <div class="action-item-v3">
+                            <i class="fas fa-circle-notch action-icon"></i>
+                            <span>${a}</span>
+                        </div>
+                    `).join('');
 
                     return `
-                        <div class="list-item" style="border-left: 4px solid ${borders[r.severity]}; background: ${colors[r.severity]}50; padding: 16px; margin-bottom: 12px; border-radius: 12px; position: relative;">
-                            <div style="position: absolute; top: 12px; right: 12px; font-size: 0.65rem; color: var(--text-muted); font-weight: 500;">
-                                <i class="fas fa-clock" style="font-size: 0.8em;"></i> ${timeAgo(r.created_at)}
-                            </div>
-                            <div style="display:flex; gap:12px; align-items:flex-start;">
-                                <div style="width:32px; height:32px; border-radius:8px; background:${borders[r.severity]}; color:#fff; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                                    <i class="fas ${icons[r.severity]}"></i>
+                        <div class="rec-card-premium ${r.severity.toLowerCase()} ${isHistory ? 'history-card' : ''}" id="rec-card-${r.id}">
+                            <div class="rec-title-row">
+                                <div>
+                                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                                        <span class="glass-tag">${(r.condition_group || 'General').toUpperCase()}</span>
+                                        <span class="rec-urgency-badge ${urgencyClass}">${urgencyLabel}</span>
+                                    </div>
+                                    <div class="rec-main-title">${r.title || (r.metric + ' Insight')}</div>
                                 </div>
-                                <div style="flex:1;">
-                                    <div style="font-weight:600; font-size:0.95rem; color:var(--text);">${r.metric} Insight</div>
-                                    <div style="font-size:0.85rem; color:var(--text-muted); margin-top:4px; line-height:1.4;">${r.message}</div>
-                                    
-                                    ${renderGroup(grouped.doctor, 'Clinical Action', 'fa-stethoscope')}
-                                    ${renderGroup(grouped.tests, 'Follow-up Diagnostics', 'fa-vial')}
-                                    ${renderGroup(grouped.lifestyle, 'Lifestyle & Management', 'fa-running')}
+                                ${!isHistory ? `<div style="font-size:0.65rem; color:var(--text-muted); font-weight:700;">${timeAgo(r.created_at)}</div>` : ''}
+                            </div>
+                            
+                            <div style="font-size: 0.9rem; color: #475569; line-height: 1.5; margin-bottom: 16px;">
+                                ${r.do_this_now || r.message}
+                            </div>
+
+                            ${actionsHtml ? `<div class="rec-today-actions">${actionsHtml}</div>` : ''}
+
+                            <div class="rec-meta-grid">
+                                <div class="meta-box">
+                                    <div class="meta-label">Why this matters</div>
+                                    <div class="meta-value" style="font-weight:600; font-size:0.8rem; color:#475569;">${r.why_this_matters || 'No clinical reasoning provided.'}</div>
+                                </div>
+                                <div class="meta-box">
+                                    <div class="meta-label">Next check</div>
+                                    <div class="meta-value" style="font-weight:600; font-size:0.8rem; color:#475569;">${r.next_check?.when || 'As needed'}</div>
                                 </div>
                             </div>
+
+                            ${!isHistory ? `
+                                <button class="btn-resolve" onclick="resolveRecommendation(${r.id})">
+                                    <i class="fas fa-check-circle"></i> Mark as done
+                                </button>
+                            ` : `
+                                <div style="margin-top:16px; font-size:0.7rem; color:var(--normal); font-weight:700; display:flex; align-items:center; gap:4px;">
+                                    <i class="fas fa-check-circle"></i> Resolved ${timeAgo(r.resolved_at)}
+                                </div>
+                            `}
                         </div>
                     `;
-                }).join('');
+                };
+
+                // Filter items into zones
+                const urgent = items.filter(r => !r.resolved_at && (r.severity === 'critical' || r.severity === 'high'));
+                const monitor = items.filter(r => !r.resolved_at && (r.severity !== 'critical' && r.severity !== 'high'));
+                const history = items.filter(r => r.resolved_at).sort((a,b) => new Date(b.resolved_at) - new Date(a.resolved_at));
+
+                zUrgent.innerHTML = urgent.length ? urgent.map(r => renderCard(r)).join('') : '<div class="empty-state" style="padding:20px;">No high-priority actions.</div>';
+                zMonitor.innerHTML = monitor.length ? monitor.map(r => renderCard(r)).join('') : '<div class="empty-state" style="padding:20px;">No active monitoring items.</div>';
+                zHistory.innerHTML = history.length ? history.map(r => renderCard(r, true)).join('') : '<div class="empty-state" style="padding:20px;">No history yet.</div>';
 
             } catch (err) {
                 console.error(err);
-                el.innerHTML = '<div class="empty-state">Unable to load recommendations.</div>';
+                zUrgent.innerHTML = '<div class="empty-state">Unable to load recommendations.</div>';
+            }
+        }
+
+        async function resolveRecommendation(recId) {
+            const btn = document.querySelector(`#rec-card-${recId} .btn-resolve`);
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
+            }
+
+            try {
+                const res = await fetch(`${API_BASE}/care-recipients/${recipientId}/recommendations/${recId}/resolve`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) throw new Error('Failed to resolve');
+                
+                // Refresh list to move to history
+                await loadRecommendations();
+            } catch (err) {
+                console.error(err);
+                alert('Failed to update status. Please try again.');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-check-circle"></i> Mark as done';
+                }
             }
         }
 

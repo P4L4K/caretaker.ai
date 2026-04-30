@@ -9,12 +9,74 @@ import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
-from tables.medical_conditions import LabValue
-from tables.medical_recommendations import MedicalRecommendation
+from tables.medical_conditions import LabValue, PatientCondition
+from tables.medical_recommendations import MedicalRecommendation, severity_rank, SEVERITY_RANK
 from tables.vital_signs import VitalSign
-from tables.audio_events import AudioEvent
+from tables.audio_events import AudioEvent, AudioEventType
 from tables.thresholds import ThresholdConfig
 from tables.users import CareRecipient
+from tables.medications import Medication
+from tables.medication_dose_logs import MedicationDoseLog
+from tables.environment import EnvironmentSensor
+from tables.video_analysis import VideoAnalysis
+from tables.conversation_history import ConversationMessage
+from tables.allergies import Allergy
+
+# ─── Model Constants ────────────────────────────────────────────────────────# 3-Tier AI constants
+LITE_MODEL  = "gemini-1.5-flash"  # Primary fast model
+FLASH_MODEL = "gemini-2.0-flash"  # Primary reasoning model
+PRO_MODEL   = "gemini-1.5-pro"    # Deep clinical reasoning (fallback/critical)
+
+# ─── v3 Pipeline Gates ──────────────────────────────────────────────────────
+LEGACY_RULE_ENGINE_WRITES_ENABLED = False  # STOP direct DB writes from old rules
+
+CONDITION_GROUPS = {
+    "diabetes": {
+        "rules": {"HIGH_HBA1C", "HIGH_FASTING_GLUCOSE", "HIGH_PP_GLUCOSE", "GLUCOSE_SPIKE"},
+        "label": "Blood sugar management",
+    },
+    "cardiovascular": {
+        "rules": {"HIGH_LDL", "LOW_HDL", "HIGH_TRIGLYCERIDES", "HIGH_BP_SYSTOLIC", "DIABETIC_DYSLIPIDEMIA", "TACHYCARDIA"},
+        "label": "Heart health",
+    },
+    "kidney": {
+        "rules": {"HIGH_CREATININE", "LOW_EGFR"},
+        "label": "Kidney health",
+    },
+    "liver": {
+        "rules": {"HIGH_ALT", "HIGH_AST"},
+        "label": "Liver health",
+    },
+    "vitals": {
+        "rules": {"LOW_SPO2", "FEVER", "BRADYCARDIA"},
+        "label": "General vitals",
+    },
+    "environment": {
+        "rules": {"HIGH_PM25", "HIGH_AQI", "TEMP_EXTREME"},
+        "label": "Home environment",
+    }
+}
+
+# Daily budget guard — never exceed these
+DAILY_BUDGET = {
+    LITE_MODEL:  490,   # leave 10 buffer from 500 RPD
+    FLASH_MODEL: 18,    # leave 2 buffer from 20 RPD
+    PRO_MODEL:   3,     # treat as extremely precious
+}
+
+EMBEDDING_MODEL = "text-embedding-004"
+DUPLICATE_SIMILARITY_THRESHOLD = 0.92
+
+# ─── Cross-domain critical rules ────────────────────────────────────────────
+CROSS_DOMAIN_CRITICAL_RULES = {
+    "LOW_SPO2_HIGH_AQI",
+    "FALL_PLUS_TACHYCARDIA",
+    "HIGH_BP_LOW_ACTIVITY",
+    "WORSENING_CREATININE_RISING_HR",
+    "Diabetic Dyslipidemia", # From evaluate_combinations
+    "FALL_PLUS_TACHYCARDIA",
+    "LOW_SPO2_HIGH_AQI"
+}
 
 # ─── Clinical Rules ─────────────────────────────────────────────────────────
 # Each rule maps an actionable condition to severity and concrete actions.
@@ -371,6 +433,127 @@ def safety_filter(alerts: List[Dict]) -> List[Dict]:
         safe_alerts.append(a)
     return safe_alerts
 
+def route_to_model(triggered_rules: List[Dict], daily_usage: Dict = None) -> str:
+    """
+    Intelligently routes to Flash Lite (routine), Flash (high risk), or Pro (critical).
+    Uses a fallback chain to respect daily quotas.
+    """
+    if daily_usage is None: daily_usage = {}
+    
+    severities = {r.get("severity", "low") for r in triggered_rules}
+    rule_ids = {r.get("rule_id", "none") for r in triggered_rules}
+
+    # 1. Critical path → Pro (if quota available)
+    if "critical" in severities or (rule_ids & CROSS_DOMAIN_CRITICAL_RULES):
+        if daily_usage.get(PRO_MODEL, 0) < DAILY_BUDGET[PRO_MODEL]:
+            return PRO_MODEL
+        # Pro budget exhausted — fall back to Flash with escalation flag
+        return FLASH_MODEL
+
+    # 2. High severity or multi-domain → Flash
+    if "high" in severities or len(triggered_rules) >= 2:
+        if daily_usage.get(FLASH_MODEL, 0) < DAILY_BUDGET[FLASH_MODEL]:
+            return FLASH_MODEL
+        # Flash budget exhausted — fall back to Lite
+        return LITE_MODEL
+
+    # 3. Everything else → Lite
+    return LITE_MODEL
+
+
+def get_daily_usage(db: Session) -> Dict[str, int]:
+    """Calculate usage per model for the current day."""
+    from sqlalchemy import func
+    from datetime import datetime
+    today = datetime.utcnow().date()
+    
+    usage = db.query(
+        MedicalRecommendation.model_used,
+        func.count(MedicalRecommendation.id)
+    ).filter(
+        func.date(MedicalRecommendation.created_at) == today
+    ).group_by(MedicalRecommendation.model_used).all()
+    
+    return {model: count for model, count in usage}
+
+
+def should_run_flash(patient_id: int, db: Session) -> bool:
+    """
+    Returns False if Flash already ran for this patient today
+    at the same or higher severity — prevents burning daily quota.
+    """
+    from sqlalchemy import func
+    from datetime import datetime
+    today = datetime.utcnow().date()
+    
+    existing = db.query(MedicalRecommendation).filter(
+        MedicalRecommendation.care_recipient_id == patient_id,
+        MedicalRecommendation.model_used == FLASH_MODEL,
+        func.date(MedicalRecommendation.created_at) == today,
+    ).count()
+    
+    return existing == 0 
+
+
+def deduplicate(new_recs: List[MedicalRecommendation], patient_id: int, db: Session) -> List[MedicalRecommendation]:
+    """
+    Uses Semantic Similarity (Embeddings) to find duplicates from the last 24h.
+    Falls back to string match if embedding service fails.
+    """
+    from datetime import datetime, timedelta
+    from utils.gemini_client import get_embedding
+    import numpy as np
+
+    since = datetime.utcnow() - timedelta(hours=24)
+    existing = db.query(MedicalRecommendation).filter(
+        MedicalRecommendation.care_recipient_id == patient_id,
+        MedicalRecommendation.created_at >= since
+    ).all()
+    
+    if not existing:
+        return new_recs
+
+    # Get embeddings for existing messages
+    existing_embeddings = []
+    for r in existing:
+        msg = r.caregiver_message or r.message
+        emb = get_embedding(msg, model=EMBEDDING_MODEL)
+        if emb:
+            existing_embeddings.append((r, np.array(emb)))
+
+    kept = []
+    for n in new_recs:
+        new_msg = n.caregiver_message or n.message
+        new_emb = np.array(get_embedding(new_msg, model=EMBEDDING_MODEL)) if existing_embeddings else None
+        
+        is_duplicate = False
+        
+        if new_emb is not None:
+            # Vector comparison
+            for old_rec, old_emb in existing_embeddings:
+                similarity = np.dot(new_emb, old_emb) / (np.linalg.norm(new_emb) * np.linalg.norm(old_emb))
+                if similarity > DUPLICATE_SIMILARITY_THRESHOLD:
+                    # It's a semantic duplicate. 
+                    # Only keep if the NEW one is more severe.
+                    if PRIORITY.get(n.severity, 0) > PRIORITY.get(old_rec.severity, 0):
+                        # Escalation! We actually want to replace/add the new one
+                        is_duplicate = False
+                        break
+                    is_duplicate = True
+                    break
+        else:
+            # Fallback to fuzzy string match
+            for r in existing:
+                if n.message[:50] == r.message[:50]:
+                    if PRIORITY.get(n.severity, 0) <= PRIORITY.get(r.severity, 0):
+                        is_duplicate = True
+                        break
+        
+        if not is_duplicate:
+            kept.append(n)
+            
+    return kept
+
 # ─── Prioritization & Deduplication ─────────────────────────────────────────
 
 PRIORITY = {
@@ -381,54 +564,79 @@ PRIORITY = {
     "low": 0
 }
 
-def prioritize_and_dedup(alerts: List[Dict], db: Session, recipient_id: int, now: datetime.datetime) -> List[Dict]:
-    # 1. Intra-run deduplication (keep highest severity per metric)
-    best_alerts = {}
-    for a in alerts:
-        metric = a["metric"]
-        if metric not in best_alerts:
-            best_alerts[metric] = a
-        else:
-            if PRIORITY[a["severity"]] > PRIORITY[best_alerts[metric]["severity"]]:
-                best_alerts[metric] = a
-                
-    unique_alerts = list(best_alerts.values())
+def is_duplicate(new_rec: Dict[str, Any], patient_id: int, db: Session) -> bool:
+    """
+    One active card per condition_group per patient per 8-hour window.
+    Only allow through if severity has escalated.
+    """
+    from datetime import datetime, timedelta
+    cutoff = datetime.utcnow() - timedelta(hours=8)
+
+    # Step 1: exact match check (fast)
+    exact = db.query(MedicalRecommendation).filter(
+        MedicalRecommendation.care_recipient_id == patient_id,
+        MedicalRecommendation.condition_group == new_rec.get("condition_group"),
+        MedicalRecommendation.resolved_at == None,
+        MedicalRecommendation.created_at >= cutoff,
+    ).first()
+
+    if exact:
+        # Only allow through if severity has escalated
+        current_rank = SEVERITY_RANK.get(exact.severity, 0)
+        # Handle both 'urgency' from AI and 'severity' from rule engine
+        new_sev = new_rec.get("urgency") or new_rec.get("severity", "suggestion")
+        new_rank = SEVERITY_RANK.get(new_sev, 0)
+        if new_rank <= current_rank:
+            return True  # duplicate, suppress it
+
+    return False  # new, allow it
+
+
+def group_triggered_rules(rules: List[Dict]) -> List[Dict]:
+    """
+    Groups individual triggered rules into thematic condition groups.
+    Example: [Glucose Alert, HbA1c Alert] -> [Diabetes Group]
+    """
+    groups = {
+        "diabetes": ["glucose", "hba1c", "blood sugar", "insulin"],
+        "cardiovascular": ["blood pressure", "systolic", "diastolic", "heart rate", "hr", "cholesterol", "ldl", "hdl"],
+        "kidney": ["creatinine", "egfr", "kidney"],
+        "liver": ["alt", "ast", "liver"],
+        "vitals": ["oxygen", "spo2", "temperature", "temp", "respiration"],
+        "environment": ["aqi", "humidity", "room temp"],
+        "general": []
+    }
     
-    # 2. Database 24hr deduping
-    final_alerts = []
-    for a in unique_alerts:
-        # Check if identical metric & severity emitted in last 24h with SAME value
-        recent = db.query(MedicalRecommendation).filter(
-            MedicalRecommendation.care_recipient_id == recipient_id,
-            MedicalRecommendation.metric == a["metric"],
-            MedicalRecommendation.severity == a["severity"],
-            MedicalRecommendation.created_at >= now - datetime.timedelta(days=1)
-        ).order_by(MedicalRecommendation.created_at.desc()).first()
+    grouped = {}
+    
+    for r in rules:
+        metric = str(r.get("metric", "")).lower()
+        found_group = "general"
+        for g_name, keywords in groups.items():
+            if any(k in metric for k in keywords):
+                found_group = g_name
+                break
         
-        # If no recent alert, OR recent alert has a DIFFERENT trigger value, allow it
-        if not recent:
-            final_alerts.append(a)
+        if found_group not in grouped:
+            grouped[found_group] = {
+                "metric": found_group.capitalize(),
+                "severity": r.get("severity", "low"),
+                "description": r.get("description", ""),
+                "rules": [r]
+            }
         else:
-            # Allow update if value changed by more than 1%
-            old_val = recent.trigger_value
-            new_val = a["value"]
-            if old_val is None or new_val is None or abs(new_val - old_val) / (old_val or 1) > 0.01:
-                final_alerts.append(a)
-            else:
-                # If identical, refresh the timestamp to show it was re-audited successfully
-                recent.created_at = now
-                # No need to append to final_alerts since DB is updated in-place
+            # Update severity to highest in group
+            if PRIORITY.get(r.get("severity", "low"), 0) > PRIORITY.get(grouped[found_group]["severity"], 0):
+                grouped[found_group]["severity"] = r["severity"]
             
-    # 3. Sort by priority
-    final_alerts.sort(key=lambda x: PRIORITY.get(x["severity"], 0), reverse=True)
-    
-    # 4. Enforce UI limit cap (Max 3 criticals, max 7 total - Expanded per user request)
-    criticals = [a for a in final_alerts if a["severity"] == "critical"][:3]
-    others = [a for a in final_alerts if a["severity"] != "critical"]
-    
-    capped = (criticals + others)[:7]
-    
-    return capped
+            # Append to description if unique
+            if r.get("description") and r["description"] not in grouped[found_group]["description"]:
+                grouped[found_group]["description"] += " | " + r["description"]
+            
+            grouped[found_group]["rules"].append(r)
+            
+    return list(grouped.values())
+
 
 def fetch_sensor_fusion_context(recipient_id: int, db: Session, days: int = 7) -> Dict[str, Any]:
     """Fetches trends from vitals and audio events for fusion."""
@@ -533,6 +741,231 @@ def get_state_of_health(recipient_id: int, db: Session) -> Dict[str, Any]:
         return {"category": "Moderate Risk", "color": "var(--warning)", "icon": "fa-info-circle", "label": "Health monitoring advised"}
         
     return {"category": "Good", "color": "var(--success)", "icon": "fa-check-circle", "label": "Maintain current lifestyle"}
+
+
+# ─── Context Builder & Output Merging ─────────────────────────────────────────
+
+def build_context_payload(patient_id: int, db: Session) -> Dict[str, Any]:
+    """
+    Assembles the full structured JSON payload sent to Gemini.
+    Pulls data from Patient Profile, Vitals, Trends, Environment, Labs, Medications, and Behavioral sources.
+    """
+    now = datetime.datetime.utcnow()
+    recipient = db.query(CareRecipient).filter(CareRecipient.id == patient_id).first()
+    if not recipient:
+        return {"error": "Patient not found"}
+
+    # 1. Profile
+    profile = {
+        "age": recipient.age,
+        "gender": recipient.gender.value if recipient.gender else "unknown",
+        "conditions": [c.disease_name for c in db.query(PatientCondition).filter(PatientCondition.care_recipient_id == patient_id).all()],
+        "allergies": [a.allergen for a in db.query(Allergy).filter(Allergy.care_recipient_id == patient_id).all()]
+    }
+
+    # 2. Vitals & Trends (last 7 days)
+    vitals_raw = db.query(VitalSign).filter(
+        VitalSign.care_recipient_id == patient_id,
+        VitalSign.recorded_at >= now - datetime.timedelta(days=7)
+    ).order_by(VitalSign.recorded_at.desc()).all()
+
+    latest_vitals = {}
+    trends = {}
+    
+    VITAL_ATTRS = ["heart_rate", "systolic_bp", "diastolic_bp", "oxygen_saturation", "temperature", "sleep_score", "bmi"]
+    
+    if vitals_raw:
+        v0 = vitals_raw[0]
+        latest_vitals = {attr: getattr(v0, attr) for attr in VITAL_ATTRS}
+        
+        for attr in VITAL_ATTRS:
+            readings = [getattr(v, attr) for v in vitals_raw if getattr(v, attr) is not None][:7]
+            if len(readings) < 2:
+                trends[attr] = "stable"
+                continue
+            
+            # Simple trend detection
+            first = readings[-1]
+            last = readings[0]
+            
+            diff = last - first
+            if abs(diff) < (first * 0.05 if first != 0 else 1):
+                trends[attr] = "stable"
+            elif diff > 0:
+                trends[attr] = "rising"
+            else:
+                trends[attr] = "declining"
+            
+            # Check for high fluctuations
+            if len(readings) >= 3:
+                variance = sum((r - sum(readings)/len(readings))**2 for r in readings) / len(readings)
+                if variance > (sum(readings)/len(readings) * 0.2)**2:
+                    trends[attr] = "fluctuating"
+
+    # 3. Environment
+    latest_env_obj = db.query(EnvironmentSensor).filter(EnvironmentSensor.care_recipient_id == patient_id).order_by(EnvironmentSensor.timestamp.desc()).first()
+    environment = {
+        "aqi": getattr(latest_env_obj, "aqi", None),
+        "pm25": getattr(latest_env_obj, "pm25", None) if hasattr(latest_env_obj, "pm25") else None,
+        "room_temperature": getattr(latest_env_obj, "temperature_c", None),
+        "humidity": getattr(latest_env_obj, "humidity_percent", None)
+    }
+
+    # 4. Lab Results
+    all_labs = db.query(LabValue).filter(LabValue.care_recipient_id == patient_id).order_by(LabValue.recorded_date.desc()).all()
+    labs = {}
+    for lab in all_labs:
+        if lab.metric_name not in labs:
+            # Find previous value for this metric
+            prev = next((l for l in all_labs if l.metric_name == lab.metric_name and l.recorded_date < lab.recorded_date), None)
+            labs[lab.metric_name] = {
+                "current": lab.normalized_value or lab.metric_value,
+                "unit": lab.normalized_unit or lab.unit,
+                "previous": prev.normalized_value or prev.metric_value if prev else None,
+                "date": lab.recorded_date.isoformat()
+            }
+
+    # 5. Medications & Adherence
+    meds_objs = db.query(Medication).filter(Medication.care_recipient_id == patient_id).all()
+    medications = []
+    for m in meds_objs:
+        # Calculate 7-day adherence
+        logs = db.query(MedicationDoseLog).filter(
+            MedicationDoseLog.medication_id == m.medication_id,
+            MedicationDoseLog.scheduled_time >= now - datetime.timedelta(days=7)
+        ).all()
+        
+        taken = sum(1 for l in logs if l.status == "TAKEN")
+        total = len(logs)
+        adherence = round(taken / total, 2) if total > 0 else 1.0
+        
+        medications.append({
+            "name": m.medicine_name,
+            "dose": m.dosage,
+            "frequency": m.frequency,
+            "adherence_rate_7d": adherence
+        })
+
+    # 6. Behavioral
+    latest_video = db.query(VideoAnalysis).filter(VideoAnalysis.recipient_id == patient_id).order_by(VideoAnalysis.timestamp.desc()).first()
+    recent_falls = db.query(VideoAnalysis).filter(
+        VideoAnalysis.recipient_id == patient_id,
+        VideoAnalysis.timestamp >= now - datetime.timedelta(days=7),
+        VideoAnalysis.has_fall == True
+    ).count()
+    
+    recent_audio = db.query(AudioEvent).filter(
+        AudioEvent.care_recipient_id == patient_id,
+        AudioEvent.detected_at >= now - datetime.timedelta(days=1),
+        AudioEvent.event_type == AudioEventType.cough
+    ).count()
+
+    behavioral = {
+        "activity_score": getattr(latest_video, "activity_score", 0),
+        "mobility_score": getattr(latest_video, "mobility_score", 0),
+        "fall_events_7d": recent_falls,
+        "cough_events_24h": recent_audio
+    }
+
+    # 7. Conversation
+    latest_msg = db.query(ConversationMessage).filter(ConversationMessage.care_recipient_id == patient_id).order_by(ConversationMessage.created_at.desc()).first()
+    conversation = {
+        "latest_sentiment": latest_msg.mood_detected.value if latest_msg and latest_msg.mood_detected else "neutral",
+        "intent": latest_msg.trigger_type.value if latest_msg and latest_msg.trigger_type else "unknown"
+    }
+
+    return {
+        "patient_profile": profile,
+        "vitals": latest_vitals,
+        "vital_trends": trends,
+        "environment": environment,
+        "labs": labs,
+        "medications": medications,
+        "behavioral": behavioral,
+        "conversation": conversation,
+        "timestamp": now.isoformat()
+    }
+
+
+def merge_ai_output(
+    raw_json: Dict[str, Any],
+    model_used: str,
+    patient_id: int,
+    triggered_rules: List[Dict],
+    escalated_from_id: Optional[int] = None,
+) -> List[MedicalRecommendation]:
+    """
+    Normalizes Gemini output into MedicalRecommendation ORM objects.
+    Supports v3 schema (cards) and legacy schema (recommendations).
+    """
+    recommendations = []
+    
+    # Determine highest severity rule for trigger_context
+    highest_rule = None
+    if triggered_rules:
+        highest_rule = max(triggered_rules, key=lambda x: PRIORITY.get(x.get("severity", "low"), 0))
+    
+    trigger_context = highest_rule.get("description") if highest_rule else "Multimodal AI Analysis"
+    
+    # Support both v3 "cards" and legacy "recommendations" keys
+    recs_list = raw_json.get("cards") or raw_json.get("recommendations", [])
+    if not isinstance(recs_list, list):
+        recs_list = [recs_list]
+        
+    for rec in recs_list:
+        msg = rec.get("caregiver_message", "")
+        # Enforce clinical disclaimer
+        disclaimer = "Please consult a doctor before making any health changes."
+        if disclaimer.lower() not in msg.lower():
+            msg = msg.rstrip(".") + f". {disclaimer}"
+            
+        # Extract next_check fields with sensible defaults
+        next_check = rec.get("next_check") or {}
+        if not isinstance(next_check, dict): next_check = {}
+        
+        # Urgency mapping
+        urgency = rec.get("urgency", "today")
+        severity = urgency.replace("act_now", "critical").replace("today", "high")
+        if severity not in SEVERITY_RANK:
+            severity = "medium"
+
+        orm_rec = MedicalRecommendation(
+            care_recipient_id=patient_id,
+            metric=rec.get("condition_group", "Multimodal Insight"),
+            severity=severity,
+            message=msg,
+            caregiver_message=msg,
+            do_this_now=rec.get("do_this_now") or "",
+            action_type=rec.get("action", "monitor"),
+            confidence_score=rec.get("confidence", 0.7),
+            reasoning=rec.get("reasoning") if model_used == PRO_MODEL else None,
+            call_doctor=str(rec.get("call_doctor", "false")).lower(),
+            call_ambulance=str(rec.get("call_ambulance", "false")).lower(),
+            health_state=raw_json.get("health_state") or raw_json.get("overall_today"),
+            model_used=model_used,
+            escalated_from=escalated_from_id,
+            trigger_context=trigger_context,
+            source=model_used,
+            
+            # v3 Enhanced Fields
+            title=rec.get("title") or "Health Update",
+            condition_group=rec.get("condition_group") or "general",
+            today_actions=rec.get("today_actions") or [],
+            why_this_matters=rec.get("why_this_matters") or "",
+            time_window=rec.get("time_window") or urgency,
+            root_cause=rec.get("root_cause"),
+            snapshot_summary=raw_json.get("overall_today"),
+            
+            # Loop Closure
+            next_check_when=next_check.get("when") or "Check back this evening",
+            next_check_look_for=next_check.get("look_for") or "How they are feeling overall",
+            next_check_if_worse=next_check.get("if_worse") or "Call their doctor",
+            
+            created_at=datetime.datetime.utcnow()
+        )
+        recommendations.append(orm_rec)
+        
+    return recommendations
 
 
 # ─── Main Execution Pipeline ──────────────────────────────────────────────────
@@ -666,25 +1099,12 @@ def generate_recommendations(recipient_id: int, db: Session):
     # 5. Safety Filter
     safe_alerts = safety_filter(alerts)
     
-    # 6. Prioritize & Dedup
-    final_alerts = prioritize_and_dedup(safe_alerts, db, recipient_id, now)
+    # 6. Return raw rules (deduping happens in AI pipeline)
+    return safe_alerts
     
-    # 7. Save to DB
-    for a in final_alerts:
-        rec = MedicalRecommendation(
-            care_recipient_id=recipient_id,
-            metric=a["metric"],
-            severity=a["severity"],
-            message=a["message"],
-            trigger_value=a["value"],
-            reference_range=a.get("reference"),
-            source=a.get("source", "rule"),
-            confidence_score=1.0, # Rule-based deterministic
-            actions=a["actions"],
-            action_payload=a.get("action_payload"),
-            created_at=now
-        )
-        db.add(rec)
-        
-    db.commit()
-    print(f"[recommendation_engine] Generated {len(final_alerts)} hardened clinical recommendations.")
+    # 7. Return triggered rules instead of writing directly to DB
+    return safe_alerts
+
+def get_triggered_rules(recipient_id: int, db: Session) -> List[Dict]:
+    """Helper to call generate_recommendations and get raw rules."""
+    return generate_recommendations(recipient_id, db)

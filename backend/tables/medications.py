@@ -32,6 +32,7 @@ class Medication(Base):
     last_auto_order_date = Column(Date, nullable=True)
 
     care_recipient = relationship("CareRecipient", back_populates="active_medications")
+    dose_logs = relationship("MedicationDoseLog", back_populates="medication", cascade="all, delete-orphan")
 
 class MedicationHistory(Base):
     __tablename__ = "medication_history"

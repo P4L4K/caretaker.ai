@@ -30,6 +30,13 @@ from tables.vital_signs import VitalSign
 from tables.audio_events import AudioEvent, AudioEventType
 from tables.video_analysis import VideoAnalysis
 from tables.medical_conditions import PatientCondition, LabValue, ConditionStatus
+from tables.medical_recommendations import MedicalRecommendation, severity_rank
+from services.recommendation_engine import (
+    LITE_MODEL, FLASH_MODEL, PRO_MODEL, build_context_payload, 
+    route_to_model, merge_ai_output, is_duplicate,
+    safety_filter, PRIORITY, get_daily_usage, should_run_flash,
+    group_triggered_rules, get_triggered_rules
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -57,6 +64,160 @@ SEVERITY_HIGH = "high"
 SEVERITY_MODERATE = "moderate"
 SEVERITY_LOW = "low"
 SEVERITY_INFO = "info"
+
+
+LITE_SYSTEM_PROMPT = """
+You are a health monitoring assistant. Scan this patient snapshot and
+decide if anything needs a caregiver's attention today.
+
+ONLY flag something if it is genuinely actionable — do not invent advice.
+If everything looks stable, return an empty recommendations list.
+
+Return ONLY valid JSON:
+{
+  "needs_full_analysis": true | false,
+  "reason": "one sentence if true, empty string if false",
+  "quick_nudges": [
+    {
+      "caregiver_message": "one specific sentence a family member can act on now",
+  "quick_nudges": [
+    {
+      "caregiver_message": "one specific sentence a family member can act on now",
+      "action": "diet | lifestyle | medication_check | environment | monitor",
+      "urgency": "suggestion"
+    }
+  ],
+  "health_state": "stable | monitoring"
+}
+
+If needs_full_analysis is true, the system will escalate to a more
+powerful model — you do not need to provide the full recommendation.
+Keep quick_nudges to suggestion-level only. Max 2 nudges.
+"""
+
+FLASH_SYSTEM_PROMPT = """
+You are Caretaker — a warm health companion helping a family
+member look after their elderly loved one at home.
+
+You receive grouped health findings. Your job is to write
+1-3 plain-English action cards the caregiver can act on TODAY.
+
+━━━━ BANNED WORDS (never use) ━━━━
+endocrinologist, cardiologist, dyslipidemia, creatinine, HbA1c,
+ALT, AST, eGFR, systolic, diastolic, NSAIDs, lipid, clinical
+correlation, aggressive management, consult physician immediately
+
+━━━━ WRITING RULES ━━━━
+- Write like a caring friend who happens to know medicine
+- Always anchor to a real number: not "sugar is high" but
+  "blood sugar reading has been above the healthy range this month"
+- Every action must be doable today: not "increase fiber" but
+  "add a small bowl of oats or lentils to lunch today"
+- One card per condition group — never one card per lab metric
+- The next_check field is mandatory — it tells the caregiver
+  when they can stop worrying about this today
+
+━━━━ GOOD EXAMPLE ━━━━
+{
+  "title": "Blood sugar today",
+  "caregiver_message": "His blood sugar control reading has been
+    above the healthy range for a few weeks, and his cholesterol
+    is also slightly high. Both improve with the same changes —
+    so one focused day of eating well makes a real difference.",
+  "do_this_now": "Serve a meal with no white rice, bread, or
+    sweet drinks today — plain dal, sabzi, and roti is perfect.",
+  "why_this_matters": "High blood sugar and cholesterol together
+    put extra pressure on the heart — small daily changes add up
+    significantly over weeks.",
+  "today_actions": [
+    "Offer water or plain lassi instead of juice or tea with sugar",
+    "A 10-minute walk after lunch helps bring blood sugar down",
+    "Avoid fried snacks today — a handful of nuts is a good swap"
+  ],
+  "next_check": {
+    "when": "tomorrow morning",
+    "look_for": "Whether he ate well today — that is the only
+      thing that matters right now, not the numbers.",
+    "if_worse": "If he feels dizzy or unusually tired today,
+      sit him down, give him water, and call his doctor."
+  },
+  "condition_group": "cardiovascular",
+  "urgency": "today",
+  "confidence": 0.82
+}
+
+━━━━ OUTPUT FORMAT ━━━━
+Return ONLY valid JSON, no markdown fences:
+{
+  "cards": [ ...1 to 3 card objects as shown above... ],
+  "overall_today": "One sentence about his overall state today.",
+  "health_trend": "stable | monitoring | declining"
+}
+"""
+
+PRO_SYSTEM_PROMPT = """
+You are a senior clinical decision support engine embedded in Caretaker.ai.
+You are called only when a serious or multi-domain health risk is flagged.
+Output will be shown to a family caregiver. It must be clinically rigorous 
+internally but translated into plain, urgent English for the reader.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+YOUR REASONING PROCESS — follow this exactly
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. PATTERN: What is the most dangerous chain across ALL domains?
+   (e.g., Poor sleep → reduced activity → elevated HR → SpO2 declining)
+2. CAUSE: What is the most likely trigger (AQI, medication, infection)?
+3. ACTION: What must the caregiver do in the NEXT 60 MINUTES?
+4. ESCALATION: Does this need a doctor call or ambulance?
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BEFORE YOU WRITE — run this check on every sentence
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Ask yourself: "Could a worried parent at 2am follow this instruction?"
+✗ VAGUE: "Patient exhibiting hypoxic symptoms. Recommend assessment."
+✓ SPECIFIC: "Call the doctor and say: oxygen is at 91% and air is poor."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DATA ANCHORING — mandatory
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Every caregiver_message MUST reference specific values (e.g., SpO2 91%, HR 108).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT FORMAT — return ONLY this JSON, no markdown, no explanation
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{
+  "recommendations": [
+    {
+      "caregiver_message": "2-3 sentences. Plain English. Warm but urgent tone.",
+      "do_this_now": "Single imperative sentence. If ambulance needed, start with Call 112.",
+      "why_this_matters": "One sentence. What happens if ignored in the next hour.",
+      "action": "emergency | doctor_visit | test | lifestyle",
+      "urgency": "critical | high",
+      "time_window": "now | next_15_min | next_hour",
+      "call_doctor": true | false,
+      "call_ambulance": true | false,
+      "confidence": 0.0-1.0,
+      "reasoning": "Internal clinical chain-of-thought (audit only).",
+      "root_cause": "Likely trigger of this episode.",
+      "next_check": {
+          "when": "next 15 mins | 30 mins | 1 hour",
+          "look_for": "Specific clinical sign to watch.",
+          "if_worse": "Immediate next step if deteriorating."
+      }
+    }
+  ],
+  "cross_domain_pattern": "Describe the multi-domain chain you found.",
+  "health_state": "at_risk | critical",
+  "snapshot_summary": "One sentence describing overall state right now."
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SAFETY RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Every caregiver_message must end with: "Do not leave them alone right now."
+- If call_ambulance is true, call_doctor must also be true.
+- Max 2 recommendations, ranked by severity.
+"""
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -719,52 +880,136 @@ def _fallback_summary(data: dict, insights: list) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  MAIN ENTRY POINT — Called by the API route
+#  MAIN ENTRY POINT — Dual-Model Pipeline
 # ═══════════════════════════════════════════════════════════════════════
 
-def generate_full_insights(recipient_id: int, db: Session) -> dict:
+async def run_recommendation_pipeline(
+    patient_id: str,
+    db: Session,
+) -> list:
     """
-    Main entry point: Aggregate → Fuse → Analyze → Return.
-    Returns the complete patient intelligence report.
+    Full end-to-end pipeline with 3-tier routing (Lite → Flash/Pro).
     """
-    print(f"[insights_engine] Generating full insights for recipient {recipient_id}")
-
-    # Step 1: Aggregate all data sources
-    data = aggregate_patient_data(recipient_id, db)
-    if "error" in data:
-        return data
-
-    # Step 2: Rule-based sensor fusion (fast, deterministic)
-    fusion_insights = generate_fusion_insights(data)
-    individual_insights = generate_individual_insights(data)
-
-    # Step 3: Gemini AI deep interpretation
-    ai_analysis = gemini_fused_analysis(data, fusion_insights)
-
-    # Step 4: Combine everything
-    # Count AI-generated insights too
-    ai_insights = ai_analysis.get("insights", [])
-    ai_critical = len([i for i in ai_insights if isinstance(i, dict) and i.get("priority") == "critical"])
-    ai_high = len([i for i in ai_insights if isinstance(i, dict) and i.get("priority") == "high"])
+    pid = int(patient_id)
+    print(f"[insights_engine] Running 3-tier recommendation pipeline for patient {pid}")
     
-    rule_critical = len([i for i in fusion_insights + individual_insights if i["severity"] == SEVERITY_CRITICAL])
-    rule_high = len([i for i in fusion_insights + individual_insights if i["severity"] == SEVERITY_HIGH])
+    # 1. Get Triggered Rules
+    raw_rules = get_triggered_rules(pid, db)
+    triggered_rules = group_triggered_rules(raw_rules)
+    print(f"[insights_engine] Grouped {len(raw_rules)} rules into {len(triggered_rules)} groups.")
 
-    total_insights = len(fusion_insights) + len(individual_insights) + len(ai_insights)
-    total_critical = rule_critical + ai_critical
-    total_high = rule_high + ai_high
+    # 2. Get Daily Usage & Target Model
+    daily_usage = get_daily_usage(db)
+    target_model = route_to_model(triggered_rules, daily_usage)
+    
+    # 3. Build Context
+    context = build_context_payload(pid, db)
+    # Add grouped rules to context so Gemini knows what triggered the alert
+    context["triggered_groups"] = triggered_rules
+    context_str = json.dumps(context, indent=2, default=str)
+    
+    all_generated = []
+    
+    # ── TIER 1: LITE (Pre-screener) ──────────────────────────────────────────
+    try:
+        lite_payload = {
+            "contents": [
+                {"role": "user", "parts": [{"text": LITE_SYSTEM_PROMPT}]},
+                {"role": "user", "parts": [{"text": f"PATIENT DATA:\n{context_str}"}]}
+            ]
+        }
+        lite_resp = call_gemini(lite_payload, caller="[Lite]", model_override=LITE_MODEL)
+        if lite_resp:
+            from utils.gemini_client import safe_json_parse
+            raw_lite = lite_resp["candidates"][0]["content"]["parts"][0]["text"]
+            parsed_lite = safe_json_parse(raw_lite)
+            
+            if parsed_lite:
+                # Store Lite nudges if any
+                if parsed_lite.get("quick_nudges"):
+                    lite_recs = merge_ai_output(parsed_lite, LITE_MODEL, pid, triggered_rules)
+                    for rec in lite_recs:
+                        # Convert ORM to dict for is_duplicate or just use attributes
+                        rec_dict = {
+                            "condition_group": rec.condition_group,
+                            "urgency": rec.severity
+                        }
+                        if not is_duplicate(rec_dict, pid, db):
+                            db.add(rec)
+                            all_generated.append(rec)
+                
+                # Check if we should proceed to higher tier
+                should_escalate = parsed_lite.get("needs_full_analysis", False)
+                if not should_escalate and target_model == LITE_MODEL:
+                    db.commit()
+                    return all_generated
+    except Exception as e:
+        print(f"[insights_engine] Lite failed: {e}")
 
-    result = {
-        "patient_data": data,
-        "fusion_insights": fusion_insights,
-        "individual_insights": individual_insights,
-        "ai_analysis": ai_analysis,
-        "total_insights": total_insights,
-        "critical_count": total_critical,
-        "high_count": total_high,
-        "generated_at": datetime.datetime.utcnow().isoformat(),
-    }
+    # ── TIER 2 & 3: FLASH / PRO ──────────────────────────────────────────────
+    if target_model in [FLASH_MODEL, PRO_MODEL]:
+        if target_model == FLASH_MODEL and not should_run_flash(pid, db):
+            print(f"[insights_engine] Skipping Flash for {pid} - already ran today.")
+            db.commit()
+            return all_generated
 
-    print(f"[insights_engine] Generated {total_insights} insights ({total_critical} critical, {total_high} high) — {len(ai_insights)} from AI, {len(fusion_insights) + len(individual_insights)} from rules")
-    return result
+        current_prompt = PRO_SYSTEM_PROMPT if target_model == PRO_MODEL else FLASH_SYSTEM_PROMPT
+        
+        try:
+            full_payload = {
+                "contents": [
+                    {"role": "user", "parts": [{"text": current_prompt}]},
+                    {"role": "user", "parts": [{"text": f"PATIENT DATA:\n{context_str}"}]}
+                ],
+                "generationConfig": {"temperature": 0.1}
+            }
+            
+            resp = call_gemini(full_payload, caller=f"[{target_model}]", model_override=target_model)
+            if resp:
+                from utils.gemini_client import safe_json_parse
+                raw_text = resp["candidates"][0]["content"]["parts"][0]["text"]
+                parsed = safe_json_parse(raw_text)
+                
+                if parsed:
+                    final_recs = merge_ai_output(parsed, target_model, pid, triggered_rules)
+                    for rec in final_recs:
+                        rec_dict = {
+                            "condition_group": rec.condition_group,
+                            "urgency": rec.severity
+                        }
+                        if not is_duplicate(rec_dict, pid, db):
+                            db.add(rec)
+                            all_generated.append(rec)
+                    
+        except Exception as e:
+            print(f"[insights_engine] {target_model} failed: {e}")
+
+    db.commit()
+    return all_generated
+
+
+def get_active_recommendations(
+    patient_id: str,
+    db: Session,
+    hours: int = 48,
+) -> list:
+    """
+    Returns all unresolved recommendations for the patient from the last `hours` hours, 
+    ordered by severity: critical → high → medium → suggestion.
+    """
+    pid = int(patient_id)
+    since = datetime.datetime.utcnow() - datetime.timedelta(hours=hours)
+    
+    # Fetch all non-archived recs
+    recs = db.query(MedicalRecommendation).filter(
+        MedicalRecommendation.care_recipient_id == pid,
+        MedicalRecommendation.created_at >= since,
+        MedicalRecommendation.archived == False
+    ).all()
+    
+    # Sort by SEVERITY_RANK (highest rank first)
+    # severity_rank is imported from recommendation_engine (which gets it from medical_recommendations)
+    recs.sort(key=lambda x: severity_rank(x.severity), reverse=True)
+    
+    return recs
 

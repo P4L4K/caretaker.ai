@@ -166,8 +166,10 @@ def _run_medical_history_pipeline_v2(recipient_id: int, report_id: int, filename
 
         # ── 10. Clinical Recommendations ──────────────────────────────────────
         try:
-            from services.recommendation_engine import generate_recommendations
-            generate_recommendations(recipient_id, db)
+            from services.insights_engine import run_recommendation_pipeline
+            import asyncio
+            # Since this is a background task thread, we use asyncio.run
+            asyncio.run(run_recommendation_pipeline(str(recipient_id), db))
             _process_recommendation_actions(recipient_id, db)
 
         except Exception as e:
@@ -1137,48 +1139,68 @@ async def update_allergy(recipient_id: int, all_id: int, data: AllergyInput, aut
 @router.get("/care-recipients/{recipient_id}/recommendations", response_model=ResponseSchema)
 @router.get("/recipients/{recipient_id}/recommendations", response_model=ResponseSchema)
 async def get_recommendations(recipient_id: int, authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
-    from tables.medical_recommendations import MedicalRecommendation
-    recs = db.query(MedicalRecommendation).filter(
-        MedicalRecommendation.care_recipient_id == recipient_id
-    ).order_by(MedicalRecommendation.created_at.desc()).limit(15).all()
-
-    latest_recs = {}
-    for r in recs:
-        if r.metric not in latest_recs:
-            latest_recs[r.metric] = r
+    from services.insights_engine import get_active_recommendations
+    
+    # Use the unified query function from insights_engine
+    recs = get_active_recommendations(str(recipient_id), db, hours=48)
     
     results = []
-    for r in latest_recs.values():
+    for r in recs:
         results.append({
             "id": r.id,
             "metric": r.metric,
             "severity": r.severity,
-            "message": r.message,
+            "message": r.caregiver_message or r.message, 
+            "do_this_now": r.do_this_now,
+            
+            # Enhanced Fields
+            "why_this_matters": r.why_this_matters,
+            "time_window": r.time_window,
+            "snapshot_summary": r.snapshot_summary,
+            "next_check": {
+                "when": r.next_check_when,
+                "look_for": r.next_check_look_for,
+                "if_worse": r.next_check_if_worse
+            },
+            "root_cause": r.root_cause,
+
             "trigger_value": r.trigger_value,
             "reference_range": r.reference_range,
             "source": r.source,
+            "model_used": r.model_used,
             "confidence_score": r.confidence_score,
             "actions": r.actions,
+            "call_doctor": r.call_doctor == "true",
+            "call_ambulance": r.call_ambulance == "true",
+            "health_state": r.health_state,
+            "title": r.title,
+            "condition_group": r.condition_group,
+            "today_actions": r.today_actions or [],
+            "resolved_at": r.resolved_at.isoformat() + "Z" if r.resolved_at else None,
+            "archived": r.archived,
             "created_at": (r.created_at.isoformat() + "Z") if r.created_at else None
         })
-
-    # Sort so critical/high come first, matching UI expectation
-    priority = {"critical": 4, "high": 3, "medium": 2, "suggestion": 1, "low": 0}
-    results.sort(key=lambda x: priority.get(x["severity"], 0), reverse=True)
 
     return {"code": 200, "status": "success", "message": "Recommendations retrieved", "result": results}
 
 
 @router.post("/care-recipients/{recipient_id}/recommendations/refresh", response_model=ResponseSchema)
+@router.post("/recipients/{recipient_id}/recommendations/refresh", response_model=ResponseSchema)
 async def refresh_recommendations(recipient_id: int, db: Session = Depends(get_db)):
-    """Triggers an on-demand regeneration of clinical recommendations."""
-    from services.recommendation_engine import generate_recommendations
+    """Triggers an on-demand regeneration of clinical recommendations using the dual-model pipeline."""
+    from services.insights_engine import run_recommendation_pipeline
     try:
-        generate_recommendations(recipient_id, db)
+        # Run the full end-to-end pipeline
+        await run_recommendation_pipeline(str(recipient_id), db)
+        
+        # Keep legacy deterministic action processing for rules
         _process_recommendation_actions(recipient_id, db)
-        return {"code": 200, "status": "success", "message": "Recommendations refreshed successfully"}
+        
+        return {"code": 200, "status": "success", "message": "Dual-model recommendations refreshed successfully"}
     except Exception as e:
-        print(f"[rec_refresh] Error: {e}")
+        print(f"[rec_refresh] Pipeline error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/care-recipients/{recipient_id}/health-status", response_model=ResponseSchema)
@@ -1221,3 +1243,21 @@ def _process_recommendation_actions(recipient_id: int, db: Session):
         elif action_type == "monitor":
             # TODO: Trigger higher frequency IoT vitals polling
             print(f"[STUB] Escalated monitoring frequency for Recipient {recipient_id}")
+@router.patch("/care-recipients/{recipient_id}/recommendations/{rec_id}/resolve", response_model=ResponseSchema)
+async def resolve_recommendation(recipient_id: int, rec_id: int, db: Session = Depends(get_db)):
+    """Mark a recommendation as resolved (caregiver completed the action)."""
+    from tables.medical_recommendations import MedicalRecommendation
+    import datetime
+    
+    rec = db.query(MedicalRecommendation).filter(
+        MedicalRecommendation.id == rec_id,
+        MedicalRecommendation.care_recipient_id == recipient_id
+    ).first()
+    
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recommendation not found")
+    
+    rec.resolved_at = datetime.datetime.utcnow()
+    db.commit()
+    
+    return {"code": 200, "status": "success", "message": "Recommendation marked as done"}
